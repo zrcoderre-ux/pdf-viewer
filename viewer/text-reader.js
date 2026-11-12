@@ -7051,13 +7051,16 @@ let boxTyped = null;
 const boxReflowSoon = debounce(() => {
   const body = boxTyped;
   boxTyped = null;
+  boxReflowNow(body);
+}, 120);
+function boxReflowNow(body) {
   if (!body || !body.isConnected || body === composingIn || !editing) return;
   const at = caretInText(body);
   if (!at || !String(at.lines[at.line]).includes("│")) return;
   const res = TD.boxEdit(at.lines, at.line, at.col, "typed", { numbered: body.classList.contains("numbered") });
   if (!res || res.lines.join("\n") === at.text) return;
   rebuildFromLines(body, res.lines, res.caret || { line: at.line, col: at.col });
-}, 120);
+}
 pagesEl.addEventListener("input", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (body) { boxTyped = body; boxReflowSoon(); }
@@ -7179,11 +7182,12 @@ $("colbox-btn").addEventListener("click", makeColumnBoxAtSelection);
 let checkboxBody = null; // the page the caret last stood on
 function refreshCheckboxBtn() {
   const on = !!doc && !!checkboxBody && checkboxBody.isConnected && checkboxBody.classList.contains("free");
-  for (const id of ["checkbox-btn", "vline-btn", "hline-btn"]) {
+  for (const id of ["checkbox-btn", "vline-btn", "hline-btn", "table-btn"]) {
     const btn = $(id);
     if (btn.hidden === on) btn.hidden = !on;
   }
   if (!on && lineMode) setLineMode(null);
+  if (!on && typeof closeTablePick === "function") closeTablePick();
 }
 document.addEventListener("selectionchange", () => {
   const sel = document.getSelection();
@@ -7405,6 +7409,116 @@ window.addEventListener("pointerup", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && lineMode) { e.preventDefault(); setLineMode(null); }
 });
+// ── ▦ Table on a ✓ Use my text page (TD.makeTable; Tab in TD.boxEdit) ──────────
+//
+// The owner, in chat: "Now also add a table creation tool. This should work
+// like in a word processor. I would use this when the ocr'd version is so
+// broken that it is easier to just start over and type it out myself." The
+// button opens a grid of cells; the pointer over it picks rows × columns (the
+// columns no more than fit across the page), a click puts the table in at the
+// caret (TD.makeTable) and the caret in its first cell. Tab and Shift+Tab in
+// any box row step from cell to cell (boxKey "Tab"), Tab in the last cell
+// adding a row.
+const TABLE_PICK_ROWS = 10, TABLE_PICK_COLS = 8;
+let tablePick = null; // { body, caret, across, maxCols, rows, cols } while the picker is open
+function pageAcross(lines) {
+  return Math.max(0, ...lines.map((l) => { const g = TD.gutterPrefix(l); return (g ? l.slice(g.gutter.length) : l).trimEnd().length; }));
+}
+function closeTablePick() {
+  if (!tablePick) return;
+  tablePick = null;
+  $("table-pick").hidden = true;
+  $("table-btn").setAttribute("aria-expanded", "false");
+}
+function showTablePick(rows, cols) {
+  const grid = $("table-pick").querySelector(".table-pick-grid");
+  for (const c of grid.children) {
+    const r = +c.dataset.r, k = +c.dataset.c;
+    c.classList.toggle("on", r < rows && k < cols);
+    c.classList.toggle("off", k >= tablePick.maxCols);
+  }
+  $("table-pick").querySelector(".table-pick-size").textContent = rows && cols ? `${rows} × ${cols} table` : "Insert table";
+}
+function openTablePick() {
+  if (tablePick) { closeTablePick(); return; }
+  const body = checkboxBody;
+  if (!body || !body.isConnected || !body.classList.contains("free")) {
+    toast("Put the caret where the table is to go on a ✓ Use my text page, then press ▦ Table.", { error: true });
+    return;
+  }
+  // Only the caret's line counts (an empty line has no text to take an offset in).
+  const sel = document.getSelection();
+  const n = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+  const lineEl = n && (n.nodeType === 1 ? n : n.parentElement).closest(".line");
+  const k = lineEl && lineEl.parentElement === body ? bodyLines(body).indexOf(lineEl) : -1;
+  if (k < 0) { toast("Put the caret where the table is to go on a ✓ Use my text page, then press ▦ Table.", { error: true }); return; }
+  const text = TD.serializeNodes(body);
+  const at = { lines: text.split("\n"), line: k };
+  if (/[│─┌└├┐┘┤]/.test(at.lines[at.line])) { toast("The caret is in a box already: put it on a line of its own.", { error: true }); return; }
+  const across = Math.max(60, pageAcross(at.lines));
+  tablePick = { body, caret: at, across, maxCols: Math.min(TABLE_PICK_COLS, TD.tableMaxCols(across)) };
+  const grid = $("table-pick").querySelector(".table-pick-grid");
+  if (!grid.children.length) {
+    grid.style.gridTemplateColumns = `repeat(${TABLE_PICK_COLS}, 16px)`;
+    for (let r = 0; r < TABLE_PICK_ROWS; r++) for (let c = 0; c < TABLE_PICK_COLS; c++) {
+      const cell = document.createElement("span");
+      cell.dataset.r = r; cell.dataset.c = c;
+      grid.appendChild(cell);
+    }
+  }
+  showTablePick(0, 0);
+  const b = $("table-btn").getBoundingClientRect();
+  Object.assign($("table-pick").style, { left: Math.max(4, Math.min(b.left, window.innerWidth - 180)) + "px", top: (b.bottom + 4) + "px" });
+  $("table-pick").hidden = false;
+  $("table-btn").setAttribute("aria-expanded", "true");
+}
+function insertTable(rows, cols) {
+  const t = tablePick;
+  closeTablePick();
+  if (!t || !t.body.isConnected || shotPut || refuseWhileBusy()) return;
+  const body = t.body;
+  if (!editing) setEditing(true);
+  // The page as it stands now (nothing should have moved while the grid was open).
+  const text = TD.serializeNodes(body);
+  const lines = text.split("\n");
+  const line = Math.min(t.caret.line, lines.length - 1);
+  const made = TD.makeTable(lines, line, rows, Math.min(cols, t.maxCols), { numbered: body.classList.contains("numbered"), across: t.across });
+  snapshot(body, true);
+  body.focus({ preventScroll: true });
+  rebuildFromLines(body, made.lines, made.caret);
+  lastSnapPage = -1; // what is typed next is its own step
+  toast("A table: type in a cell and its text wraps within it. Tab goes to the next cell (in the last, it adds a row), Shift+Tab back. Drag a rule to size a column. Ctrl+Z takes the table off.", { ms: 8000 });
+}
+{
+  const pick = $("table-pick");
+  pick.addEventListener("mousedown", (e) => e.preventDefault()); // the caret stays where it is
+  pick.addEventListener("pointermove", (e) => {
+    const c = e.target.closest && e.target.closest(".table-pick-grid > span");
+    if (!c || !tablePick) return;
+    tablePick.rows = +c.dataset.r + 1;
+    tablePick.cols = Math.min(+c.dataset.c + 1, tablePick.maxCols);
+    showTablePick(tablePick.rows, tablePick.cols);
+  });
+  pick.addEventListener("click", (e) => {
+    const c = e.target.closest && e.target.closest(".table-pick-grid > span");
+    if (!c || !tablePick) return;
+    insertTable(+c.dataset.r + 1, Math.min(+c.dataset.c + 1, tablePick.maxCols));
+  });
+  $("table-btn").addEventListener("mousedown", (e) => e.preventDefault());
+  $("table-btn").addEventListener("click", openTablePick);
+  document.addEventListener("pointerdown", (e) => { if (tablePick && !e.target.closest(".table-pick-wrap")) closeTablePick(); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tablePick) { e.preventDefault(); closeTablePick(); } });
+}
+// Tab in a table's cell goes to the next cell, as a word processor's does
+// (before the page's own Tab, which indents).
+pagesEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey || !editing) return;
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (!body) return;
+  // A row just typed in is set on its rules first, while the caret is still in it.
+  if (boxTyped === body) { boxReflowSoon.cancel(); boxTyped = null; boxReflowNow(body); }
+  if (boxKey(body, e.shiftKey ? "ShiftTab" : "Tab")) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
 for (const [id, mode] of [["vline-btn", "v"], ["hline-btn", "h"]]) {
   $(id).addEventListener("mousedown", (e) => e.preventDefault()); // the caret stays where it is
   $(id).addEventListener("click", () => pressLineBtn(mode));

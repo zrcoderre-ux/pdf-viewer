@@ -5024,6 +5024,7 @@ export function boxEdit(lines, i, col, key, { numbered = false } = {}) {
   } else if (key === "Enter") res = reflowBox(work, i, { line: i, col: c }, { numbered, breakAt: true });
   else if (key === "Backspace") res = boxBackspace(work, i, c, { numbered });
   else if (key === "typed") res = reflowBox(work, i, { line: i, col: c }, { numbered });
+  else if (key === "Tab" || key === "ShiftTab") res = boxTab(work, i, c, key === "ShiftTab");
   if (!res) return null;
   if (!open) return res;
   const back = openBox(res.lines, open, rules, boxBars(work[i]).length);
@@ -5228,4 +5229,106 @@ export function drawHorizontalLine(lines, at, c0, c1, { numbered = false } = {})
   if (z - a < 2) return { error: "short" };
   const out = lines.slice(0, at).concat([" ".repeat(a) + "─".repeat(z - a + 1)], lines.slice(at));
   return { lines: out, caret: { line: Math.min(at + 1, out.length - 1), col: 0 } };
+}
+
+// ---- a table made as a word processor makes one --------------------------------
+//
+// The owner, in chat: "Now also add a table creation tool. This should work
+// like in a word processor. I would use this when the ocr'd version is so
+// broken that it is easier to just start over and type it out myself." ▦ Table
+// picks rows × columns off a grid and writes an empty box of them at the
+// caret, ruled on every side and between every row (makeTable), its columns
+// equal across the page's text; Tab and Shift+Tab step from cell to cell, and
+// Tab in the last cell adds a row (boxTab). It is a box like any other, so
+// typing wraps in a cell, Enter and Backspace keep to their column and a rule
+// is dragged to size it.
+
+/** How wide each of `cols` columns of a table `across` characters wide is drawn (BOX_MIN at least). */
+export function tableWidths(cols, across) {
+  const inner = across - cols - 1;
+  const w = Math.max(BOX_MIN, Math.floor(inner / cols));
+  const more = w > BOX_MIN ? inner - w * cols : 0; // the characters left over, one to each of the last columns
+  return Array.from({ length: cols }, (_, j) => w + (j >= cols - more ? 1 : 0));
+}
+/** The most columns a table `across` characters wide holds. */
+export function tableMaxCols(across) {
+  return Math.max(1, Math.floor((across - 1) / (BOX_MIN + 1)));
+}
+/**
+ * An empty table of `rows` × `cols` put in at line `at`: where that line is
+ * blank (a blank numbered line on pleading paper) the table's rows take it
+ * and the blank lines under it, each keeping its number, else the table goes
+ * in under it; a row with no blank line to take is a line between two
+ * numbers. Ruled over, under and between every two rows (├─┼─┤), so each row
+ * keeps to itself as text is typed in. `across`: the page's widest line past
+ * its margin number (60 at least). Returns { lines, caret } — the caret in the
+ * first cell.
+ */
+export function makeTable(lines, at, rows, cols, { numbered = false, across = 0 } = {}) {
+  const blank = (k) => k < lines.length && !String(numbered && gutterPrefix(lines[k]) ? gutterPrefix(lines[k]).rest : lines[k]).trim();
+  let k = Math.max(0, Math.min(lines.length, at));
+  if (k < lines.length && !blank(k)) k++;
+  const widths = tableWidths(cols, Math.max(60, across));
+  const pad = numbered ? "    " : "";
+  const rule = (a, m, z) => pad + a + widths.map((w) => "─".repeat(w)).join(m) + z;
+  const empty = "│" + widths.map((w) => " ".repeat(w)).join("│") + "│";
+  const out = lines.slice(0, k);
+  out.push(rule("┌", "┬", "┐"));
+  const first = out.length;
+  for (let r = 0; r < rows; r++) {
+    if (r) out.push(rule("├", "┼", "┤"));
+    if (blank(k)) {
+      const g = numbered ? gutterPrefix(lines[k]) : null;
+      out.push((g ? String(parseInt(g.gutter, 10)).padStart(2) + "  " : pad) + empty);
+      k++;
+    } else out.push(pad + empty);
+  }
+  out.push(rule("└", "┴", "┘"));
+  return { lines: out.concat(lines.slice(k)), caret: { line: first, col: pad.length + 2 } };
+}
+
+/**
+ * Tab in a box row (closed): the caret to the end of the next cell's text —
+ * along the row, then the first cell of the box's next row — or, with `back`,
+ * the cell before. Tab in the last cell adds a row under it (an empty one
+ * between two numbers, as the table's own rows stand). Returns { lines, caret }.
+ */
+function boxTab(lines, i, c, back) {
+  const box = boxAround(lines, i);
+  if (!box) return null;
+  const own = boxBars(lines[i]);
+  const j = own.findIndex((x, q) => q + 1 < own.length && x < c && c <= own[q + 1]);
+  if (j < 0) return null;
+  const same = (k) => isBoxRow(lines[k]) && boxBars(lines[k]).length === own.length;
+  const rows = [];
+  for (let k = box.from; k <= box.to; k++) if (same(k)) rows.push(k);
+  const r = rows.indexOf(i);
+  const n = own.length - 1;
+  const end = (out, k, q) => {
+    const s = out[k], b = boxBars(s);
+    const cell = s.slice(b[q] + 1, b[q + 1]);
+    const t = cell.trim();
+    if (!t) return { line: k, col: Math.min(b[q] + 2, b[q + 1]) };
+    return { line: k, col: b[q] + 1 + (cell.length - cell.trimStart().length) + t.length };
+  };
+  if (back) {
+    if (j > 0) return { lines: lines.slice(), caret: end(lines, i, j - 1) };
+    if (r > 0) return { lines: lines.slice(), caret: end(lines, rows[r - 1], n - 1) };
+    return { lines: lines.slice(), caret: end(lines, i, 0) };
+  }
+  if (j + 1 < n) return { lines: lines.slice(), caret: end(lines, i, j + 1) };
+  if (r + 1 < rows.length) return { lines: lines.slice(), caret: end(lines, rows[r + 1], 0) };
+  // The last cell: a row added under it, ruled off as the row above is from its own.
+  const last = rows[rows.length - 1];
+  const s = lines[last];
+  const add = [];
+  const sep = lines[box.to] && isBoxRule(lines[box.to]) ? (() => {
+    // A rule between rows where the table has them, else none.
+    for (let k = box.from + 1; k < box.to; k++) if (isBoxRule(lines[k]) && boxBars(lines[k]).length === own.length) return lines[k];
+    return null;
+  })() : null;
+  if (sep) add.push(sep);
+  add.push(" ".repeat(own[0]) + own.slice(0, -1).map((x, q) => "│" + " ".repeat(own[q + 1] - x - 1)).join("") + "│" + s.slice(own[n] + 1));
+  const out = lines.slice(0, last + 1).concat(add, lines.slice(last + 1));
+  return { lines: out, caret: { line: last + add.length, col: own[0] + 2 } };
 }

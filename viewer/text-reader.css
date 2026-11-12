@@ -1411,3 +1411,14 @@ li:hover > .reorder-btns, li:focus-within > .reorder-btns, .pm-order-panel .reor
 .pm-order-panel li:hover { background: var(--btn); }
 .pm-order-panel li.current { background: var(--accent); color: #fff; }
 .pm-order-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ▦ Table's rows × columns picker, as a word processor's. */
+.table-pick-wrap { position: relative; display: inline-block; }
+/* fixed: the toolbar clips what overflows it; placed under the button when it opens */
+.table-pick { position: fixed; z-index: 1000; padding: 8px; background: var(--panel-bg, #fff); color: var(--fg, #222); border: 1px solid var(--border, #ccc); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.table-pick[hidden] { display: none; }
+.table-pick-grid { display: grid; gap: 2px; }
+.table-pick-grid > span { width: 16px; height: 16px; border: 1px solid var(--border, #bbb); background: transparent; cursor: pointer; box-sizing: border-box; }
+.table-pick-grid > span.on { background: var(--accent, #1a73e8); border-color: var(--accent, #1a73e8); opacity: .75; }
+.table-pick-grid > span.off { opacity: .3; cursor: not-allowed; }
+.table-pick-size { margin-top: 6px; font-size: 12px; text-align: center; white-space: nowrap; }

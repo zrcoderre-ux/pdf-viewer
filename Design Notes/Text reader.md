@@ -2689,6 +2689,33 @@ statement's fact pushed its column into the next fact's rows. A box with only
 a top and foot rule is unchanged. `test-textdoc.mjs` ("lines drawn on a ✓ Use
 my text page") and `test-free-page.mjs` section 12.
 
+**▦ Table on a ✓ Use my text page** (`#table-btn`, `#table-pick`,
+`openTablePick`, `insertTable`; `TD.makeTable`, `TD.tableWidths`,
+`TD.tableMaxCols`, Tab in `TD.boxEdit` → `boxTab`). The owner: "Now also add a
+table creation tool. This should work like in a word processor. I would use
+this when the ocr'd version is so broken that it is easier to just start over
+and type it out myself." The button (shown with ☐ Checkbox) opens a rows ×
+columns grid, 10 × 8, the columns past what fits across the page greyed
+(`tableMaxCols`: `BOX_MIN` and a rule each). The grid is `position: fixed`,
+placed under the button when it opens: the toolbar clips what overflows it.
+A click writes the table at the caret's LINE (read off the line element, as
+an empty line has no text node to take an offset in): on a blank line its
+rows take that line and the blank lines under it, a numbered one keeping its
+number, a row with no blank line left a line between two numbers; on a line
+of text, under it. Ruled on every side and between every two rows (├─┼─┤),
+so a cell's text wraps within its own row of the table (the section rule of
+`reflowBox`, above), the row growing above the next rule. As wide as the
+page's widest line past its margin number, 60 characters at least, the
+columns equal (`tableWidths`: the characters left over one each to the last
+columns). Tab and Shift+Tab in any box row (a capture `keydown` on the pages,
+before the page's own Tab, which indents) move the caret to the end of the
+next or previous cell's text, along the row and on across rows; Tab in the
+box's last cell adds a row under it, ruled off as the rows above are where
+they are. A row typed in and not yet set on its rules (`boxTyped`, 120 ms) is
+set first (`boxReflowNow`), while the caret is still in it. `test-textdoc.mjs`
+("a table made as a word processor makes one") and `test-free-page.mjs`
+section 13.
+
 **A box's keys on every page, and a table ruled only between its columns**
 (`boxKey`, `boxReflowSoon`; `TD.boxEdit`, `TD.openBoxAround`). The owner, of a
 table of objections (Objection and Material │ Grounds Asserted │ Plaintiffs'

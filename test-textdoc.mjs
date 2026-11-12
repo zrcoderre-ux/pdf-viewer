@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, boxEdit, openBoxAround, resizeBox, drawVerticalLine, drawHorizontalLine, pageNumbersComplete,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, boxEdit, openBoxAround, resizeBox, drawVerticalLine, drawHorizontalLine, makeTable, tableMaxCols, pageNumbersComplete,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, setAnswer, answerFor, answerLine, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
@@ -2342,6 +2342,31 @@ console.log("lines drawn on a ✓ Use my text page (drawVerticalLine, drawHorizo
   const oh = drawHorizontalLine(o.lines, 2, 0, 9, { numbered: true });
   check("…a rule across it between two rows, open at its ends as its rules are", [oh.lines[2].length, oh.lines[2].slice(0, 5), oh.lines[2][19], oh.lines[2][31]], [R.length, "    ─", "┼", "┼"]);
   check("…the box's other lines as they were", [oh.lines[0], oh.lines[1], oh.lines[3]], [o.lines[0], o.lines[1], o.lines[2]]);
+}
+console.log("a table made as a word processor makes one (makeTable, Tab in boxEdit)");
+{
+  const cells = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.slice(0, -1).map((x, j) => l.slice(x + 1, b[j + 1]).trim()); };
+  const N = [" 1  Heading", " 2", " 3", " 4  More text.", " 5"];
+  const t = makeTable(N, 1, 3, 3, { numbered: true, across: 50 });
+  check("put in on a blank numbered line: its rows take that line and the blank one under it, numbers kept, the third a line between two numbers",
+    t.lines.map((l) => l.slice(0, 5)), [" 1  H", "    ┌", " 2  │", "    ├", " 3  │", "    ├", "    │", "    └", " 4  M", " 5"]);
+  check("…its columns equal (a character apart at most), the table 60 characters across at least, every rule straight", [new Set(t.lines.filter((l) => /[│┌├└]/.test(l)).map((l) => [...l].map((c, k) => ("│┌┐┬├┤┼└┘┴".includes(c) ? k : -1)).filter((k) => k >= 0).join(","))).size, t.lines[1].length - 4 >= 60], [1, true]);
+  check("…the caret in the first cell", [t.caret.line, t.lines[t.caret.line][t.caret.col - 2]], [2, "│"]);
+  check("put in on a line of text: under it", makeTable(["Some words", "More"], 0, 1, 2).lines.map((l) => l[0]), ["S", "┌", "│", "└", "M"]);
+  check("no more columns than fit", [tableMaxCols(60), tableMaxCols(30)], [8, 4]);
+  const typed = t.lines.slice();
+  typed[2] = typed[2].replace("│      ", "│ Name ");
+  const tab = boxEdit(typed, 2, typed[2].indexOf("Name") + 4, "Tab", { numbered: true });
+  check("Tab: the next cell of the row", [tab.caret.line, tab.caret.col > typed[2].indexOf("Name") + 4, tab.lines], [2, true, typed]);
+  const lastRow = 6, lastCol = t.lines[6].lastIndexOf("│") - 1;
+  const tl = boxEdit(t.lines, lastRow, lastCol, "Tab", { numbered: true });
+  check("Tab in the row's last cell: the next row's first", boxEdit(t.lines, 2, t.lines[2].lastIndexOf("│") - 1, "Tab", { numbered: true }).caret, { line: 4, col: 6 });
+  check("Tab in the table's last cell: a row added under it, ruled off as the rows above", [tl.lines.length - t.lines.length, tl.lines[7].slice(0, 5), cells(tl.lines[8]), tl.caret], [2, "    ├", ["", "", ""], { line: 8, col: 6 }]);
+  check("Shift+Tab at a row's first cell: the row above's last", boxEdit(typed, 4, 6, "ShiftTab", { numbered: true }).caret.line, 2);
+  const wrap = t.lines.slice();
+  wrap[2] = wrap[2].replace("│                  │", "│ A long party name here │");
+  const w = boxEdit(wrap, 2, wrap[2].indexOf("here") + 4, "typed", { numbered: true });
+  check("text past a cell's width wraps within its row of the table, the next row not touched", [cells(w.lines[2])[0], cells(w.lines[3])[0], w.lines[4].slice(0, 5), w.lines.slice(4).map(cells).filter((c) => c.length)[0]], ["A long party", "name here", "    ├", ["", "", ""]]);
 }
 console.log("a table ruled only between its columns: keys kept in the column (openBoxAround, boxEdit)");
 {

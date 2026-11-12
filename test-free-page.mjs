@@ -767,6 +767,78 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    console.log("13. ▦ Table on a ✓ Use my text page: rows × columns off the grid, typed in, Tab from cell to cell");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "E Cover.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 1 && document.querySelector("#pages .page-body").textContent.includes("COMPLAINT"));
+      await p.waitForTimeout(600);
+      await fixClick(p, 0);
+      await p.waitForTimeout(600);
+      const raw = async () => {
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(250);
+        const lines = await p.evaluate(() => document.querySelector("#pages .tpage .raw-sheet .raw-text").textContent.split("\n").slice(1));
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(400);
+        return lines;
+      };
+      const cells = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.slice(0, -1).map((x, j) => l.slice(x + 1, b[j + 1]).trim()); };
+      // The caret on line 6, blank.
+      await p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const lt = body.querySelectorAll(":scope > .line")[5].querySelector(".lt");
+        const rg = document.createRange(); rg.selectNodeContents(lt); rg.collapse(false);
+        body.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
+      });
+      await p.waitForTimeout(150);
+      check("the button is in the toolbar", await p.evaluate(() => !document.getElementById("table-btn").hidden), true);
+      await p.click("#table-btn");
+      check("pressed: the grid opens", await p.evaluate(() => !document.getElementById("table-pick").hidden), true);
+      const cellBox = (rr, cc) => p.evaluate(({ rr, cc }) => { const b = document.querySelector(`#table-pick .table-pick-grid > span[data-r="${rr}"][data-c="${cc}"]`).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }, { rr, cc });
+      const pick = await cellBox(1, 2);
+      await p.mouse.move(pick.x, pick.y, { steps: 3 });
+      check("…the pointer over it names the table", await p.evaluate(() => document.querySelector("#table-pick .table-pick-size").textContent), "2 × 3 table");
+      await p.mouse.click(pick.x, pick.y);
+      await p.waitForTimeout(600);
+      check("…clicked: the grid closes", await p.evaluate(() => document.getElementById("table-pick").hidden), true);
+      const made = await raw();
+      check("a 2 × 3 table put in on lines 6 and 7, a rule over, between and under", made.slice(5, 10).map((l) => l.slice(0, 5)), ["    ┌", " 6  │", "    ├", " 7  │", "    └"]);
+      check("…line 8 still line 8", made.find((l) => l.includes("Plaintiff alleges")).slice(0, 4), " 8  ");
+      // ⇄ Raw took the caret: back into the first cell with a click.
+      const first = await p.evaluate(() => { const c = document.querySelectorAll("#pages .tpage .page-body > .line")[6].querySelector(".rc"); const b = c.getBoundingClientRect(); return { x: b.left + 8, y: b.top + b.height / 2 }; });
+      await p.mouse.click(first.x, first.y);
+      await p.waitForTimeout(150);
+      await p.keyboard.type("Exhibit", { delay: 15 });
+      await p.keyboard.press("Tab");
+      await p.keyboard.type("Objection", { delay: 15 });
+      await p.keyboard.press("Tab");
+      await p.keyboard.type("Ruling", { delay: 15 });
+      await p.keyboard.press("Tab");
+      await p.keyboard.type("A", { delay: 15 });
+      await p.keyboard.press("Shift+Tab");
+      await p.keyboard.type(" here", { delay: 15 });
+      await p.waitForTimeout(500);
+      const typed = await raw();
+      check("typed with Tab between: a cell each, Tab at a row's end to the next row, Shift+Tab back to the row above's last", [cells(typed[6]), cells(typed[8])], [["Exhibit", "Objection", "Ruling here"], ["A", "", ""]]);
+      // From the "A" cell to the last, then Tab: a row added.
+      const aCell = await p.evaluate(() => { const c = document.querySelectorAll("#pages .tpage .page-body > .line")[8].querySelector(".rc"); const b = c.getBoundingClientRect(); return { x: b.left + 8, y: b.top + b.height / 2 }; });
+      await p.mouse.click(aCell.x, aCell.y);
+      await p.waitForTimeout(150);
+      await p.keyboard.press("Tab");
+      await p.keyboard.press("Tab");
+      await p.keyboard.press("Tab");
+      await p.keyboard.type("B", { delay: 15 });
+      await p.waitForTimeout(500);
+      const grown = await raw();
+      check("Tab in the last cell: a row added under it, ruled off, the caret in its first cell", [grown[9].slice(0, 5), cells(grown[10]), grown[11].slice(0, 5)], ["    ├", ["B", "", ""], "    └"]);
+      const straight = (ls) => new Set(ls.filter((l) => /[│┌└├]/.test(l)).map((l) => [...l].map((c, k) => ("│┌┐┬├┤┼└┘┴".includes(c) ? k : -1)).filter((k) => k >= 0).join(","))).size;
+      check("…every rule straight", straight(grown), 1);
+      check("Tab on an ordinary line still indents", await (async () => { await caretBefore(p, 0, grown.findIndex((l) => l.includes("Plaintiff alleges")), "Plaintiff"); await p.keyboard.press("Tab"); await p.waitForTimeout(300); return (await raw()).find((l) => l.includes("Plaintiff alleges")).includes("    Plaintiff"); })(), true);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
     console.log("7. the Flagged panel's list goes to each ✓ Use my text page, in whichever document it is");
     {
       const r = await newReader();
