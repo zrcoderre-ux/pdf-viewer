@@ -668,7 +668,7 @@ try {
   }
 
   // ── 12. updates ───────────────────────────────────────────────────────────
-  console.log("12. Home's Check for updates: up to date, then a newer release shown, downloaded and ready to install");
+  console.log("12. Home's Check for updates: up to date, then a newer release shown, downloaded, and the restart to install it counted down and cancelled");
   {
     await win.evaluate(() => document.getElementById("home-tab").click());
     await until(() => win.evaluate(() => !document.getElementById("dropzone").hidden));
@@ -693,12 +693,18 @@ try {
     });
     check("…and nothing downloaded yet", served.filter((n) => !/\.yml$/.test(n)), []);
     await win.evaluate(() => document.querySelector(".pdfplus-about .pa-get").click());
-    const ready = await until(() => win.evaluate(() => {
+    // Downloaded, the restart is counted down; the button cancels it (or this
+    // test's PDF+ would close to install).
+    const counting = await until(() => win.evaluate(() => {
       const b = document.querySelector(".pdfplus-about .pa-get");
-      return /Restart and install|failed/.test(b.textContent + document.querySelector(".pdfplus-about .pa-hint").textContent)
-        && (b.textContent === "Restart and install" ? b.textContent : document.querySelector(".pdfplus-about .pa-hint").textContent);
+      const t = b.textContent + document.querySelector(".pdfplus-about .pa-hint").textContent;
+      if (/^Restarting in \d s — Cancel$/.test(b.textContent)) { b.click(); return "counting"; }
+      return /failed/.test(t) && document.querySelector(".pdfplus-about .pa-hint").textContent;
     }), 30000);
-    check("downloaded, checked and ready to install", ready, "Restart and install");
+    check("downloaded and checked: the restart counted down on the button", counting, "counting");
+    check("…a click cancels it, and the button offers the restart", await win.evaluate(() => document.querySelector(".pdfplus-about .pa-get").textContent), "Restart and install");
+    await sleep(6000);
+    truthy("…and PDF+ stays open past the count", await win.evaluate(() => document.querySelector(".pdfplus-about .pa-get").textContent === "Restart and install"));
     truthy("…the installer was fetched", served.some((n) => /^PDFPlus-.*9\.9\.9/.test(n)));
     await win.evaluate(() => document.getElementById("home-tab").click()); // back to the documents
   }

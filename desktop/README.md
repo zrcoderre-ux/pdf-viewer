@@ -41,9 +41,11 @@ Home shows PDF+'s version and a **Check for updates** button. Nothing is
 asked of GitHub until you click it. When a newer release exists, Home shows
 its version and what changed, and **Download and install** fetches it. The
 installer is checked against the SHA-512 published with the release before
-it runs. **Restart and install** then closes PDF+ (asking first about any
-document with unsaved changes), installs the update and opens PDF+ again.
-If you keep PDF+ open instead, the update installs the next time it closes.
+it runs. Once it is downloaded the button counts down, **Restarting in 5 s —
+Cancel**, and then closes PDF+ (asking first about any document with unsaved
+changes), installs the update and opens PDF+ again. Click the button during
+the count to wait: it then reads **Restart and install**, and if you keep
+PDF+ open the update installs the next time it closes.
 
 The button reads this repository's newest release, through GitHub's own
 "latest release" link, so it works only while the repository is public. A
