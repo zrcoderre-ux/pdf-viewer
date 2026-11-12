@@ -2305,6 +2305,17 @@ app, which routes it to the reader tab.
   PDF-Linker writes a form's (⇄ Raw shows them), so each new column takes
   typing, Enter, Backspace and a drag of its rule as any box's does. A column
   is never drawn narrower than six characters. Ctrl+Z takes each line back.
+  **▦ Table puts in a table as a word processor does**, for a page whose OCR
+  is past mending and easier to type out again; it sits beside the line
+  buttons on a ✓ Use my text page. Put the caret where the table goes, press
+  ▦ Table and pick its rows and columns off the grid. The table is drawn
+  across the page's text with equal columns, a rule between every two rows;
+  on a blank numbered line its rows take that line and the blank ones under
+  it, each keeping its number. **Tab goes to the next cell** (on along the
+  row, then the next row), **Shift+Tab back**, and **Tab in the last cell adds
+  a row**. Text typed in a cell wraps within it, the row growing to hold it;
+  Enter starts a new line in that cell; drag a rule to size a column, and │
+  Line or ─ Line to split one. Ctrl+Z takes the table off.
   **Backspace at the start of an indented line takes the indent off first,
   one space a press,** and leaves the line on its number until the indent is
   gone; the Backspace after that moves it up to the half line above, as
