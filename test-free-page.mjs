@@ -683,6 +683,90 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    console.log("12. │ Line and ─ Line on a ✓ Use my text page: lines drawn into the file make a box of three columns, ruled across");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "E Cover.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 1 && document.querySelector("#pages .page-body").textContent.includes("COMPLAINT"));
+      await p.waitForTimeout(600);
+      const shown = () => p.evaluate(() => !document.getElementById("vline-btn").hidden && !document.getElementById("hline-btn").hidden);
+      await caretBefore(p, 0, 7, "Plaintiff");
+      await p.waitForTimeout(100);
+      check("on an ordinary page neither button is in the toolbar", await p.evaluate(() => document.getElementById("vline-btn").hidden && document.getElementById("hline-btn").hidden), true);
+      await fixClick(p, 0);
+      await p.waitForTimeout(600);
+      await caretBefore(p, 0, 7, "Plaintiff");
+      await p.waitForTimeout(100);
+      check("on a ✓ Use my text page both are", await shown(), true);
+      const raw = async () => {
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(250);
+        const lines = await p.evaluate(() => document.querySelector("#pages .tpage .raw-sheet .raw-text").textContent.split("\n").slice(1));
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(400);
+        return lines;
+      };
+      // Where a word stands on screen: its first character's left, its line's middle.
+      const wordAt = (what) => p.evaluate((what) => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+          const k = n.data.indexOf(what);
+          if (k < 0) continue;
+          const rg = document.createRange(); rg.setStart(n, k); rg.setEnd(n, k + 1);
+          const b = rg.getBoundingClientRect();
+          return { x: b.left, y: b.top + b.height / 2 };
+        }
+        return null;
+      }, what);
+      const drag = async (a, b) => { await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 3 }); await p.mouse.move(b.x, b.y, { steps: 3 }); await p.mouse.up(); await p.waitForTimeout(600); };
+      const cells = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.slice(0, -1).map((x, j) => l.slice(x + 1, b[j + 1]).trim()); };
+      // A vertical line down lines 1 to 5, just left of COMPLAINT FOR.
+      await p.click("#vline-btn");
+      check("pressed, │ Line is lit", await p.evaluate(() => document.getElementById("vline-btn").getAttribute("aria-pressed")), "true");
+      const c1 = await wordAt("COMPLAINT"), d1 = await wordAt("Defendant.");
+      await drag({ x: c1.x - 4, y: c1.y }, { x: c1.x - 4, y: d1.y });
+      const one = await raw();
+      check("a vertical line down lines of text: a two-column box of them", one.filter((l) => l.includes("│")).map(cells).slice(0, 3),
+        [["QUILLON BRAKESMAN, an individual,", "COMPLAINT FOR:"], ["Plaintiff,", "1. Breach of contract"], ["v.", "2. Fraud"]]);
+      // A second, down the box just left of "of contract": a third column (the
+      // words its narrower right-hand column no longer holds wrapped down it).
+      const c2 = await wordAt("of contract");
+      const foot = await wordAt("Defendant.");
+      await drag({ x: c2.x - 3, y: c2.y }, { x: c2.x - 3, y: foot.y });
+      const two = await raw();
+      check("a second vertical line through the box: a third column, every row split there", two.filter((l) => l.includes("│")).map(cells).slice(0, 3),
+        [["QUILLON BRAKESMAN, an individual,", "COMPLAINT", "FOR:"], ["Plaintiff,", "1. Breach", "of"], ["v.", "2. Fraud", "contract"]]);
+      const straight = (ls) => [...new Set(ls.filter((l) => /[│┌└├]/.test(l)).map((l) => [...l].map((c, k) => ("│┌┐┬└┘┴├┤┼".includes(c) ? k : -1)).filter((k) => k >= 0).join(",")))];
+      check("…every rule of it straight: four rules, top to foot", [straight(two).length, straight(two)[0].split(",").length], [1, 4]);
+      truthy("…drawn ruled", (await p.evaluate(() => document.querySelectorAll("#pages .tpage .page-body > .line.rl").length)) >= 5);
+      // ─ Line between the rows of lines 2 and 3.
+      await p.click("#hline-btn");
+      check("─ Line takes over from │ Line", await p.evaluate(() => [document.getElementById("vline-btn").getAttribute("aria-pressed"), document.getElementById("hline-btn").getAttribute("aria-pressed")]), ["false", "true"]);
+      const v = await wordAt("v."), pl = await wordAt("Plaintiff,");
+      const gapY = (pl.y + v.y) / 2;
+      await drag({ x: pl.x, y: gapY }, { x: pl.x + 200, y: gapY });
+      const three = await raw();
+      const k2 = three.findIndex((l) => l.includes("Plaintiff,"));
+      check("a horizontal line between two rows: a rule across the box there, joining its columns", [/^ *├─+┼─+┼─+┤$/.test(three[k2 + 1]), three[k2 + 2].includes("v.")], [true, true]);
+      check("…the box's rules still straight", straight(three).length, 1);
+      // Enter at "of": its column moves down within its own row, never past the rule.
+      await caretBefore(p, 0, k2, "of");
+      await p.keyboard.press("Escape");
+      await p.keyboard.press("Enter");
+      await p.waitForTimeout(500);
+      const four = await raw();
+      const rule = four.findIndex((l) => /├/.test(l));
+      check("Enter above the drawn rule: the column moves down a row above it, the row under it as it was", [cells(four[rule - 1]), cells(four[rule + 1])], [["", "", "of"], ["v.", "2. Fraud", "contract"]]);
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(400);
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(400);
+      check("Ctrl+Z twice takes back the Enter and the horizontal line", (await raw()).join("\n"), two.join("\n"));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
     console.log("7. the Flagged panel's list goes to each ✓ Use my text page, in whichever document it is");
     {
       const r = await newReader();

@@ -2289,6 +2289,22 @@ app, which routes it to the reader tab.
   PDF-Linker writes a form's (`[   ]`); with ✎ Edit off it is drawn as a box.
   With the caret on a box already, the same button ticks it (`[ X ]`) or
   clears a ticked one, and nothing on the line moves. Ctrl+Z takes each back.
+  **│ Line and ─ Line draw a column or a row's rule** on a ✓ Use my text
+  page; both appear in the toolbar beside ☐ Checkbox. Press one (it stays lit
+  until you press it again or Esc) and drag on the page: │ Line down where a
+  column is to divide, ─ Line across between two lines. A vertical line drawn
+  through a box or table adds a column there, top to foot, the box no wider:
+  a word the line would cut goes into the right-hand column, and the text the
+  narrower column no longer holds wraps down it. Drawn on lines of text it
+  makes them a two-column box, as ⊞ Column box does, and a ─ line you drew just
+  over or under them becomes the box's top or foot, so draw lines one after
+  another to build a table of as many columns as you need. A horizontal line
+  between two rows of a box rules it across there; each row of the table then
+  keeps to itself, Enter and wrapping moving a column's text down only as far
+  as the next rule. The lines are written into the file in rules, as
+  PDF-Linker writes a form's (⇄ Raw shows them), so each new column takes
+  typing, Enter, Backspace and a drag of its rule as any box's does. A column
+  is never drawn narrower than six characters. Ctrl+Z takes each line back.
   **Backspace at the start of an indented line takes the indent off first,
   one space a press,** and leaves the line on its number until the indent is
   gone; the Backspace after that moves it up to the half line above, as

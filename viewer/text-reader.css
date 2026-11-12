@@ -1352,6 +1352,10 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
    where the rule will stand. */
 body.editing .page-body.free .line.rl .rb { cursor: col-resize; }
 .box-guide { width: 0; border-left: 2px dashed var(--accent, #1a73e8); z-index: 50; pointer-events: none; }
+.box-guide.h { width: auto; height: 0; border-left: 0; border-top: 2px dashed var(--accent, #1a73e8); }
+/* Drawing a line (│ Line, ─ Line): a crosshair over a ✓ Use my text page. */
+#pages.drawing-line .page-body.free, #pages.drawing-line .page-body.free * { cursor: crosshair !important; }
+#vline-btn[aria-pressed="true"], #hline-btn[aria-pressed="true"] { background: var(--accent, #1a73e8); color: #fff; }
 
 /* A pleading caption's clerk's stamp, against the right margin (text-reader.js,
    pdfsync.captionAlign); a line carrying the attorney block's words and the
