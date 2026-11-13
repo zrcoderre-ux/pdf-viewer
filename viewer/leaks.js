@@ -463,8 +463,24 @@ export function exportMatcher(exportNames, forward) {
 export function isSuggested(row) {
   if (!row || row.ok) return false;
   const own = String(row.fix0 == null ? "" : row.fix0).trim();
-  if (own[0] !== "~" && own[0] !== "=") return false;
+  if (own[0] !== "~" && own[0] !== "=" && !isPrefilledFix(row)) return false;
   return fold(row.fix) === fold(own);
+}
+/**
+ * PDF-Linker's own `*CORRECT TEXT`, pre-filled into the Fix? cell of a row it
+ * read as a scan error (its Notes say "pre-filled: …"). Since 2026-10-24 that
+ * is what it pre-fills instead of `~`, and it is the same kind of proposal:
+ * the owner wants every one reviewed before it is applied (2026-11-13). A
+ * single `*` only; a `*` the operator typed in Excel carries no such note.
+ */
+export const PREFILL_NOTE = "pre-filled:";
+export function isPrefilledFix(row) {
+  const own = String(row && row.fix0 != null ? row.fix0 : "").trim();
+  return own[0] === "*" && own[1] !== "*" && String((row && row.notes) || "").includes(PREFILL_NOTE);
+}
+/** Rows PDF-Linker answered for the operator that the operator has not accepted or changed. */
+export function unreviewedSuggestions(rows) {
+  return (rows || []).filter(isSuggested);
 }
 /** Whether a row is still the review's business: nothing typed, or a suggestion not yet accepted. */
 export function isPending(row) {

@@ -9,7 +9,7 @@
 import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
-  packDecisions, unpackDecisions, decisionsKey, rowIdentity, wholeContextIdentity, leakPages, CONTEXT_RULE, isSuggested, isPending,
+  packDecisions, unpackDecisions, decisionsKey, rowIdentity, wholeContextIdentity, leakPages, CONTEXT_RULE, isSuggested, isPending, isPrefilledFix, unreviewedSuggestions,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps, masterWithdrawEdits,
   walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
@@ -316,6 +316,19 @@ check("…and an empty cell is not one (there is nothing to accept)",
   isSuggested({ fix: "", fix0: "" }), false);
 check("…nor is a ~ the operator typed over the sheet's own cell",
   isSuggested({ fix: "~Vazquez", fix0: "" }), false);
+{
+  // PDF-Linker's pre-filled `*` (its Notes say so) is a suggestion too, and
+  // stops the walk and the Re-run button until it is reviewed (owner, 2026-11-13).
+  const note = "pre-filled: reads as a scan error of 'Smith' — leave it to accept";
+  const pre = { fix: "*Smith", fix0: "*Smith", notes: note };
+  check("a pre-filled * is a suggestion", [isPrefilledFix(pre), isSuggested(pre), isPending(pre)], [true, true, true]);
+  check("…a * typed in Excel (no pre-fill note) is an answer", isSuggested({ fix: "*Smith", fix0: "*Smith", notes: "" }), false);
+  check("…a ** is never a pre-fill", isPrefilledFix({ fix: "**Smith", fix0: "**Smith", notes: note }), false);
+  check("…changed here, it is the operator's answer", isSuggested({ fix: "*Smyth", fix0: "*Smith", notes: note }), false);
+  check("…cleared here, it is a row still to answer, not a suggestion", [isSuggested({ fix: "", fix0: "*Smith", notes: note }), isPending({ fix: "", fix0: "*Smith", notes: note })], [false, true]);
+  check("…accepted, it is reviewed", isSuggested({ ...pre, ok: true }), false);
+  check("unreviewedSuggestions lists only those", unreviewedSuggestions([pre, { ...pre, ok: true }, { fix: "no", fix0: "" }]).length, 1);
+}
 check("…nor one already accepted", isSuggested({ fix: "~Vazquez", fix0: "~Vazquez", ok: true }), false);
 check("both count as still to answer", [undecidedCount(rows), rows.map(isPending)], [2, [true, true, false]]);
 check("next unanswered wraps, and is -1 when none", [nextUndecided(rows, 2), nextUndecided(rows, 0), nextUndecided(rows, null), nextUndecided([{ fix: "yes" }], 0)], [0, 1, 0, -1]);

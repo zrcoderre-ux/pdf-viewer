@@ -5056,6 +5056,16 @@ async function rerunLinker() {
     toast(`PDF-Linker is already running on ${dir.name} (ETA ${seen.eta.label}).`, { error: true, ms: 6000 });
     return;
   }
+  // PDF-Linker applies a reading it pre-filled (a `*` scan-error fix) unless
+  // the cell is cleared, so the run waits until every one has been looked at
+  // here: accepted, changed or cleared (owner, 2026-11-13).
+  const unseen = leaks && (!leaks.folder || leaks.folder === dir.name) ? LK.unreviewedSuggestions(leakRows()) : [];
+  if (unseen.length) {
+    const one = unseen.length === 1;
+    toast(`Not run: ${unseen.length} reading${one ? "" : "s"} PDF-Linker pre-filled in ${leaks.name} ${one ? "is" : "are"} not reviewed yet, and the run would apply ${one ? "it" : "them"} as ${one ? "it stands" : "they stand"}. Accept (Alt+A), change or clear ${one ? "it" : "each"}, then press Re-run PDF-Linker again.`, { error: true, ms: 10000 });
+    await goToLeak(leakRows().indexOf(unseen[0]));
+    return;
+  }
   const launcher = await folderLauncher(dir);
   if (!launcher) { toast(`${dir.name} has no Re-run PDF-Linker launcher: PDF-Linker writes one when it runs on the folder.`, { error: true, ms: 7000 }); return; }
   if (!launcher.token) {

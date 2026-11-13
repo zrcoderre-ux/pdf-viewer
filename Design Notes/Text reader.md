@@ -3836,3 +3836,29 @@ the answer.
 
 Tests: `test-ocr-fix-instant.mjs` (browser), `test-leaks.mjs` ("the
 correction a * cell writes in").
+
+## PDF-Linker's pre-filled `*` is reviewed before it is applied (`isPrefilledFix`)
+
+Since 2026-10-24 PDF-Linker pre-fills a scan-error row's Fix? cell with
+`*CANONICAL` (it had been `~CANONICAL`), and applies it at the next run
+unless the cell is cleared. The reader counted only a pre-filled `~` or `=`
+as a suggestion (`isSuggested`), so a pre-filled `*` read as an answer: the
+walk went past it, the count left it out, and the run applied a reading
+nobody had looked at. The owner (2026-11-13): "I want to be sure that I have
+reviewed the auto generated * first."
+
+A single `*` in the cell the sheet arrived with is a suggestion when its
+Notes carry PDF-Linker's pre-fill note, which starts `pre-filled:`
+(`PREFILL_NOTE`, matching `_PN_PREFILL_NOTE` in `pdf_linker.py`). A `*` typed
+in Excel carries no such note and stays an answer; `**` is never a pre-fill.
+It is then handled as a `~` suggestion is: the walk stops on it, the bar
+says it is PDF-Linker's reading not yet accepted, **accept** takes it, which
+writes the correction into the text at once (`writeOcrFix`), and typing
+anything else or clearing the cell replaces it.
+
+Re-run PDF-Linker (`rerunLinker`) refuses while any suggestion in the
+folder's worksheet is unreviewed (`unreviewedSuggestions`), says how many
+there are and opens the review at the first. The guard covers only the
+button. A launcher double-clicked in the folder, or a sheet answered in
+Excel, still runs, and PDF-Linker still applies an untouched pre-fill there,
+as its own rule says. `test-leaks.mjs` pins what counts as a suggestion.
