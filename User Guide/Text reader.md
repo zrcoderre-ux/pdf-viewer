@@ -758,8 +758,9 @@ app, which routes it to the reader tab.
   full run writes the export the same way. Accepting a `*` PDF-Linker
   pre-filled writes it in the same way.
   **A row PDF-Linker answered for you is still a row to answer.** Where the
-  sheet arrives with a `~value` already in its Fix? cell — its own reading
-  that this value is a misspelling of that one — the review stops on it
+  sheet arrives with a `~value`, or a `*value` its Notes say it pre-filled,
+  already in its Fix? cell — its own reading that this value is a
+  misspelling or a scan error of that one — the review stops on it
   exactly as it stops on an empty cell, and the bar says whose reading it is.
   The suggestion is usually right, which is why it is pre-filled; when it is
   wrong it is wrong in the way that matters most, since a `~Martin` over a
@@ -769,7 +770,10 @@ app, which routes it to the reader tab.
   workbook — the cell already says it — so it is remembered in the reader,
   beside the unsaved decisions, and a save does not clear it; nor is it ever
   counted among the answers "not yet saved", and once a run has applied it
-  and its row has gone, it is let go without a word. A decision moves
+  and its row has gone, it is let go without a word. **Re-run PDF-Linker
+  waits until every one is reviewed**: with one still unaccepted, it says how
+  many and opens the review at the first, since the run would apply them as
+  they stand. (A launcher double-clicked in the folder does not ask.) A decision moves
   you to the next row still to answer; the **Leaks** tab lists every row with
   its state and jumps to any of them. A `no` or `never` on a value the key
   binds is mirrored as one of the reader's keeps, so the orange mark goes and
