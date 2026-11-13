@@ -24426,6 +24426,11 @@ function applyMatchedLayoutNow() {
     // …or, on a page with no such grid, where its type stands across the sheet.
     p.body.__typeBox = p.tops && !p.geom && !p.grid && p.type && p.type.right > p.type.left ? { left: p.type.left * p.scale, right: p.type.right * p.scale } : null;
     p.body.classList.toggle("rowleft", !!(p.tops && !p.geom && !p.grid));
+    // …and where the PDF begins a caption's right-hand column, px from the
+    // sheet's left (captionSideX): the caption's `)` side is set against it
+    // (rules.js), not where the export's characters put it.
+    const sides = p.tops && p.cells ? p.cells.map((c) => (c && c.side != null ? c.side : null)).filter((x) => x != null) : [];
+    p.body.__capSide = sides.length ? Math.min(...sides) * p.scale : null;
     if (p.body.style.getPropertyValue("--grid-col") !== gridCol) {
       if (gridCol) p.body.style.setProperty("--grid-col", gridCol); else p.body.style.removeProperty("--grid-col");
     }
@@ -25299,7 +25304,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // row's alone — a box row the export writes as one line can be three of
     // the PDF's rows, and matched to the one in bold italics.
     let face = mostFace(found.map((g) => g.item), faceOf) || mostFace(row.items, faceOf) || plain;
-    if (l.classList.contains("rl")) return { text: null, cuts: [], places: [], face, cellFaces: boxCellFaces(lt, found, faceOf) };
+    if (l.classList.contains("rl")) return { text: null, cuts: [], places: [], face, cellFaces: boxCellFaces(lt, found, faceOf), side: captionSideX(lt, found) };
     // …in bold or italics only where nearly all of it is: what no piece was
     // found for takes the line's face, and a line half the firm's name in bold
     // and half the clerk's stamp beside it drew the stamp bold too (the owner:
@@ -25374,6 +25379,28 @@ function boxCellFaces(lt, found, faceOf) {
     at += len;
   }
   return out;
+}
+/**
+ * Where the PDF begins the text a caption row sets past its `)` side (rules.js,
+ * markParen), in PDF units: the x of the first piece found after the bar, or
+ * null. The export puts the side where its characters fall, and those are not
+ * the PDF's — the fakes it writes run longer than the names the PDF prints, and
+ * its characters are not the reader's — so beside the PDF the side is set from
+ * where the PDF's right-hand column begins (applyMatchedLayout, __capSide;
+ * rules.js, solvePage). The owner, of a declaration's caption side by side:
+ * "too much empty white space between the parites and the verticle line and
+ * not enough space on the right margin", the motion's title cut off at the
+ * sheet's edge.
+ */
+function captionSideX(lt, found) {
+  const bar = lt.querySelector(".rb.paren");
+  if (!bar || bar.dataset.v === "up" || !found || !found.length) return null;
+  const r = document.createRange();
+  r.setStart(lt, 0);
+  r.setEndBefore(bar);
+  const at = r.toString().length;
+  for (const g of found) if (!g.glued && g.at > at && g.item && Number.isFinite(g.x)) return g.x;
+  return null;
 }
 /** The face most of a row's characters are set in (null where none is known). */
 function mostFace(items, faceOf) {
@@ -25624,6 +25651,7 @@ function clearMatched(sec) {
   body.classList.remove("fixed", "cgrid", "rowleft");
   body.__charGrid = null;
   body.__typeBox = null;
+  body.__capSide = null;
   body.style.paddingTop = "";
   body.style.removeProperty("--grid-em");
   body.style.removeProperty("--grid-col");
