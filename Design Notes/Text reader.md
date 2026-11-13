@@ -3791,3 +3791,48 @@ only where `keyClickHold` is off. `openKeyAt` (and `showKeyBar` opened with
 side bar or the status count, and closing. An answer under the hold repaints
 the term (`paintKey`, `renderKeyBar`) where it stands. Test:
 `test-key-answers.mjs` case 6.
+
+## A `*` answer written into the text at once (`writeOcrFix`)
+
+The owner, 2026-11-13: "Using the * should work like use my text, writing that
+revision in wherever the old value was. Also, when done through pdf+ it should
+rewrite the textfile instantly, not waiting for the re-run (but also on
+re-run)." A `*CORRECT TEXT` (or `**`) answer, given on a LEAKS row
+(`decideLeak`), accepted as PDF-Linker pre-filled it (`acceptLeak`), or given a
+name in the key walk (`decideKey`), used to sit in the Fix? cell until
+PDF-Linker's next pass. Now `writeOcrFixSoon` runs `writeOcrFix` just after the
+decision, outside its undo step, so Ctrl+Z first takes back the text and then
+the answer.
+
+- **What is written:** the correct text whole, as PDF-Linker reads the cell
+  (`LK.ocrWholeText`, its `_pn_ocr_whole_text`: `*David {said}` on "avidsaid"
+  is "David said"), in each hit's own casing (`LK.ocrCased`, its
+  `_pn_ocr_cased`, over `PK.caseShape`/`applyCase`; a correction with a digit
+  and no space, an identifier, as typed).
+- **Where:** every whole-word occurrence (`PK.buildMatcher`, the matcher a
+  name gets) on the pages on screen and, with the case folder open in full,
+  in every other export the row names (`LK.parseFiles`; every export for a
+  key-walk answer), never Combined Text.txt. It is the folder-wide Replace
+  all's own code: `planHere` and `prepareDocReplace` (each plan now carries
+  the text it matched, `plan.text`, and `applyReplace` takes a function of
+  it), `folderReplaceSummary`, and `commitFolderReplace` (its `quiet` and
+  display `label`), so it is one Ctrl+Z and ↶ Undo replace in folder covers
+  it. A hit inside a longer pseudonym or a kept value is left, as Replace all
+  leaves one.
+- **The text is typed:** the correction goes in as plain text and the
+  typed-name pass marks a real name the key binds, so the file carries its
+  pseudonym, which is what PDF-Linker's `*` writes (the correct text's own
+  stand-in where the case binds it).
+- **Saved at once:** `saveDocument`, which writes the changed exports and the
+  decision files (`LEAKS.xlsx`, `New Real Values.txt`) the answer is in. A
+  busy reader (a save, a replace being prepared, a document opening) or a
+  folder that changed while the other exports were read writes nothing and
+  says the answer is kept for Save and the run.
+- **On the re-run:** PDF-Linker reads the cell as before, corrects the PDF's
+  OCR layer and the original copy, and since the exports no longer carry the
+  garble, keeps the fix's key row unmatched (`ocr_decided`), so a full run
+  writes the same correction. See PDF-Linker's notes, *Control words and the
+  KEEP store*, "PDF+ writes a `*` into the exports".
+
+Tests: `test-ocr-fix-instant.mjs` (browser), `test-leaks.mjs` ("the
+correction a * cell writes in").

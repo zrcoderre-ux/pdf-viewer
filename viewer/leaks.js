@@ -194,6 +194,35 @@ export function classifyFix(cell, value) {
   return { kind: "replacement", label: "replace with “" + raw + "”" };
 }
 
+/**
+ * The CORRECT text a `*` (or `**`) cell says the value meant, whole, or ""
+ * where the cell is no scan-error fix: `*Smith` is "Smith", and the keep-spec
+ * form `*David {said}` on "avidsaid" is "David said" — the fix and its kept
+ * words in the order the cell states them, brackets, braces and quote marks
+ * dropped. PDF-Linker's `_pn_ocr_whole_text`, which corrects the original copy
+ * and the PDF with it; the reader writes it into the export (writeOcrFix).
+ */
+export function ocrWholeText(cell, value) {
+  const c = classifyFix(cell, value);
+  if (c.kind !== "ocr") return "";
+  const rest = String(cell).trim().replace(/^\*+/, "");
+  return rest.replace(/[[\]{}]/g, " ").replace(/["'“”‘’]/g, "").replace(/\s+/g, " ").trim();
+}
+/**
+ * `correct` in the casing of the `garble` it replaces where it stands, as
+ * PDF-Linker's `_pn_ocr_cased` writes it: a shouted garble a shouted
+ * correction, a quiet one quiet, prose as prose (`caseShape`, `applyCase`, from
+ * pseudo-key.js, passed in so this file needs nothing of it). An identifier's
+ * misreading ("25STCV378l8") says nothing of case, so a correction carrying a
+ * digit and no space is written as typed.
+ */
+export function ocrCased(garble, correct, { caseShape, applyCase }) {
+  const c = String(correct == null ? "" : correct);
+  if (/\d/.test(c) && !/\s/.test(c)) return c;
+  const shape = caseShape(garble);
+  return shape === "none" ? c : applyCase(shape, c);
+}
+
 /** Whether a decision is a KEEP the reader should mirror (a bound value left as it stands). */
 export function isKeepKind(kind) {
   return kind === "no" || kind === "never";
