@@ -67,6 +67,11 @@ function ruleSpan(part) {
 function closeCell(cell) {
   const kids = cell.childNodes;
   if (kids.length === 1 && kids[0].nodeType === 1 && kids[0].classList.contains("rh")) cell.classList.add("hf");
+  // …or a caption's foot (markParen): its underscores with the spaces a line
+  // between two numbers opens with. As type, the run was its underscores'
+  // width, wider than the grid's characters, and pushed the caption's side out.
+  else if ([...kids].some((n) => n.nodeType === 1 && n.classList.contains("rh") && /^_+$/.test(n.textContent))
+    && [...kids].every((n) => (n.nodeType === 3 ? !n.data.trim() : n.classList.contains("rh")))) cell.classList.add("hf");
   return cell;
 }
 
@@ -335,7 +340,9 @@ export function pageGrid(rows, { place = null, slop = RULE_COL_SLOP, reach = Inf
       });
       let right = bx.length ? bx[bx.length - 1] + 1 : 0;
       runs.forEach((rs, i) => { for (const [, e] of rs) right = Math.max(right, left(i) + e); });
-      return { widths, runs, bars: bx, right };
+      // …and where its text ends, the last cell's too (fitWide, beside a PDF).
+      const text = bs.length ? Math.max(right, left(bs.length) + widths[bs.length]) : right;
+      return { widths, runs, bars: bx, right, text };
     }),
   };
 }
@@ -438,6 +445,10 @@ function readPage(body) {
     // its PDF row's own size.
     wide: !fixed && !!sec && !sec.classList.contains("matched") && !sec.classList.contains("swapped"),
     origin: 0,
+    // Beside its PDF, where the PDF begins a caption's right-hand column, px
+    // from the sheet's left (text-reader.js, captionSideX): the `)` side is
+    // set against that (solvePage), not where the export's characters put it.
+    capSide: fixed && Number.isFinite(body.__capSide) ? body.__capSide : null,
   };
 }
 
@@ -478,7 +489,7 @@ function readRow(line, lt, glen) {
       const from = i ? bars[i - 1] + 1 : glen;
       return ruleCell(text.slice(from, i < bars.length ? bars[i] : text.length), from);
     });
-    return { line, lt, bars, cells, segs };
+    return { line, lt, bars, cells, segs, paren: !!line.querySelector(":scope > .lt > .rb.paren:not([data-v=\"up\"])") };
   }
   if (!lt.querySelector(".rh")) return null;
   const text = laidText(line).slice(glen);
@@ -591,7 +602,12 @@ function measurePage(p) {
   for (const row of p.rows) {
     if (row.free) continue;
     // What the text needs past where it is set in: the same at any grid.
-    row.ext = row.segs.map((s, i) => (s.t != null ? needOnGrid(row.cells[i]) - (row.padded[i] || 0) : 0));
+    // A caption's foot (its underscores before the `)`, a .hf cell) is a rule
+    // drawn across its cell to the side and needs no room of its own: measured
+    // as type, its underscores — as many as the export's characters to the
+    // `)` — ran wider than the grid's characters and pushed the side, the
+    // whole caption's, out past where the PDF draws it.
+    row.ext = row.segs.map((s, i) => (s.t != null && !row.cells[i].classList.contains("hf") ? needOnGrid(row.cells[i]) - (row.padded[i] || 0) : 0));
     // A numbered row's first cell begins past the margin's: its table is that much wider.
     row.gutter = Math.max(0, row.cells[0].getBoundingClientRect().left - row.line.getBoundingClientRect().left);
   }
@@ -605,6 +621,10 @@ function measurePage(p) {
   const b = p.body.getBoundingClientRect();
   const first = p.rows[0];
   p.bodyAt = b.left;
+  if (p.capSide != null) {
+    const sheet = p.body.closest(".page-inner") || p.body;
+    p.sideAt = sheet.getBoundingClientRect().left + p.capSide;
+  }
   p.rowsAt = first ? (first.free ? first.lt : first.cells[0]).getBoundingClientRect().left : b.left;
   if (p.wide) p.room = b.width ? b.right - (parseFloat(getComputedStyle(p.body).paddingRight) || 0) - p.rowsAt : 0;
 }
@@ -624,6 +644,29 @@ function rowleftOrigin(p, u) {
   return lefts.length ? Math.max(0, Math.min(...lefts)) : 0;
 }
 
+/**
+ * A caption's `)` side beside its PDF: { cols, x } — the file's columns the
+ * side stands in, and its place, px from the rows' left (`at0`, on the
+ * screen), so the text past it begins where the PDF begins its right-hand
+ * column (p.sideAt): the side as far in front of that as the file sets the
+ * nearest of that column's text past its `)`. Null where the PDF said nothing
+ * (a flowing page, a caption no piece of the PDF was found past).
+ */
+function sideOf(p, u, at0) {
+  if (p.sideAt == null) return null;
+  const cols = new Set();
+  let pad = Infinity;
+  for (const row of p.rows) {
+    if (!row.paren || row.bars.length !== 1) continue;
+    cols.add(row.bars[0]);
+    const s = row.segs[1];
+    if (s && s.t != null) pad = Math.min(pad, Math.max(0, (s.t - row.bars[0]) * u - 1));
+  }
+  if (!cols.size || !Number.isFinite(pad)) return null;
+  const x = p.sideAt - at0 - pad - 1;
+  return x > 0 ? { cols, x } : null;
+}
+
 /** A page's grid worked out (pure, but for reading the records the layout left). */
 function solvePage(p) {
   // Every column on a whole pixel of the screen: the rows' left (given them
@@ -638,11 +681,13 @@ function solvePage(p) {
   const reach = p.cg ? Math.min(Number.isFinite(p.cg.right) ? p.cg.right : Infinity, p.width || Infinity) - p.origin - 1 : Infinity;
   const at = (g) => {
     const u = gridUnit(p, g);
+    const side = sideOf(p, u, at0);
     const grid = pageGrid(p.rows.map((row) => {
       const pads = padsOf(p, row, u);
       return { bars: row.bars, cells: row.segs.map((s, i) => (s.runs ? { runs: s.runs } : { need: s.t != null ? pads[i] + row.ext[i] : 0 })) };
-    }), { place: (o) => (o - p.originChars) * u, reach, slack: p.cg ? u : 0, snap });
+    }), { place: (o) => (side && side.cols.has(o) ? side.x : (o - p.originChars) * u), reach, slack: p.cg ? u : 0, snap });
     grid.u = u;
+    grid.side = side;
     grid.right = grid.rows.reduce((m, r) => Math.max(m, r.right), 0);
     return grid;
   };
@@ -692,10 +737,12 @@ function applyPage(p, grid) {
   // character in px, how far it was tightened and how small its type drawn.
   p.body.__rules = { unit: grid.u, g: p.g, f: p.f };
   p.right = 0;
+  p.textRight = 0;
   const boxes = [];
   p.rows.forEach((row, k) => {
     const out = grid.rows[k];
     p.right = Math.max(p.right, out.right);
+    p.textRight = Math.max(p.textRight, out.text);
     const { line, lt } = row;
     line.__ruled = true; // set here: given back whole when it no longer is (loosen)
     if (p.moves) setPx(line, "left", p.origin);
@@ -710,6 +757,13 @@ function applyPage(p, grid) {
     }
     line.classList.add("fit");
     const pads = padsOf(p, row, grid.u);
+    // A caption's side pushed past where the PDF draws it (the reader's type
+    // runs wider in a party's line than the PDF's): the text past it still
+    // begins where the PDF begins it, as long as a character's room is left.
+    if (grid.side && row.paren && pads[1] != null) {
+      const push = out.bars[0] - grid.side.x;
+      if (push > 0) pads[1] = Math.max(Math.min(pads[1], grid.u), pads[1] - push);
+    }
     const last = row.cells.length - 1;
     row.cells.forEach((c, i) => {
       if (pads[i] != null) setPx(c, "padding-left", pads[i]);
@@ -766,11 +820,15 @@ function fitWide(pages) {
     const over = [];
     for (const p of todo) {
       const room = p.wide ? p.room : p.width - (p.moves ? p.origin : p.gutter0);
-      if (!(room > 0) || !(p.right - room > 0.5)) continue;
+      // Beside its PDF the text past a box's last bar counts too (a caption's
+      // causes of action past its `)` side): the sheet clips it at its edge,
+      // and the owner read "PERSONAL" as "PERSON".
+      const right = p.fixed ? Math.max(p.right, p.textRight || 0) : p.right;
+      if (!(room > 0) || !(right - room > 0.5)) continue;
       // (a flowing sheet's grid has given all it does: GRID_MIN, solvePage)
       // Beside its PDF only the text gives, and only so far: past that the
       // box runs off its sheet rather than be set too small to read.
-      let want = Math.floor(p.f * (room / p.right) * 1000) / 1000;
+      let want = Math.floor(p.f * (room / right) * 1000) / 1000;
       if (p.fixed) want = Math.max(BOX_TYPE_MIN, want);
       if (want > 0 && want < p.f) { p.f = want; over.push(p); }
     }

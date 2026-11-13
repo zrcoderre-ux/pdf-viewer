@@ -1567,6 +1567,35 @@ is never read for a `)` side. Tests: `test-textdoc.mjs` ("caption parens"),
 `test-caption-parens.mjs` (numbered and plain: one column, the foot, the file
 read back unchanged).
 
+**Beside its PDF a caption's `)` side stands where the PDF draws the box**
+(`text-reader.js` `captionSideX`, `body.__capSide`; `rules.js` `sideOf`,
+`closeCell`; 2026-11-13). The owner, of a declaration's caption side by side:
+"there is too much empty white space between the parites and the verticle line
+and not enough space on the right margin. it is cut off right after SERVICE
+before "OF" … PERSONAL reads as PERSON", and the reader should be laid out for
+the real names, which is how the owner reads. Two things put the side about
+35 points right of the PDF's line. The export writes the `)` where its own
+characters fall (the fakes it holds run longer than the names the PDF prints),
+and the side stood at that column on the reader's grid. And the caption's foot,
+the underscores before the closing `)`, was measured as type: the cell held the
+spaces a line between two numbers opens with as well as the run, so it was not
+`.hf`, and the underscores, wider than the grid's character, pushed the side
+out for the whole caption. Now `planCells` reads, for each caption row, the x
+of the first piece of the PDF found past the bar; the page takes the least of
+them as where the PDF begins its right-hand column (`__capSide`, px from the
+sheet's left); `sideOf` places the side's column so the text past it begins
+there (the column's nearest lead from the file taken off). The side still
+moves right where a party's line needs it (the reader's type runs a few
+percent wider than the PDF's), and then the right-hand text's lead is cut by
+the same amount, down to one grid character, so it still begins where the PDF
+begins it. A foot cell of spaces and an underscore run is `.hf` and needs no
+room. And beside a PDF, `fitWide` counts the text past a box's last bar too, so
+text that would still run off the sheet is drawn smaller rather than clipped.
+Flowing pages are unchanged but for the foot. Test: `test-caption-box-side.mjs`
+(the export's side at column 52 and at 64; the bar at the PDF's side or just
+clear of the parties, the right-hand column on the sheet and starting as far
+past the bar as the PDF starts it).
+
 **A caption's two sides are columns under ✎ Edit** (`textdoc.captionEdit`;
 text-reader.js `captionKey`, `captionReflowSoon`, `captionSides`,
 `captionCaretIn`, `placeCaptionCaret`; owner's request, 2026-10-23: "When it
