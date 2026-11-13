@@ -725,7 +725,9 @@ app, which routes it to the reader tab.
   take effect on screen at once. Phrase and a typed answer go to PDF-Linker
   in New Real Values.txt, are listed in the Flagged panel (× withdraws one),
   and are put in by the next Re-run PDF-Linker, which does a full run where
-  a new pseudonym has to replace one the files already carry.
+  a new pseudonym has to replace one the files already carry. A
+  `*CORRECT TEXT` answer (a scan error) is also written into the text at
+  once, as a Leaks row's is (below).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and PDF-Linker reads the cells back. The
@@ -744,6 +746,17 @@ app, which routes it to the reader tab.
   replacement, `~CORRECT SPELLING`,
   `*CORRECT TEXT` (`**` in every folder), a `[part to keep]` — is typed and
   applied with Enter; **Alt+Y**, **Alt+N**, **Alt+↑/↓** work from the page.
+  **A `*` answer is written into the text the moment you give it**, as a
+  page you typed out with ✎ Use my text is: the correct text replaces the
+  value wherever it stands as a whole word, in each spot's own capitals
+  ("SMLTH" becomes "SMITH"), on the pages on screen and in every export of
+  the folder the row names, and the files are saved there and then, with
+  the answer in `LEAKS.xlsx`. A correct text the key fakes goes into the
+  file as its pseudonym. Ctrl+Z puts the text back. The next Re-run
+  PDF-Linker still reads the answer: it corrects the PDF's own OCR text and
+  the original copy, and keeps the correction in the key, so every later
+  full run writes the export the same way. Accepting a `*` PDF-Linker
+  pre-filled writes it in the same way.
   **A row PDF-Linker answered for you is still a row to answer.** Where the
   sheet arrives with a `~value` already in its Fix? cell — its own reading
   that this value is a misspelling of that one — the review stops on it

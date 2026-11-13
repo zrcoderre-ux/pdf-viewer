@@ -13,9 +13,9 @@ import {
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps, masterWithdrawEdits,
   walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
-  newTrail, trailMove, trailBack, trailForward,
+  newTrail, trailMove, trailBack, trailForward, ocrWholeText, ocrCased,
 } from "./viewer/leaks.js";
-import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, forwardRuns, caseShape, applyCase } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -675,6 +675,24 @@ console.log("finishing the page before leaving it");
   check("in a reel the span keeps to the document's own pages",
     sweepSpan([{ index: 7, number: 1 }, { index: 8, number: 2 }], 7, { same: false }), { lo: 7, hi: 9 });
   check("a page not in the list: no span", sweepSpan(P, 9, { same: false }), null);
+}
+
+// A `*` answer is written into the text the moment it is given (text-reader.js
+// writeOcrFix): the correction whole, as PDF-Linker's `_pn_ocr_whole_text`
+// reads the cell, in each garble's own casing (`_pn_ocr_cased`).
+{
+  console.log("\nthe correction a * cell writes in");
+  check("the whole correct text of a fix, a keep-spec's kept words in order",
+    [ocrWholeText("*Smith", "Smlth"), ocrWholeText("*David {said}", "avidsaid"), ocrWholeText("**San Diego", "SanDiega"), ocrWholeText(" *“covenants” ", "cuve!nants")],
+    ["Smith", "David said", "San Diego", "covenants"]);
+  check("no fix, no correction: yes, an alias, a typed replacement, a bare star",
+    [ocrWholeText("yes", "x"), ocrWholeText("~Smith", "Smyth"), ocrWholeText("Smith", "x"), ocrWholeText("*", "x")], ["", "", "", ""]);
+  const C = { caseShape, applyCase };
+  check("written in each garble's own casing",
+    [ocrCased("SMLTH", "Smith", C), ocrCased("smlth", "Smith", C), ocrCased("Smlth", "Smith", C), ocrCased("Cuve!nants", "covenants", C), ocrCased("SANDIEGA", "San Diego", C)],
+    ["SMITH", "smith", "Smith", "Covenants", "SAN DIEGO"]);
+  check("an identifier's correction is written as typed",
+    ocrCased("25stcv378l8", "25STCV37818", C), "25STCV37818");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

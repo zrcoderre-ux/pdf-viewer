@@ -11842,12 +11842,16 @@ function decideKey(answer) {
   });
   persistValues();
   renderFlags();
+  // A `*` answer is a scan error's correction: written into the text now
+  // (writeOcrFix), in every export of the folder the name stands in.
+  const ocrFix = !!LK.ocrWholeText(a, real);
+  if (ocrFix) writeOcrFixSoon(real, a, []);
   // Said as it is: the answer is held here until Save writes it into
   // New Real Values.txt, and the key itself is never written by the reader —
   // pseudonym_key.xlsx changes only when the operator re-runs PDF-Linker
   // (the owner, 2026-10-30: no writing the key on Save, and no run started
   // by a Save; a re-run by hand).
-  if (a !== "yes" && a !== "no" && a !== "never") {
+  if (a !== "yes" && a !== "no" && a !== "never" && !ocrFix) {
     toast((a === "phrase"
       ? `"${real}" is to be faked whole, as one name.`
       : `"${real}" answered “${a}”.`)
@@ -12095,10 +12099,13 @@ function planReplace(body, segs, start, end) {
 /**
  * Carry a plan out: the hit's text off each of its lines, the replacement
  * where it began. Returns a collapsed range just after the replacement, which
- * the edits that follow (the typed-name pass) keep in its place.
+ * the edits that follow (the typed-name pass) keep in its place. `withText`
+ * may be a function of the text the hit matched (`plan.text`), which a `*`
+ * fix uses to write its correction in each garble's own casing (writeOcrFix).
  */
-function applyReplace(plan, withText) {
+function applyReplace(plan, with_) {
   const { start, end, parts } = plan;
+  const withText = typeof with_ === "function" ? with_(plan.text || "") : with_;
   let at = null;
   for (let i = parts.length - 1; i >= 0; i--) {
     const { line, from, to } = parts[i];
@@ -12266,7 +12273,7 @@ function planHere(rx) {
     while ((m = rx.exec(text))) {
       if (!m[0].length) { rx.lastIndex++; continue; }
       const plan = planReplace(body, segs, m.index, m.index + m[0].length);
-      if (plan) plans.push(plan);
+      if (plan) { plan.text = m[0]; plans.push(plan); }
       else {
         skipped++;
         const mm = reelMemberOf(pageIndexOf(body));
@@ -12415,7 +12422,7 @@ async function prepareDocReplace(d, rx, withText, pass) {
       while ((m = rx.exec(text))) {
         if (!m[0].length) { rx.lastIndex++; continue; }
         const plan = planReplace(body, segs, m.index, m.index + m[0].length);
-        if (plan) plans.push(plan); else skipped++;
+        if (plan) { plan.text = m[0]; plans.push(plan); } else skipped++;
       }
       if (plans.length) {
         for (let k = plans.length - 1; k >= 0; k--) applyReplace(plans[k], withText);
@@ -12556,9 +12563,9 @@ function folderReplaceSummary(q, withText, here, prepared, comb, unreadable) {
  * document put in the store, unsaved, and every document's before and after
  * journalled, with a marker on the undo history that brings them all back.
  */
-function commitFolderReplace({ q, withText, here, prepared, sum }) {
+function commitFolderReplace({ q, withText, label = withText, here, prepared, sum, quiet = false }) {
   const id = ++batchSeq;
-  const rec = { id, q, withText, folder: folderName, state: "done", docs: [] };
+  const rec = { id, q, withText: label, folder: folderName, state: "done", docs: [] };
   const members = [];
   for (const { body } of here.edits) { const m = reelMemberOf(pageIndexOf(body)); if (m && !members.includes(m)) members.push(m); }
   const before = new Map(members.map((m) => [m, { doc: liveMemberDoc(m), spots: memberSpotsRel(m) }]));
@@ -12593,6 +12600,7 @@ function commitFolderReplace({ q, withText, here, prepared, sum }) {
   scanFindHere();
   findLandHere();
   storeChanged();
+  if (quiet) return; // the caller says what was done (writeOcrFix)
   // Said: how many where, that nothing is written, and how to take it back.
   const done = sum.hereN + sum.offN;
   const where = [];
@@ -12606,6 +12614,96 @@ function commitFolderReplace({ q, withText, here, prepared, sum }) {
   const allLines = [...sum.hereBy].map(([name, k]) => per(name, k)).concat(offLines);
   $("fb-rnote").textContent = offLines.slice(0, 3).join("; ") + (offLines.length > 3 ? `; and ${offLines.length - 3} more` : "");
   $("fb-rnote").title = allLines.join("\n");
+}
+
+// ── a `*` fix written into the text the moment it is answered ───────────────
+//
+// The owner (2026-11-13): "Using the * should work like use my text, writing
+// that revision in wherever the old value was. Also, when done through pdf+
+// it should rewrite the textfile instantly, not waiting for the re-run (but
+// also on re-run)." A `*CORRECT TEXT` answer — on a LEAKS row (decideLeak, or
+// a pre-filled one accepted: acceptLeak) or on a name in the key walk
+// (decideKey) — says the scan misread the page, and until now the export kept
+// the garble until PDF-Linker's next pass. Now the correction is written in
+// at once, wherever the value stands as a whole word: the pages on screen and,
+// with a case folder open in full, every other export of it (the ones the row
+// names; every one, for a name answered in the key walk), by the folder-wide
+// Replace all's own code, so it is one Ctrl+Z, and each garble takes the
+// correction in its own casing (LK.ocrCased, as PDF-Linker's `_pn_ocr_cased`).
+// The correct text is TYPED in, so a real name the key binds goes into the
+// file as its pseudonym, as PDF-Linker writes it (`_pn_apply_ocr_fixes`: the
+// correct text's own stand-in where the case binds it, the text itself
+// elsewhere). Then everything owed is saved (saveDocument: the exports, and
+// LEAKS.xlsx or New Real Values.txt carrying the answer), so the files read
+// corrected before any run. PDF-Linker's next pass still reads the cell: it
+// corrects the PDF's OCR layer and the original copy, and keeps the fix in
+// the key even though the exports no longer carry the garble, so a full run
+// writes the same correction again (`ocr_decided`, `write_key`).
+//
+// A hit inside a longer pseudonym, or a value kept where it stands, is left
+// as it is, as Replace all leaves one. Combined Text.txt is left to PDF-Linker.
+let ocrFixBusy = false;
+function writeOcrFixSoon(value, cell, files) {
+  // Out of the decision's own undo step: the replace is a step of its own.
+  setTimeout(() => { duringAsync("writing a scan-error fix into the text", () => writeOcrFix(value, cell, { files })); }, 0);
+}
+async function writeOcrFix(value, cell, { files = [] } = {}) {
+  const correct = LK.ocrWholeText(cell, value);
+  if (!correct || !doc || PK.fold(correct) === PK.fold(value)) return;
+  const later = ` The answer is kept; Save writes it, and PDF-Linker's run writes the correction.`;
+  if (saving || folderPass || opening || ocrFixBusy) { toast(`“${value}” was not corrected in the text yet: the reader is busy.` + later, { error: true, ms: 8000 }); return; }
+  const rx = PK.buildMatcher([value]);
+  if (!rx) return;
+  const withText = (garble) => LK.ocrCased(garble, correct, PK);
+  const reelNames = () => reel.map((m) => m.name).join("\n");
+  const stamp = { reel: reelNames(), unsaved: unsavedSeq, rev, fakes: settings.showFakes };
+  const moved = () => stamp.reel !== reelNames() || stamp.unsaved !== unsavedSeq || stamp.rev !== rev || stamp.fakes !== settings.showFakes;
+  ocrFixBusy = true;
+  try {
+    const wide = folderOpen() && !isCombinedHead();
+    const prepared = [], unreadable = [];
+    if (wide) {
+      const named = new Set((files || []).map((f) => LK.fold(exportForName(f) || f)));
+      const targets = folderDocs.filter((d) => !d.combined && !onReel(d) && (!named.size || named.has(LK.fold(d.name))));
+      const pass = { stop: false };
+      for (const d of targets) {
+        let p = null;
+        try { p = await prepareDocReplace(d, rx, withText, pass); }
+        catch (err) { console.warn(err); unreadable.push(d.name); }
+        if (moved()) { clearShadow(); toast(`“${value}” was not corrected in the text: the documents changed while it was being prepared.` + later, { error: true, ms: 8000 }); return; }
+        if (p) prepared.push(p);
+      }
+    }
+    const here = planHere(rx);
+    let done = 0, docs = 0, skipped = here.skipped;
+    if (wide) {
+      const sum = folderReplaceSummary(value, correct, here, prepared, 0, unreadable);
+      skipped = sum.skipped;
+      if (sum.docs) {
+        commitFolderReplace({ q: value, withText, label: correct, here, prepared, sum, quiet: true });
+        done = sum.hereN + sum.offN;
+        docs = sum.docs;
+      }
+    } else if (here.edits.length) {
+      snapshotPages(here.edits.map((e) => e.body));
+      done = applyHere(here.edits, withText).done;
+      docs = 1;
+      afterTextChange();
+    }
+    const left = skipped ? ` ${skipped} left as ${skipped === 1 ? "it stands" : "they stand"} (part of a longer name, or kept).` : "";
+    const unread = unreadable.length ? ` Not read, so not corrected: ${nameList(unreadable.map((n) => TD.docLabel(n)))}.` : "";
+    if (!done) {
+      toast(`“${value}” is not in the text${wide ? " of the folder" : " on screen"} as a whole word, so there was nothing to correct in it now.${left}${unread} The answer is kept for PDF-Linker's run.`, { ms: 8000 });
+      return;
+    }
+    const saved = await saveDocument();
+    toast(`“${value}” corrected to “${correct}” in ${done} place${done === 1 ? "" : "s"}${docs > 1 ? ` across ${docs} documents` : ""}`
+      + (saved ? " and saved." : " — not saved yet: Ctrl+S writes it.")
+      + left + unread + " Ctrl+Z puts it back.", { ms: 9000 });
+  } finally {
+    ocrFixBusy = false;
+    clearShadow();
+  }
 }
 
 // The folder replaces the reader holds, for Ctrl+Z and ↶ Undo replace in
@@ -19134,6 +19232,8 @@ function decideLeakNow(text, { advance = false } = {}) {
   row.fix = String(text == null ? "" : text).trim();
   decidedHere++;
   persistLeaks();
+  // A scan error's correction goes into the text now, not at the run.
+  if (LK.ocrWholeText(row.fix, row.value)) writeOcrFixSoon(row.value, row.fix, LK.parseFiles(row.file));
   // A `yes` settles the name for the save; withdrawn, it is undecided again.
   // Nothing on the page moves, so no paint follows to recount: the count, the
   // walk and the Save button are told here, as "fake it" tells them.
@@ -19165,6 +19265,8 @@ function acceptLeakNow() {
   row.ok = true;
   decidedHere++;
   persistLeaks();
+  // PDF-Linker's pre-filled `*CANONICAL`, accepted: written in now, as a typed one is.
+  if (LK.ocrWholeText(row.fix, row.value)) writeOcrFixSoon(row.value, row.fix, LK.parseFiles(row.file));
   renderLeaksBar();
   paintLeakRow(leaks.at);
   renderLeaksTabState();
