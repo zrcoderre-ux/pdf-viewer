@@ -684,8 +684,11 @@ app, which routes it to the reader tab.
   opening it is put there for you) and press **Copy page for diagnosis**:
   PDF-Linker writes that page alone into the do-not-share subfolder, each line
   holding one of them blanked across the page and everything else kept, both
-  text layers included. It says which pieces it could not find. Open the copy
-  and look before you send it.
+  text layers included. It looks for each name in the PDF's text and, with
+  Tesseract, in the printed page itself, word by word, so a name the
+  page's own OCR misread is still found. It says which pieces it could not
+  find, and if Tesseract could not run. Open the copy and look before you
+  send it.
 - **Nothing is saved over what a run changed.** When you come back to the
   window, or open an export, the reader looks at the case folder's key and
   LEAKS.xlsx; where a PDF-Linker run (or Excel) has changed them since the

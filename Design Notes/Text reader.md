@@ -3780,7 +3780,7 @@ when the pop-up opens) and PDF-Linker writes that page alone into the
 do-not-share subfolder with each line holding one blanked, naming the pieces
 it did not find. The pieces are real text, in the request file only until
 PDF-Linker takes it. Esc closes the pop-up from anywhere, since its buttons
-are disabled, and lose the focus, while a request is out. Tests:
+are disabled, and lose the focus, while a request is out. PDF-Linker finds each piece in the page's ink as well as its text layers, word by word within an OCR slip (the owner: "It didn't scrub the names", on a page whose only layer was junk); its answer says whether Tesseract read the ink (`ocr`), and where it did not the note says a name the layers misread can still show. Tests:
 `test-textdoc.mjs` ("diagnosis names" to "…nor is a broken file"),
 `test-folder-save.mjs` case 41, and PDF-Linker's
 `tests/test_page_diagnostics.py`.
