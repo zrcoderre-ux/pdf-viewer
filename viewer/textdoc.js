@@ -4843,7 +4843,16 @@ export function reflowBox(lines, i, caret = null, { numbered = false, breakAt = 
       if (caret.col > own[j] && caret.col <= own[j + 1]) {
         const cell = lines[i].slice(own[j] + 1, own[j + 1]);
         const lead = cell.length - cell.replace(/^ +/, "").length;
-        at = { row: i, j, off: Math.max(0, Math.min(text.get(i)[j].length, caret.col - own[j] - 1 - lead)) };
+        // A SPACE JUST TYPED STAYS. The owner: "when I am typing with use my
+        // text it keeps undoing my spaces". The cell's text is read trimmed,
+        // so a space typed at the end of it went with the next rewrite of the
+        // row (every keystroke's, a beat after it) and the caret was put back
+        // before it: the next word ran on ("onApril", "Thisis"). The spaces
+        // between the text and the caret are the caret cell's own text.
+        const want = caret.col - own[j] - 1 - lead;
+        const t = text.get(i)[j];
+        if (want > t.length) text.get(i)[j] = t + cell.slice(lead + t.length, lead + want).replace(/[^ ]/g, " ");
+        at = { row: i, j, off: Math.max(0, Math.min(text.get(i)[j].length, want)) };
       }
     }
   }
@@ -4884,10 +4893,12 @@ export function reflowBox(lines, i, caret = null, { numbered = false, breakAt = 
     for (;;) {
       const k = rows[r];
       const t = text.get(k)[j];
-      if (!force && t.length <= room(j)) break;
+      // (A space typed at the end, before the caret, wraps nothing: it stays
+      // until the word after it shows where the line breaks.)
+      if (!force && t.trimEnd().length <= room(j)) break;
       let cut = force ? at.off : t.lastIndexOf(" ", room(j));
       if (!force && cut <= 0) cut = room(j);
-      const keep = t.slice(0, cut).trimEnd(), carry = t.slice(cut).trim();
+      const keep = t.slice(0, cut).trimEnd(), carry = t.slice(cut).trimStart();
       text.get(k)[j] = keep;
       touched.add(k);
       if (at && at.row === k && at.j === j && (force || at.off > keep.length)) at = { row: null, j, off: force ? 0 : Math.max(0, at.off - (t.length - carry.length)) };
@@ -4896,7 +4907,7 @@ export function reflowBox(lines, i, caret = null, { numbered = false, breakAt = 
       const nt = text.get(next)[j];
       const broke = force;
       force = false;
-      if (!broke && nt && /^[a-z]/.test(nt)) text.get(next)[j] = carry + " " + nt;
+      if (!broke && nt && /^[a-z]/.test(nt)) text.get(next)[j] = carry + (carry.endsWith(" ") ? "" : " ") + nt;
       else if (!nt) text.get(next)[j] = carry;
       else {
         // An item of its own: the column moves down a row to make room.
@@ -5090,6 +5101,9 @@ export function boxEdit(lines, i, col, key, { numbered = false } = {}) {
   if (!open) return res;
   const back = openBox(res.lines, open, rules, boxBars(work[i]).length);
   const caret = res.caret ? { line: res.caret.line, col: Math.max(0, res.caret.col - (open.left != null && res.caret.col > open.left ? 1 : 0)) } : null;
+  // The last column's row is written trimmed (openBox): a space typed at its
+  // end, before the caret, stays (reflowBox keeps it in the closed box).
+  if (caret && back[caret.line] != null && back[caret.line].length < caret.col) back[caret.line] = back[caret.line].padEnd(caret.col);
   return { lines: back, caret };
 }
 

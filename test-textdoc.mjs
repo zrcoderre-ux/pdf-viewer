@@ -2362,6 +2362,37 @@ console.log("lines drawn on a ✓ Use my text page (drawVerticalLine, drawHorizo
   check("…a rule across it between two rows, open at its ends as its rules are", [oh.lines[2].length, oh.lines[2].slice(0, 5), oh.lines[2][19], oh.lines[2][31]], [R.length, "    ─", "┼", "┼"]);
   check("…the box's other lines as they were", [oh.lines[0], oh.lines[1], oh.lines[3]], [o.lines[0], o.lines[1], o.lines[2]]);
 }
+console.log("a space typed at the end of a box cell stays (boxEdit \"typed\")");
+{
+  // The owner: "when I am typing with use my text it keeps undoing my spaces".
+  // Each keystroke in a box row sets the row back on its rules, and the cell
+  // was read trimmed: the space just typed went, the caret back before it,
+  // and the next word ran on.
+  const W = 30;
+  const cell = (t) => "│" + (" " + t).padEnd(W) + "│";
+  const box = ["┌" + "─".repeat(W) + "┐", cell("Executed on April"), cell(""), "└" + "─".repeat(W) + "┘"];
+  const typeIn = (lines, i, col, ch) => lines.map((l, k) => (k === i ? l.slice(0, col) + ch + l.slice(col) : l));
+  let lines = box, col = 2 + "Executed on April".length;
+  for (const ch of " 21, 2026") {
+    lines = typeIn(lines, 1, col, ch);
+    const r = boxEdit(lines, 1, col + 1, "typed");
+    if (r) { lines = r.lines; col = r.caret.col; } else col++;
+  }
+  check("a closed box: each space typed stays, the caret after it", [lines[1], col], [cell("Executed on April 21, 2026"), 2 + "Executed on April 21, 2026".length]);
+  const R = "──────────┬──────────";
+  let open = [R, " left     │ Executed on", R.replace("┬", "┴")];
+  col = open[1].length;
+  for (const ch of " April") {
+    open = typeIn(open, 1, col, ch);
+    const r = boxEdit(open, 1, col + 1, "typed");
+    if (r) { open = r.lines; col = r.caret.col; } else col++;
+  }
+  check("…a box open at its sides: the last column's too", open[1], " left     │ Executed on April");
+  const N = 12, c2 = (t) => "│" + (" " + t).padEnd(N) + "│";
+  const narrow = ["┌" + "─".repeat(N) + "┐", "│ aaa bbbbbbbbbb │", c2(""), "└" + "─".repeat(N) + "┘"];
+  const w = boxEdit(narrow, 1, 2 + "aaa bbbbbbbbbb ".length, "typed");
+  check("…a word wrapped down its column keeps the space typed after it", [w.lines[2], w.caret], [c2("bbbbbbbbbb"), { line: 2, col: 2 + "bbbbbbbbbb ".length }]);
+}
 console.log("a table made as a word processor makes one (makeTable, Tab in boxEdit)");
 {
   const cells = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.slice(0, -1).map((x, j) => l.slice(x + 1, b[j + 1]).trim()); };

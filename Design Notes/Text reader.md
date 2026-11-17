@@ -2625,6 +2625,23 @@ does not move. Widening a column does not pull wrapped text back up: the file
 does not say which rows were one item. Tested in `test-textdoc.mjs` and `test-free-page.mjs`
 (section 10, a cover page's parties and causes of action).
 
+**A space typed at the end of a box cell stays** (`reflowBox`'s caret cell,
+`boxEdit`'s open-sided rows). The owner: "when I am typing with use my text it
+keeps undoing my spaces … it let me go back and add spaces just not while I
+typed" — on a page PDF-Linker exported as a box (a form's or a proof of
+service's outline in `│` rules, every line a box row), the file read
+"Executed on April21,2026". `reflowBox` reads each cell's text trimmed and
+writes the row back after every keystroke (`boxReflowSoon`, 120 ms), so a
+space typed at the end of the cell went with the next rewrite and the caret
+was put back before it; the next word ran on. A space between two words
+already there is no cell's end, which is why going back to add one worked.
+Now the spaces between the cell's text and the caret are kept as the caret
+cell's text: they never wrap the row on their own (the break test is on the
+text without them), a word wrapped down the column carries them
+(`trimStart`, not `trim`), and an open-sided box's last column, which
+`openBox` writes trimmed, is padded back out to the caret. Pinned in
+`test-textdoc.mjs` ("a space typed at the end of a box cell stays").
+
 **☐ Checkbox on a ✓ Use my text page** (`#checkbox-btn`, `insertCheckbox`,
 `refreshCheckboxBtn`, `checkboxBody`). The owner: "add a check box insert for
 text files that appears in the tool bar when I am in use my text." The button
