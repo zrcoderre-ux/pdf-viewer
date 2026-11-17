@@ -3874,7 +3874,9 @@ export function pieceList(text) {
 /**
  * PDF-Linker's answer, read from DIAGNOSIS_RESULT_FILE: null where it is not
  * the answer to `nonce` (or not an answer at all); else { ok, state, report,
- * file, folder, blanked, missing, error }.
+ * file, folder, blanked, missing, error, ocr }. A page copy finds each piece
+ * in the page's text layers and in its ink, read by Tesseract (`ocr` false
+ * where it could not be, null from a PDF-Linker that did not say).
  */
 export function parseDiagnosisResult(text, nonce) {
   let d;
@@ -3889,6 +3891,8 @@ export function parseDiagnosisResult(text, nonce) {
     blanked: Number(d.blanked) || 0,
     missing: Array.isArray(d.missing) ? d.missing.map(String) : [],
     error: typeof d.error === "string" ? d.error : "",
+    // pagecopy: whether the page's ink was read too (Tesseract there), not only its text layers.
+    ocr: typeof d.ocr === "boolean" ? d.ocr : null,
   };
 }
 

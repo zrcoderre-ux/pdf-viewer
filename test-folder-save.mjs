@@ -2738,11 +2738,17 @@ test(41, "🩺 Diagnose: the page's report asked for through the Re-run link, sh
     // A page copy: the pieces typed, one a line.
     await r.page.fill("#diag-remove", "Corwin Ashdale\n12 Orrin Lane\n");
     await r.page.click("#diag-copy");
-    const q2 = await answer((q) => ({ nonce: q.nonce, state: q.state, ok: true, file: "A Complaint page 1 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 1, missing: ["12 Orrin Lane"] }));
+    const q2 = await answer((q) => ({ nonce: q.nonce, state: q.state, ok: true, file: "A Complaint page 1 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 1, missing: ["12 Orrin Lane"], ocr: true }));
     check("the request: pagecopy, with the pieces", q2 && [q2.state, q2.pdf, q2.page, q2.remove], ["pagecopy", "A Complaint.pdf", 1, ["Corwin Ashdale", "12 Orrin Lane"]]);
     await r.page.waitForFunction(() => /Wrote/.test(document.getElementById("diag-note").textContent), null, { timeout: 10000 }).catch(() => {});
     const note = await r.page.evaluate(() => document.getElementById("diag-note").textContent);
     truthy("…the copy named, and what was not found", /Wrote “A Complaint page 1 for diagnosis\.pdf” into Original Text \(real names - do not share\): 1 line blanked\. Not found on the page, so nothing was removed for: 12 Orrin Lane\./.test(note), note);
+    // Tesseract not there: the copy looked in the text layers only, and says so.
+    await r.page.fill("#diag-remove", "Corwin Ashdale");
+    await r.page.click("#diag-copy");
+    await answer((q) => ({ nonce: q.nonce, state: q.state, ok: true, file: "A Complaint page 1 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 1, missing: [], ocr: false }));
+    await r.page.waitForFunction(() => /Tesseract/.test(document.getElementById("diag-note").textContent), null, { timeout: 10000 }).catch(() => {});
+    truthy("…a copy made without Tesseract says the ink was not read", /Tesseract could not be run, so the names were looked for only in the PDF's text layers/.test(await r.page.evaluate(() => document.getElementById("diag-note").textContent)));
     // PDF-Linker refuses: its reason is said.
     await r.page.click("#diag-report");
     await answer((q) => ({ nonce: q.nonce, state: q.state, ok: false, error: "page 1 is not in a PDF of 0 page(s)" }));

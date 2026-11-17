@@ -1015,9 +1015,10 @@ check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
   try { diagnosisRequestText("abc", "go", {}); } catch { threw = true; }
   check("…never a run's state", threw, true);
   check("pieces from a list", pieceList(["  a b ", "a b", "c"]), ["a b"]);
-  const answer = JSON.stringify({ nonce: "abc", state: "pagecopy", ok: true, file: "Motion page 4 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 2, missing: ["x y"] });
+  const answer = JSON.stringify({ nonce: "abc", state: "pagecopy", ok: true, file: "Motion page 4 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 2, missing: ["x y"], ocr: false });
   check("diagnosis answer", parseDiagnosisResult(answer, "abc"),
-    { ok: true, state: "pagecopy", report: "", file: "Motion page 4 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 2, missing: ["x y"], error: "" });
+    { ok: true, state: "pagecopy", report: "", file: "Motion page 4 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 2, missing: ["x y"], error: "", ocr: false });
+  check("…from a PDF-Linker that does not say whether it read the ink", parseDiagnosisResult(JSON.stringify({ nonce: "abc", state: "report", ok: true }), "abc").ocr, null);
   check("…another request's answer is none", parseDiagnosisResult(answer, "abd"), null);
   check("…nor is a broken file", parseDiagnosisResult("{", "abc"), null);
 }

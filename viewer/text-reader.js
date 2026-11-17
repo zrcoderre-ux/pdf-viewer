@@ -26285,7 +26285,10 @@ async function diagnosePage(state) {
     } else {
       const missed = result.missing.length ? ` Not found on the page, so nothing was removed for: ${result.missing.join("; ")}.` : "";
       const none = remove.length ? "" : " Nothing was listed to remove, so it is the whole page, real text and all.";
-      setDiagNote(`Wrote “${result.file}” into ${result.folder}: ${result.blanked} line${result.blanked === 1 ? "" : "s"} blanked.${missed}${none} Open it and look before you send it.`, !!missed);
+      // Read off the ink as well as the text layers where Tesseract is there:
+      // without it a name the layers misread or never carried still shows.
+      const inkless = remove.length && result.ocr === false ? " Tesseract could not be run, so the names were looked for only in the PDF's text layers: one they misread can still show." : "";
+      setDiagNote(`Wrote “${result.file}” into ${result.folder}: ${result.blanked} line${result.blanked === 1 ? "" : "s"} blanked.${missed}${none}${inkless} Open it and look before you send it.`, !!(missed || inkless));
     }
   } finally {
     setDiagBusy(false);
