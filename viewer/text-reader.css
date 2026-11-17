@@ -767,6 +767,12 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 }
 .page-label .raw-page:hover { background: #e3e5e8; }
 .tpage.raw .page-label .raw-page { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 🩺 Diagnose, beside it: PDF-Linker's report of the PDF page, or a copy of it. */
+.page-label .diag-page {
+  float: right; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .diag-page:hover { background: #e3e5e8; }
 /* ⊘ Did not OCR, beside it: strips the page's text for [DID NOT OCR]. */
 .page-label .nocr-page {
   float: right; margin-right: 6px; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
@@ -1264,6 +1270,26 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
 #comment-pop button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
 #side-comments .cmt-lv { white-space: normal; }
 #side-comments .cmt-by { color: var(--text-muted); font-style: italic; margin-left: 4px; }
+/* 🩺 Diagnose: PDF-Linker's report of a page, or a copy of it for diagnosis. */
+#diag-pop {
+  position: fixed; z-index: 36; display: flex; flex-direction: column; gap: 6px; width: 420px; max-width: calc(100vw - 8px);
+  background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
+}
+#diag-pop[hidden], #diag-pop [hidden] { display: none; }
+#diag-pop .dg-head { line-height: 1.4; word-break: break-word; }
+#diag-pop .dg-label { color: var(--text-muted); line-height: 1.4; }
+#diag-pop textarea { font: inherit; font-size: 12px; resize: vertical; min-height: 44px; background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 5px; }
+#diag-pop pre { margin: 0; max-height: 45vh; overflow: auto; white-space: pre; font-size: 11px; line-height: 1.35; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 6px; }
+#diag-pop .dg-note { margin: 0; color: var(--text-muted); line-height: 1.4; word-break: break-word; }
+#diag-pop .dg-note:empty { display: none; }
+#diag-pop .dg-note.error { color: #e53935; }
+#diag-pop .dg-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+#diag-pop .dg-actions.end { justify-content: flex-end; }
+#diag-pop button { background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+#diag-pop button:disabled { opacity: 0.5; cursor: default; }
+#diag-pop button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+#diag-pop button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
 #swap-pop {
   position: fixed; z-index: 35; display: flex; flex-direction: column; gap: 6px; width: 340px;
   background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
@@ -1333,7 +1359,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
   #pages { zoom: var(--print-zoom, 1); }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
-  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page, .page-label .unfix-page, .page-label .num-page, .page-label .unnum-page, .page-label .cmt-page { display: none; }
+  .page-label .swap-page, .page-label .raw-page, .page-label .diag-page, .page-label .nocr-page, .page-label .fix-page, .page-label .unfix-page, .page-label .num-page, .page-label .unnum-page, .page-label .cmt-page { display: none; }
   /* A page swapped for its PDF page prints its text, and its PDF page — the
      filing, which nothing scrubbed — never prints, whether or not the page
      was told a print was coming (body.printing does the same on screen). */

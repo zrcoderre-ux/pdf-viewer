@@ -43,7 +43,7 @@ import { createToaPanel } from "./toa.js";
 import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
-import { folderLauncher, writeRunRequest, awaitPickup } from "./run-request.js";
+import { folderLauncher, writeRunRequest, awaitPickup, writeDiagnosisRequest, awaitDiagnosis } from "./run-request.js";
 import { dressLines as dressRuleLines, fitRuleRows, placeholderIn } from "./rules.js";
 import { dressColumns as dressColumnsOf, undressColumns, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
 // Every caller goes through these two, so the lines the operator has set by
@@ -5535,6 +5535,18 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         b.type = "button";
         b.addEventListener("click", (e) => { e.preventDefault(); toggleRaw(Number(sec.dataset.index)); });
         setRawButton(b, false);
+        tools.appendChild(b);
+      }
+      if (p.header != null && PS.pdfPageOf(p)) {
+        // 🩺 Diagnose: PDF-Linker's masked report of this PDF page, or a copy
+        // of it for diagnosis (page diagnostics, below); read off the section
+        // at the click for the same reason.
+        const b = document.createElement("button");
+        b.className = "diag-page";
+        b.type = "button";
+        b.textContent = "🩺 Diagnose";
+        b.title = "Ask PDF-Linker why this page reads as it does: a report of the PDF page's pictures, text layers and OCR decisions, every letter and digit masked so it can be shared — or a copy of the page with chosen lines removed";
+        b.addEventListener("click", (e) => { e.preventDefault(); openDiagPop(Number(sec.dataset.index), b); });
         tools.appendChild(b);
       }
       if (p.header != null) {
@@ -26180,6 +26192,115 @@ async function showSwapPop() {
   $("swap-range").select();
 }
 function hideSwapPop() { swapPop.hidden = true; }
+
+// ── 🩺 Diagnose: a page's report, and a copy of it for diagnosis ──────────────
+//
+// The owner, after three pages in a week each needed a geometry dump read off
+// a copy of the page: "Can we build something directly into PDF+ that would
+// help with these diagnostics?" PDF-Linker answers both through the Re-run
+// button's own link and request file, with a state of its own, and starts no
+// run (textdoc.js, "PAGE DIAGNOSTICS"; PDF-Linker's `_answer_diagnosis`):
+//   Page report — the PDF page's pictures, text layers by font and whether
+//     they are drawn or invisible, PDF-Linker's marks, every OCR decision
+//     with the numbers behind it, what its dedupe kept, and the export's
+//     reading, every letter a or A and every digit 9. Shown here with Copy,
+//     and saved in the case folder (TD.PAGE_REPORT_FILE) for an upload.
+//   Copy page for diagnosis — the page alone, each line holding one of the
+//     pieces typed here blanked across the page in its picture and its text
+//     layers, everything else kept, both OCR layers included (a flattening
+//     redaction throws away the layers the copy is for). Real text, so
+//     PDF-Linker writes it into the do-not-share subfolder.
+const diagPop = $("diag-pop");
+let diagAt = null;        // { index, entry }: the page the pop-up is for
+let diagBusy = false;     // a request is out
+const DIAG_PICKUP_MS = 90000;   // PDF-Linker started by the link, as for Re-run
+const DIAG_WORK_MS = 120000;    // …and a dense page's report written
+/** Open the pop-up for page `i`, beside its label's button `anchor`. */
+function openDiagPop(i, anchor) {
+  if (!doc || !doc.pages[i]) return;
+  const e = pageEntryAt(i);
+  if (!dirHandle) { toast("Open the case folder first: PDF-Linker reads the page from the folder's PDF.", { error: true, ms: 7000 }); return; }
+  if (!e || !e.pdf) { toast("No PDF is matched to this page, so PDF-Linker has nothing to look at — pick one under ⇄ PDF pages… → Pick PDFs….", { error: true, ms: 7000 }); return; }
+  diagAt = { index: i, entry: e };
+  $("diag-pop-where").textContent = `🩺 ${e.pdf}, page ${e.page}`;
+  // What is selected on this page is the likeliest thing to take out of a copy.
+  const s = currentSelection();
+  const picked = s && pageIndexOf(s.body) === i ? String(document.getSelection() || "") : "";
+  if (picked.trim()) $("diag-remove").value = TD.pieceList(picked).join("\n");
+  setDiagOut(null);
+  setDiagNote("");
+  diagPop.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const w = diagPop.offsetWidth, h = diagPop.offsetHeight;
+  diagPop.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, r.right - w)) + "px";
+  diagPop.style.top = Math.max(toolbar.offsetHeight + 4, Math.min(window.innerHeight - h - 4, r.bottom + 6)) + "px";
+}
+function closeDiagPop() { diagPop.hidden = true; }
+function setDiagNote(text, error = false) {
+  const n = $("diag-note");
+  n.textContent = text;
+  n.classList.toggle("error", !!error);
+}
+function setDiagOut(report) {
+  const out = $("diag-out");
+  out.textContent = report || "";
+  out.hidden = !report;
+  $("diag-copy-report").hidden = !report;
+}
+function setDiagBusy(on) {
+  diagBusy = on;
+  for (const id of ["diag-report", "diag-copy"]) $(id).disabled = on;
+}
+/** Ask PDF-Linker for `state` ("report" or "pagecopy") of the pop-up's page, and show its answer. */
+async function diagnosePage(state) {
+  const at = diagAt;
+  const dir = dirHandle;
+  if (!at || !dir || diagBusy) return;
+  if ((await permissionOf(dir, "readwrite")) !== "granted") {
+    let p = "denied";
+    try { p = await dir.requestPermission({ mode: "readwrite" }); } catch { p = "denied"; }
+    if (p !== "granted") { setDiagNote(`The reader may not write into ${dir.name}, so it cannot ask PDF-Linker.`, true); return; }
+    // The question took the click: Chrome opens an outside program only on one.
+    if (navigator.userActivation && !navigator.userActivation.isActive) { setDiagNote("Allowed. Press the button again."); return; }
+  }
+  const launcher = await folderLauncher(dir);
+  if (!launcher) { setDiagNote(`${dir.name} has no Re-run PDF-Linker launcher: PDF-Linker writes one when it runs on the folder.`, true); return; }
+  if (!launcher.token) { setDiagNote(`${launcher.name} in ${dir.name} was written by a PDF-Linker from before the Re-run button. Double-click it once; the run writes it afresh.`, true); return; }
+  const remove = state === "pagecopy" ? TD.pieceList($("diag-remove").value) : [];
+  const nonce = crypto.randomUUID();
+  setDiagBusy(true);
+  setDiagOut(null);
+  try {
+    openLink(TD.rerunUrl(launcher.token, dir.name, nonce));
+    try { await writeDiagnosisRequest(dir, nonce, state, { pdf: at.entry.pdf, page: at.entry.page, remove }); }
+    catch (e) { setDiagNote(`Could not write ${TD.RUN_REQUEST_FILE} into ${dir.name} (${e.message || e}).`, true); return; }
+    setDiagNote("Waiting for PDF-Linker — if Chrome asks whether to open PDF-Linker, say Open.");
+    const { taken, result } = await awaitDiagnosis(dir, nonce, DIAG_PICKUP_MS, DIAG_WORK_MS);
+    if (!taken) { setDiagNote("PDF-Linker did not start. If this computer has not been set up for the Re-run button, double-click Register Reader Button.bat in the PDF-Linker folder once.", true); return; }
+    if (!result) { setDiagNote("PDF-Linker took the request but sent no answer. It may be a version from before page diagnostics: update it and try again.", true); return; }
+    if (!result.ok) { setDiagNote(`PDF-Linker could not: ${result.error || "no reason given"}.`, true); return; }
+    if (state === "report") {
+      setDiagOut(result.report);
+      setDiagNote(`Every letter is a or A and every digit 9, so nothing real is in it.${result.file ? ` Also saved as ${result.file} in ${dir.name}.` : ""}`);
+    } else {
+      const missed = result.missing.length ? ` Not found on the page, so nothing was removed for: ${result.missing.join("; ")}.` : "";
+      const none = remove.length ? "" : " Nothing was listed to remove, so it is the whole page, real text and all.";
+      setDiagNote(`Wrote “${result.file}” into ${result.folder}: ${result.blanked} line${result.blanked === 1 ? "" : "s"} blanked.${missed}${none} Open it and look before you send it.`, !!missed);
+    }
+  } finally {
+    setDiagBusy(false);
+  }
+}
+$("diag-report").addEventListener("click", () => { diagnosePage("report"); });
+$("diag-copy").addEventListener("click", () => { diagnosePage("pagecopy"); });
+$("diag-close").addEventListener("click", closeDiagPop);
+$("diag-copy-report").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("diag-out").textContent); toast("Report copied."); }
+  catch { toast("Could not copy: select the report and press Ctrl+C.", { error: true }); }
+});
+// On the document, not the pop-up: its buttons are disabled while a request is
+// out, which takes the focus out of it.
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !diagPop.hidden) { e.preventDefault(); closeDiagPop(); } });
 function applyRange(on) {
   const src = sourceInView();
   if (!src) { pickPdf(); return; }
