@@ -897,13 +897,13 @@ body.sbs .line.trailer, .tpage.matched .line.trailer { display: none; }
    beside the PDF the PDF's body type at the grid's scale (--body-em). Never
    in a line's own type: a margin two and a half ems of each line's type put
    a line set larger or smaller than the body out of line with the rest. The
-   numbers are set in the page's body type at its full size and in the text's
-   colour, as pleading paper prints them: they were eight tenths of it and
-   grey, smaller than the PDF's and hard to see. */
+   numbers are set in the page's body type, nine tenths of its size, and in
+   the text's colour: eight tenths and grey was hard to see, and the full size
+   "slightly too big". */
 .page-body.numbered { --gutter-em: var(--reader-size-eff, 1em); --gutter-w: calc(2.6 * var(--gutter-em)); }
 .page-body.numbered.fixed { --gutter-em: var(--body-em); }
-.page-body.numbered .gutter { font-size: var(--body-em); color: inherit; padding-right: calc(0.4 * var(--gutter-em)); margin-right: calc(0.88 * var(--gutter-em)); }
-body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
+.page-body.numbered .gutter { font-size: calc(0.9 * var(--body-em)); color: inherit; padding-right: calc(0.4 * var(--gutter-em)); margin-right: calc(0.88 * var(--gutter-em)); }
+body.gutter-off .page-body.numbered .gutter { font-size: calc(0.9 * var(--body-em)); }
 /* A numbered line is never wrapped: its tail would fall on a screen line with
    no number, which read across to the PDF is one line off. It runs past the
    column instead and is CUT at the edge of the paper (.page-inner clips) —
@@ -913,14 +913,16 @@ body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
    unnumbered lines under it, and every slot is padded to the fullest one's rows
    (--slot-rows, on #pages). Off the grid only: there the PDF places them. */
 .tpage:not(.matched) .page-body.numbered:not(.fixed) .line[data-slot] > .lt { white-space: pre; }
-.tpage:not(.matched) .page-body.numbered:not(.fixed) .line[data-slot="end"] {
-  margin-bottom: calc(max(0, var(--slot-rows, 1) - var(--slot-used, 1)) * var(--reader-lh) * 1em);
+/* The padding is shared out under each of the slot's rows, so a lone half
+   line stands midway between its numbers whatever the fullest slot holds. */
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line[data-slot="row"] {
+  margin-bottom: calc(max(0, var(--slot-rows, 1) / var(--slot-used, 1) - 1) * var(--reader-lh) * 1em);
 }
 /* …a row of a ruled box is made taller instead: a gap under it would break the
    box's bars, and the bars stretch to the row's height. */
-.tpage:not(.matched) .page-body.numbered:not(.fixed) .line.rl[data-slot="end"] {
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line.rl[data-slot="row"] {
   margin-bottom: 0;
-  height: calc((1 + max(0, var(--slot-rows, 1) - var(--slot-used, 1))) * var(--reader-lh) * 1em);
+  height: calc(max(1, var(--slot-rows, 1) / var(--slot-used, 1)) * var(--reader-lh) * 1em);
 }
 /* The columns an export lays out with spaces, laid out (columns.js), on a
    grid whose character is the reader font's average one (--col-n, in ems;

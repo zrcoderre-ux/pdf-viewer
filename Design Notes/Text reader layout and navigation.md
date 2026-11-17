@@ -503,9 +503,10 @@ of the next page's and its text 18 px); the PDF's body type at the grid's
 scale beside it. The numbers are set in the page's body type
 (`--body-em`), never a line's own, so a line set larger or smaller keeps its
 number in line. They were eight tenths of it and grey (`#9aa0a6`); the owner
-found them smaller than the PDF's and hard to see, so they are the body
-type's full size in the text's colour, as pleading paper prints them; the
-rule beside them stays grey.
+found them smaller than the PDF's and hard to see, so they were set at the
+body type's full size in the text's colour; then "slightly too big"
+(2026-11-17), so they are nine tenths of it, still in the text's colour
+(`test-margin-pitch.mjs` section 1). The rule beside them stays grey.
 
 **…and a line between two numbers that nothing placed stands on the half
 line** (`pdfsync.betweenTops`, after `offGridTops` in `applyMatchedLayoutNow`;
@@ -548,13 +549,18 @@ its own, so that pair of numbers stood twice as far apart as the rest. The
 owner: a line between the numbers is fine, but the spacing should be
 consistent throughout. `slotLines(body)` (from `dressBody`, and over every
 page in `afterTextChange`) marks each numbered line and the unnumbered lines
-under it, up to the next number, as one slot (`data-slot`, "end" on its last
-line, `--slot-used` its rows); the lines after the last number (a footer) and
-the trailer are in none. `slotRows()` puts the rows of the fullest slot of any
-numbered page on screen on `#pages` as `--slot-rows`, and the CSS pads each
-slot's last line to it (`margin-bottom`, in `--reader-lh` rows), so every
-number of the document stands the same distance from the next: one row, or
-two once any number has a line under it. Lines in a slot do not wrap, as a
+under it, up to the next number, as one slot (`data-slot`: "row" on each line
+that takes a row, "seam" on a box's rule; `--slot-used` the slot's rows, on
+each row); the lines after the last number (a footer) and the trailer are in
+none. `slotRows()` puts the rows of the fullest slot of any numbered page on
+screen on `#pages` as `--slot-rows`, and the CSS pads each slot to it, so
+every number of the document stands the same distance from the next: one
+row, or two once any number has a line under it. The padding is shared
+among the slot's rows (`margin-bottom` of `--slot-rows / --slot-used - 1`
+rows under each), not put under its last line: with one slot of three rows
+anywhere, a lone half line stood a third of the way from its number to the
+next, and the owner asked that it "split the difference more" (2026-11-17,
+`test-margin-pitch.mjs` section 4). Lines in a slot do not wrap, as a
 numbered line does not. A row of a ruled box (`.line.rl`, a table row) is
 made taller instead of given a margin, so its bars stretch and the box stays
 closed (`test-straight-rules.mjs` caught the gap). None of it applies on the grid (`.tpage.matched`,

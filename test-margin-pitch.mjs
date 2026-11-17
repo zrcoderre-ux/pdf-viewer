@@ -2,8 +2,9 @@
 // slotLines, slotRows; text-reader.css `[data-slot]`): a line between two
 // margin numbers is kept, and every number of every numbered page stands the
 // same distance from the next, as a normal page and as a ✓ Use my text page;
-// taking the in-between line out brings every gap back to one row; the
-// numbers are in the text's own size and colour.
+// taking the in-between line out brings every gap back to one row; a lone
+// half line stands midway between its numbers when another slot holds two;
+// the numbers are at nine tenths of the text's size, in its colour.
 //
 // Run: node test-margin-pitch.mjs   (from the repo root)
 //
@@ -106,7 +107,10 @@ L.push("====== Page 2 ======");
 for (let n = 1; n <= 6; n++) L.push(String(n).padStart(2) + (n === 2 ? "  Plain." : ""));
 // …and a box drawn down numbered lines: its bars must still meet.
 L.push("====== Page 3 ======", " 1  Box:", " 2  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2510", " 3  \u2502 Fact \u2502 Okay \u2502", " 4  \u2502 Two  \u2502 Yes  \u2502", " 5  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2518", " 6  After.");
-const A = L.join("\n") + "\n";
+const A0 = L.join("\n") + "\n";
+// A page whose slot 8 has two lines under its number (every slot three rows)
+// and slot 6 one: the lone half line stands midway between 6 and 7.
+const B0 = ["====== Page 1 ======", ...Array.from({ length: 10 }, (_, k) => k + 1).flatMap((n) => [String(n).padStart(2) + "  Line " + n, ...(n === 6 ? ["    a lone half line"] : n === 8 ? ["    a third", "    two thirds"] : [])])].join("\n") + "\n";
 
 let srv = null, browser = null;
 async function openReader(page) {
@@ -114,7 +118,7 @@ async function openReader(page) {
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
   await page.waitForTimeout(800);
 }
-async function newReader() {
+async function newReader(A = A0) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await context.newPage();
   const log = { errors: [] };
@@ -189,10 +193,10 @@ async function run() {
         return { n: rows.length, gaps: out };
       });
       check("the box is drawn, its rows touching (no gap for its bars to break at)", bars, { n: 4, gaps: [0, 0, 0] });
-      check("the margin numbers in the text's own size and colour", await p.evaluate(() => {
+      check("the margin numbers at nine tenths of the text's size, in its colour", await p.evaluate(() => {
         const l = document.querySelector("#pages .page-body > .line.num");
         const g = getComputedStyle(l.querySelector(".gutter")), t = getComputedStyle(l.querySelector(".lt"));
-        return [g.fontSize === t.fontSize, g.color === t.color];
+        return [Math.abs(parseFloat(g.fontSize) / parseFloat(t.fontSize) - 0.9) < 0.01, g.color === t.color];
       }), [true, true]);
       truthy("the line between the numbers is kept", (await p.evaluate(() => document.querySelector("#pages .page-body").textContent)).includes("its second line, between the numbers"));
       console.log("2. …and as a ✓ Use my text page");
@@ -217,6 +221,21 @@ async function run() {
       const g3 = await gaps(p);
       const three = even(g3);
       truthy(`every gap one row (${JSON.stringify(g3)}, row ${row})`, typeof three === "number" && Math.abs(three - row) <= 2);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    console.log("4. a slot of three rows elsewhere: a lone half line still midway between its numbers");
+    {
+      const r = await newReader(B0);
+      const p = r.page;
+      const at = await p.evaluate(() => {
+        const ls = [...document.querySelectorAll("#pages .page-body > .line")];
+        const top = (re) => ls.find((l) => re.test(l.textContent)).getBoundingClientRect().top;
+        return { six: top(/^ 6 /), half: top(/lone half/), seven: top(/^ 7 /), eight: top(/^ 8 /), a: top(/a third/), b: top(/two thirds/), nine: top(/^ 9 /) };
+      });
+      truthy(`the lone half line midway (${JSON.stringify(at)})`, Math.abs(at.half - (at.six + at.seven) / 2) <= 1);
+      truthy("…and two at the thirds", Math.abs(at.a - (2 * at.eight + at.nine) / 3) <= 1 && Math.abs(at.b - (at.eight + 2 * at.nine) / 3) <= 1);
+      truthy("…every number still the same pitch", Math.abs((at.seven - at.six) - (at.nine - at.eight)) <= 1);
       check("no page errors", r.log.errors, []);
       await r.close();
     }
