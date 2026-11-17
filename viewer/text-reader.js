@@ -5816,6 +5816,7 @@ function dressBody(body) {
 // slot in the document is padded to the rows of the fullest one
 // (`--slot-rows` on #pages, slotRows): one number with a line under it, and
 // every number down every numbered page stands two rows from the next. The
+// padding is shared among the slot's rows, so its lines split the pitch evenly. The
 // lines in a slot are not wrapped (a wrapped one would make its slot taller
 // than the rest), as a numbered line is not. The lines after the last number
 // (a footer) are not in a slot. On the grid (`.fixed`) the PDF places the
@@ -5843,12 +5844,17 @@ function slotLines(body) {
   const lines = [...body.querySelectorAll(":scope > .line")];
   let at = -1;
   const close = (end) => {
-    // The slot's room is padded under its last ROW, a rule after it standing
-    // on the seam below the padding (a box's last row is stretched down to it).
-    let used = 0, last = at;
-    for (let k = at; k < end; k++) if (!isSeam(lines[k])) { used++; last = k; }
-    for (let k = at; k < end; k++) lines[k].dataset.slot = k === last ? "end" : "in";
-    lines[last].style.setProperty("--slot-used", String(used));
+    // The slot's room is shared out under each of its ROWS alike, a rule
+    // standing on the seam below the row before it (a box's row is stretched
+    // down to it). Padded under the last row only, a lone half line in a page
+    // whose fullest slot had three rows stood a third of the way from its
+    // number to the next; the owner: "It should split the difference more".
+    let used = 0;
+    for (let k = at; k < end; k++) if (!isSeam(lines[k])) used++;
+    for (let k = at; k < end; k++) {
+      lines[k].dataset.slot = isSeam(lines[k]) ? "seam" : "row";
+      if (!isSeam(lines[k])) lines[k].style.setProperty("--slot-used", String(used));
+    }
     if (used > body.__slotRows) body.__slotRows = used;
   };
   lines.forEach((l, k) => {
