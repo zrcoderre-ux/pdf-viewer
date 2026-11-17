@@ -1,6 +1,8 @@
 // Asking PDF-Linker to run on a case folder from a page: the text reader's
 // "Re-run PDF-Linker" (text-reader.js, rerunLinker) and Home's "Take over" on
-// a run that stopped part-way (pwa/app-web.js, takeOverRun). The link and the
+// a run that stopped part-way (pwa/app-web.js, takeOverRun) — and, through
+// the same link, for a page diagnosis that starts no run (diagnosePage;
+// textdoc.js, "PAGE DIAGNOSTICS"). The link and the
 // request file's format are textdoc.js's (rerunUrl, runRequestText, "THE
 // RE-RUN BUTTON"); this is the part that touches the folder.
 
@@ -54,4 +56,48 @@ export async function awaitPickup(dir, ms, poll = 500) {
   if (taken) return true;
   try { await dir.removeEntry(TD.RUN_REQUEST_FILE); return false; }
   catch (e) { return !!(e && e.name === "NotFoundError"); } // taken at the last moment
+}
+
+/** Write the request file for a page diagnosis (TD.diagnosisRequestText). */
+export async function writeDiagnosisRequest(dir, nonce, state, fields) {
+  const fh = await dir.getFileHandle(TD.RUN_REQUEST_FILE, { create: true });
+  const w = await fh.createWritable();
+  await w.write(TD.diagnosisRequestText(nonce, state, fields));
+  await w.close();
+}
+
+/** PDF-Linker's answer to `nonce` in the folder, taken away once read; null where none is there yet. */
+export async function takeDiagnosis(dir, nonce) {
+  let text;
+  try { text = await (await (await dir.getFileHandle(TD.DIAGNOSIS_RESULT_FILE)).getFile()).text(); }
+  catch { return null; }
+  const res = TD.parseDiagnosisResult(text, nonce);
+  if (res) { try { await dir.removeEntry(TD.DIAGNOSIS_RESULT_FILE); } catch { /* gone already */ } }
+  return res;
+}
+
+/**
+ * Wait for PDF-Linker's answer to a page diagnosis: up to `pickupMs` for it
+ * to take the request file, then up to `workMs` more for the answer. Returns
+ * { taken, result }: taken false where PDF-Linker never came (the request
+ * file is then taken back), result null where it took the request and wrote
+ * no answer in time (a PDF-Linker from before reads the state as "cancel").
+ */
+export async function awaitDiagnosis(dir, nonce, pickupMs, workMs, poll = 500) {
+  const pause = () => new Promise((r) => setTimeout(r, poll));
+  let until = Date.now() + pickupMs;
+  let taken = false;
+  for (;;) {
+    const res = await takeDiagnosis(dir, nonce);
+    if (res) return { taken: true, result: res };
+    if (!taken && (await runRequestTaken(dir))) { taken = true; until = Date.now() + workMs; }
+    if (Date.now() >= until) break;
+    await pause();
+  }
+  if (!taken) {
+    try { await dir.removeEntry(TD.RUN_REQUEST_FILE); }
+    catch (e) { if (e && e.name === "NotFoundError") return { taken: true, result: await takeDiagnosis(dir, nonce) }; }
+    return { taken: false, result: null };
+  }
+  return { taken: true, result: null };
 }

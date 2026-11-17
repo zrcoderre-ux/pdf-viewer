@@ -3835,6 +3835,63 @@ export function runRequestText(nonce, state) {
   return JSON.stringify({ nonce, state }) + "\n";
 }
 
+/**
+ * PAGE DIAGNOSTICS (text-reader.js, `diagnosePage`; PDF-Linker's
+ * `_answer_diagnosis`, 2026-11-17). The owner: "Can we build something
+ * directly into PDF+ that would help with these diagnostics?" The Re-run
+ * button's link and request file, with a state of their own: "report" asks
+ * PDF-Linker for a masked report of one PDF page (its pictures, its text
+ * layers, every OCR decision with its numbers, the export's reading — every
+ * letter a or A, every digit 9, so it can be pasted into a chat), and
+ * "pagecopy" for that page alone with each line holding one of `remove`
+ * blanked and both text layers kept, written into the do-not-share
+ * subfolder. PDF-Linker starts no run for either: it writes
+ * DIAGNOSIS_RESULT_FILE with the same nonce, which the reader reads and takes
+ * away. A PDF-Linker from before reads either state as "cancel", so the
+ * reader hears nothing and says to update it. The states, the fields and the
+ * result's fields change only in step with PDF-Linker.
+ */
+export const DIAGNOSIS_RESULT_FILE = "PDF-Linker Diagnosis.json";
+export const PAGE_REPORT_FILE = "PDF-Linker Page Report.txt";
+export const DIAGNOSIS_STATES = ["report", "pagecopy"];
+/** The request file's text for a page diagnosis: `state` one of DIAGNOSIS_STATES; `remove` (pagecopy) the pieces of text whose lines are blanked. */
+export function diagnosisRequestText(nonce, state, { pdf, page, remove = [] } = {}) {
+  if (!DIAGNOSIS_STATES.includes(state)) throw new Error(`not a diagnosis: ${state}`);
+  const req = { nonce, state, pdf: String(pdf || ""), page: Number(page) || 0 };
+  if (state === "pagecopy") req.remove = pieceList(remove);
+  return JSON.stringify(req) + "\n";
+}
+/** The pieces of text a page copy blanks the lines of: one a line, trimmed, two characters or more, each once. */
+export function pieceList(text) {
+  const all = Array.isArray(text) ? text : String(text == null ? "" : text).split(/\r?\n/);
+  const out = [];
+  for (const t of all) {
+    const v = String(t == null ? "" : t).replace(/\s+/g, " ").trim();
+    if (v.length >= 2 && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+/**
+ * PDF-Linker's answer, read from DIAGNOSIS_RESULT_FILE: null where it is not
+ * the answer to `nonce` (or not an answer at all); else { ok, state, report,
+ * file, folder, blanked, missing, error }.
+ */
+export function parseDiagnosisResult(text, nonce) {
+  let d;
+  try { d = JSON.parse(String(text == null ? "" : text)); } catch { return null; }
+  if (!d || typeof d !== "object" || d.nonce !== nonce || !DIAGNOSIS_STATES.includes(d.state)) return null;
+  return {
+    ok: d.ok === true,
+    state: d.state,
+    report: typeof d.report === "string" ? d.report : "",
+    file: typeof d.file === "string" ? d.file : "",
+    folder: typeof d.folder === "string" ? d.folder : "",
+    blanked: Number(d.blanked) || 0,
+    missing: Array.isArray(d.missing) ? d.missing.map(String) : [],
+    error: typeof d.error === "string" ? d.error : "",
+  };
+}
+
 /** The pseudonym key by name — the macro's pattern plus Windows' copies. */
 /** A document's name as a reader says it: without the export's extension. */
 export function docLabel(name) {

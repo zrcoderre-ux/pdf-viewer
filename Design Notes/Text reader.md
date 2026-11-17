@@ -3754,6 +3754,37 @@ older PDF-Linker records no folder, and the button says to double-click it
 once. Tests: `test-textdoc.mjs` ("launcher folder token", "rerun link"), and
 PDF-Linker's `tests/test_reader_rerun_button.py`.
 
+**🩺 Diagnose a page** (`openDiagPop`, `diagnosePage`; `run-request.js`
+`writeDiagnosisRequest`, `awaitDiagnosis`, `takeDiagnosis`; `textdoc`
+`diagnosisRequestText`, `parseDiagnosisResult`, `pieceList`,
+`DIAGNOSIS_RESULT_FILE`; the owner, 2026-11-17: "Can we build something
+directly into PDF+ that would help with these diagnostics?"). Three pages in
+a week needed their layers read off a copy of the PDF page, each by a script
+written in chat and run by hand, and one copy came back flattened by a
+redaction, its layers gone. A page with a PDF page now carries 🩺 Diagnose in
+its header, opening a pop-up with two requests to PDF-Linker, sent through
+the Re-run button's own `pdf-linker:` link and `RUN_REQUEST_FILE` with a state
+of their own ("report", "pagecopy") and the PDF's name and page
+(`pageEntryAt`), so the link registered on the computer is unchanged and a
+PDF-Linker from before reads the state as "cancel" and answers nothing (the
+pop-up then says to update it). PDF-Linker (`_answer_diagnosis`) starts no
+run: it answers in `DIAGNOSIS_RESULT_FILE` under the request's nonce, which
+the reader reads and takes away (`awaitDiagnosis`: 90 s for the request to
+be taken, as for Re-run, then two minutes for the answer). Page report is
+PDF-Linker's masked account of the page (every letter a/A, every digit 9),
+shown in the pop-up with Copy and saved as `PAGE_REPORT_FILE` in the case
+folder; it is masked, so the clipboard is free to take it. Copy page for
+diagnosis sends the pieces typed in the box (`pieceList`: one a line,
+trimmed, two characters or more, each once; the page's selection fills it
+when the pop-up opens) and PDF-Linker writes that page alone into the
+do-not-share subfolder with each line holding one blanked, naming the pieces
+it did not find. The pieces are real text, in the request file only until
+PDF-Linker takes it. Esc closes the pop-up from anywhere, since its buttons
+are disabled, and lose the focus, while a request is out. Tests:
+`test-textdoc.mjs` ("diagnosis names" to "…nor is a broken file"),
+`test-folder-save.mjs` case 41, and PDF-Linker's
+`tests/test_page_diagnostics.py`.
+
 **A real host is standing only whole** (`pseudo-key.hostRunsOn`, asked in
 `hitsFrom` of a `compileReals` matcher only; 2026-10-30). The owner: "It
 keeps flagging www.courts.ca as a leak inside of www.courts.ca.gov. It

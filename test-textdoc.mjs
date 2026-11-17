@@ -28,6 +28,7 @@ import {
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
   COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage, commentAuthor, commentAuthorRanges,
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
+  diagnosisRequestText, parseDiagnosisResult, pieceList, DIAGNOSIS_RESULT_FILE, PAGE_REPORT_FILE, DIAGNOSIS_STATES,
   captionParens,
   captionEdit,
   STRIKE_MARK, strikeRuns, strikeEdit, unstruck, strikeLayout, markdownLines,
@@ -1002,6 +1003,23 @@ check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
     "pdf-linker://run?f=" + tok + "&d=Okafor%20v.%20Pemberly&n=0f8a2c4e-1b3d-4a5f-9e7c-6d2b8a1c3e5f");
   check("run request", JSON.parse(runRequestText("abc", "go")), { nonce: "abc", state: "go" });
   check("its names", [RUN_REQUEST_FILE, LAUNCHER_STEMS], ["PDF-Linker Run Request.json", ["Re-run PDF-Linker", "Run PDF-Linker"]]);
+  // Page diagnostics: the same link and file, a state of its own (PDF-Linker's
+  // `_answer_diagnosis`, `_DIAGNOSIS_RESULT_FILE`, `_PAGE_REPORT_FILE`).
+  check("diagnosis names", [DIAGNOSIS_RESULT_FILE, PAGE_REPORT_FILE, DIAGNOSIS_STATES],
+    ["PDF-Linker Diagnosis.json", "PDF-Linker Page Report.txt", ["report", "pagecopy"]]);
+  check("report request", JSON.parse(diagnosisRequestText("abc", "report", { pdf: "Motion.pdf", page: "127" })),
+    { nonce: "abc", state: "report", pdf: "Motion.pdf", page: 127 });
+  check("page copy request", JSON.parse(diagnosisRequestText("abc", "pagecopy", { pdf: "Motion.pdf", page: 4, remove: "Quill  Rasho\n x\n\n12 Orrin Lane\nQuill Rasho" })),
+    { nonce: "abc", state: "pagecopy", pdf: "Motion.pdf", page: 4, remove: ["Quill Rasho", "12 Orrin Lane"] });
+  let threw = false;
+  try { diagnosisRequestText("abc", "go", {}); } catch { threw = true; }
+  check("…never a run's state", threw, true);
+  check("pieces from a list", pieceList(["  a b ", "a b", "c"]), ["a b"]);
+  const answer = JSON.stringify({ nonce: "abc", state: "pagecopy", ok: true, file: "Motion page 4 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 2, missing: ["x y"] });
+  check("diagnosis answer", parseDiagnosisResult(answer, "abc"),
+    { ok: true, state: "pagecopy", report: "", file: "Motion page 4 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 2, missing: ["x y"], error: "" });
+  check("…another request's answer is none", parseDiagnosisResult(answer, "abd"), null);
+  check("…nor is a broken file", parseDiagnosisResult("{", "abc"), null);
 }
 // My-Macros' Markdown export: opened as a lone file, never a document of the folder.
 check("markdown by name", ["Draft Order.md", "Draft.MARKDOWN", "Brief.txt", "notes.md.txt"].map(isMarkdownName), [true, true, false, false]);

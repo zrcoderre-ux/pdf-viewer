@@ -669,6 +669,23 @@ app, which routes it to the reader tab.
   double-click `Re-run PDF-Linker` in the folder instead. A launcher written
   by a PDF-Linker from before the button does not say where its folder is, so
   the first time, double-click it yourself; the run writes it afresh.
+- **🩺 Diagnose a page.** When a page reads badly and the PDF looks fine, the
+  page header's **🩺 Diagnose** asks PDF-Linker why, through the same link as
+  Re-run (set up the same way) and without starting a run. **Page report**
+  shows what the PDF page carries and what PDF-Linker decided about it: its
+  pictures and their resolution, each text layer (font, drawn or invisible,
+  size), PDF-Linker's marks on the page, every OCR decision with the numbers
+  behind it, what was dropped as a second reading, and the export's reading.
+  Every letter is shown as a or A and every digit as 9, so nothing real is in
+  it: **Copy report** and paste it into a chat, or upload `PDF-Linker Page
+  Report.txt`, which it also writes into the case folder. Where the words
+  themselves matter, list in the box what must not leave (a name, an address,
+  one a line, as the PDF spells it; what you select on the page before
+  opening it is put there for you) and press **Copy page for diagnosis**:
+  PDF-Linker writes that page alone into the do-not-share subfolder, each line
+  holding one of them blanked across the page and everything else kept, both
+  text layers included. It says which pieces it could not find. Open the copy
+  and look before you send it.
 - **Nothing is saved over what a run changed.** When you come back to the
   window, or open an export, the reader looks at the case folder's key and
   LEAKS.xlsx; where a PDF-Linker run (or Excel) has changed them since the

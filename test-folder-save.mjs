@@ -2690,6 +2690,70 @@ test(40, "a decided name the save cannot write: Save says so, and Re-run PDF-Lin
   } finally { await r.close(); }
 });
 
+// ── 41. 🩺 Diagnose: a page report and a page copy, asked of PDF-Linker ─────
+// The owner: "Can we build something directly into PDF+ that would help with
+// these diagnostics?" The test plays PDF-Linker's part (`_answer_diagnosis`):
+// the request is read, taken away, and answered in PDF-Linker Diagnosis.json.
+test(41, "🩺 Diagnose: the page's report asked for through the Re-run link, shown and copied; a page copy names the pieces to take out", async () => {
+  const TOKEN = "QzpcQ2FzZXNcQ2FzZSBIYXJuZXNz";
+  const bat = "@echo off\r\nREM PDF-Linker re-run - double-click\r\nREM Folder, for the text reader's Re-run button: " + TOKEN + "\r\nstart \"x\" /min x\r\nexit /b\r\n";
+  const r = await newReader();
+  try {
+    await writeFolder(r.page, { root: { ...ROOT, "Re-run PDF-Linker.bat": bat, "A Complaint.pdf": "%PDF-1.4 stand-in" } });
+    await setReel(r.page, false);
+    await adopt(r.page);
+    await openDoc(r.page, "A Complaint.txt");
+    await r.page.evaluate(() => {
+      window.__links = [];
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { if (/^pdf-linker:/.test(this.href)) { window.__links.push(this.href); return; } return click.call(this); };
+    });
+    const buttons = await r.page.evaluate(() => document.querySelectorAll(".tpage .page-label .diag-page").length);
+    truthy("each page with a PDF page has 🩺 Diagnose", buttons > 0, String(buttons));
+    // PDF-Linker's part: take the request, answer it.
+    const answer = (fn) => r.page.evaluate(async (src) => {
+      const fn = eval(src);
+      for (let t0 = Date.now(); Date.now() - t0 < 15000; await new Promise((res) => setTimeout(res, 100))) {
+        let q = null;
+        try { q = JSON.parse(await (await (await window.__case.getFileHandle("PDF-Linker Run Request.json")).getFile()).text()); } catch { continue; }
+        await window.__case.removeEntry("PDF-Linker Run Request.json");
+        const w = await (await window.__case.getFileHandle("PDF-Linker Diagnosis.json", { create: true })).createWritable();
+        await w.write(JSON.stringify(fn(q)));
+        await w.close();
+        return q;
+      }
+      return null;
+    }, fn.toString());
+    await r.page.click(".tpage .page-label .diag-page");
+    check("the pop-up opens on the page's PDF page", await r.page.evaluate(() => [!document.getElementById("diag-pop").hidden, document.getElementById("diag-pop-where").textContent]), [true, "🩺 A Complaint.pdf, page 1"]);
+    await r.page.click("#diag-report");
+    const q1 = await answer((q) => ({ nonce: q.nonce, state: q.state, ok: true, report: "PDF-Linker page report\n   Aaaa aa 99", file: "PDF-Linker Page Report.txt" }));
+    const [link] = await r.page.evaluate(() => window.__links.slice());
+    const m = /^pdf-linker:\/\/run\?f=([A-Za-z0-9_-]+)&d=Case%20Harness&n=([0-9a-f-]{36})$/.exec(link || "");
+    check("the request: report, the PDF and its page, under the link's nonce", q1, { nonce: m ? m[2] : "?", state: "report", pdf: "A Complaint.pdf", page: 1 });
+    await r.page.waitForFunction(() => !document.getElementById("diag-out").hidden, null, { timeout: 10000 }).catch(() => {});
+    check("the report is shown", await r.page.evaluate(() => document.getElementById("diag-out").textContent), "PDF-Linker page report\n   Aaaa aa 99");
+    truthy("…with where it is saved", /Also saved as PDF-Linker Page Report\.txt in Case Harness/.test(await r.page.evaluate(() => document.getElementById("diag-note").textContent)));
+    check("…and the answer taken away", await r.page.evaluate(async () => { try { await window.__case.getFileHandle("PDF-Linker Diagnosis.json"); return true; } catch { return false; } }), false);
+    // A page copy: the pieces typed, one a line.
+    await r.page.fill("#diag-remove", "Corwin Ashdale\n12 Orrin Lane\n");
+    await r.page.click("#diag-copy");
+    const q2 = await answer((q) => ({ nonce: q.nonce, state: q.state, ok: true, file: "A Complaint page 1 for diagnosis.pdf", folder: "Original Text (real names - do not share)", blanked: 1, missing: ["12 Orrin Lane"] }));
+    check("the request: pagecopy, with the pieces", q2 && [q2.state, q2.pdf, q2.page, q2.remove], ["pagecopy", "A Complaint.pdf", 1, ["Corwin Ashdale", "12 Orrin Lane"]]);
+    await r.page.waitForFunction(() => /Wrote/.test(document.getElementById("diag-note").textContent), null, { timeout: 10000 }).catch(() => {});
+    const note = await r.page.evaluate(() => document.getElementById("diag-note").textContent);
+    truthy("…the copy named, and what was not found", /Wrote “A Complaint page 1 for diagnosis\.pdf” into Original Text \(real names - do not share\): 1 line blanked\. Not found on the page, so nothing was removed for: 12 Orrin Lane\./.test(note), note);
+    // PDF-Linker refuses: its reason is said.
+    await r.page.click("#diag-report");
+    await answer((q) => ({ nonce: q.nonce, state: q.state, ok: false, error: "page 1 is not in a PDF of 0 page(s)" }));
+    await r.page.waitForFunction(() => /could not/.test(document.getElementById("diag-note").textContent), null, { timeout: 10000 }).catch(() => {});
+    check("a refusal is said", await r.page.evaluate(() => document.getElementById("diag-note").textContent), "PDF-Linker could not: page 1 is not in a PDF of 0 page(s).");
+    await r.page.keyboard.press("Escape");
+    check("Esc closes it", await r.page.evaluate(() => document.getElementById("diag-pop").hidden), true);
+    check("no Leave site? in front of the link", r.log.dialogs.filter((d) => d.type === "beforeunload"), []);
+  } finally { await r.close(); }
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 srv = await startServer();
 try {

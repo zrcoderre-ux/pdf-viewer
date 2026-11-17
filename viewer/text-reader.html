@@ -507,6 +507,16 @@
     <div class="sp-actions"><button id="pdf-pick" class="secondary" title="Choose the PDF by hand — for a combined file, select every member's PDF at once and each is matched to its document">Pick PDFs…</button><button id="swap-close" class="secondary">Close</button></div>
     <p class="sp-note" id="swap-pop-note"></p>
   </div>
+  <div id="diag-pop" hidden role="dialog" aria-label="Diagnose this page">
+    <div class="dg-head"><b id="diag-pop-where"></b></div>
+    <div class="dg-actions"><button id="diag-report" class="primary" title="PDF-Linker reports on this PDF page: its pictures, its text layers, its marks, every OCR decision with the numbers behind it and the export's reading — every letter and digit masked, so it can be pasted into a chat">Page report</button></div>
+    <label class="dg-label" for="diag-remove">Copy the page for diagnosis, with each line holding one of these removed — one a line, as the PDF has it:</label>
+    <textarea id="diag-remove" rows="3" spellcheck="false" placeholder="e.g. a name, a street address"></textarea>
+    <div class="dg-actions"><button id="diag-copy" title="PDF-Linker writes this page alone into the do-not-share subfolder, each line holding a piece above blanked across the page and everything else kept, both text layers included">Copy page for diagnosis</button></div>
+    <pre id="diag-out" hidden></pre>
+    <p class="dg-note" id="diag-note"></p>
+    <div class="dg-actions end"><button id="diag-copy-report" hidden>Copy report</button><button id="diag-close" class="secondary" title="Close (Esc)">Close</button></div>
+  </div>
   <div id="pn-tip" hidden></div>
   <div id="type-tip" hidden></div>
   <div id="toast" hidden></div>
