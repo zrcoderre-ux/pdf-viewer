@@ -486,6 +486,8 @@ export function dateNote(text) {
 // only the fill changed, so a date stays a date and a link keeps its look.
 
 const RED_FILL = '<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/><bgColor indexed="64"/></patternFill></fill>';
+// Excel's standard Light Green.
+const GREEN_FILL = '<fill><patternFill patternType="solid"><fgColor rgb="FF92D050"/><bgColor indexed="64"/></patternFill></fill>';
 
 /** The <fill> entries of a styles.xml, raw, with what each means (markOfColor). */
 function fillsOf(xml, theme) {
@@ -514,15 +516,16 @@ function setAttr(tag, name, value) {
 }
 
 /**
- * The workbook with hearing `hg`'s row marked `mark` ("off": filled red;
- * "": its red taken off), as new bytes. The row is found afresh in `data`
- * (the file as it stands now, which Excel may have changed): at `hg.row` of
- * `hg.sheet` where its case name still stands there, else the row of that
- * sheet holding the same case name and date; none, and it throws.
- * Off fills the Date, Motion Type, Case Name and Date Submitted cells and any
- * other cell of the row already marked, with the red the sheet's own off rows
- * use where it has one; On takes the off fills off every cell of the row and
- * off the row's own style, and leaves any other fill (a yellow highlight) be.
+ * The workbook with hearing `hg`'s row marked `mark` ("done": its Motion Type
+ * and Case Name cells filled green; "off": the same two filled red; "": both
+ * marks taken off), as new bytes. The row is found afresh in `data` (the file
+ * as it stands now, which Excel may have changed): at `hg.row` of `hg.sheet`
+ * where its case name still stands there, else the row of that sheet holding
+ * the same case name and date; none, and it throws. The fill is the one the
+ * sheet's own rows so marked use, where it has one, else a plain red or
+ * light green. Marking one way takes the other mark off every cell of the
+ * row and off the row's own style; "" takes both off; any other fill (a
+ * yellow highlight on the Date cell) is left be.
  */
 export async function markHearing(data, hg, mark) {
   if (data && typeof data.arrayBuffer === "function" && !(data instanceof Uint8Array)) data = new Uint8Array(await data.arrayBuffer());
@@ -544,31 +547,44 @@ export async function markHearing(data, hg, mark) {
     const m = /\sfillId="(\d+)"/.exec(xfs[s] || "");
     return m && fills[+m[1]] ? fills[+m[1]].mark : "";
   };
-  // The red: the one the sheet's own off rows use, else a plain red added once.
-  let redId = fills.findIndex((f) => f.mark === "off");
+  // The red and the green: the ones the sheet's own marked rows use, else a
+  // plain one added once.
   const added = { fills: [], xfs: [] };
-  if (mark === "off" && redId < 0) { redId = fills.length; added.fills.push(RED_FILL); }
-  // One new style per old one, reused where an identical one stands.
+  const fillFor = (which) => {
+    let id = fills.findIndex((f) => f.mark === which);
+    if (id < 0) {
+      const raw = which === "off" ? RED_FILL : GREEN_FILL;
+      const k = added.fills.indexOf(raw);
+      id = fills.length + (k < 0 ? added.fills.push(raw) - 1 : k);
+    }
+    return id;
+  };
+  // One new style per old one and fill, reused where an identical one stands.
   const memo = new Map();
-  const styleFor = (s) => {
-    if (memo.has(s)) return memo.get(s);
+  const styleFor = (s, which) => {
+    const key = s + "|" + which;
+    if (memo.has(key)) return memo.get(key);
     const base = xfs[s] || xfs[0] || '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>';
-    const want = withFill(base, mark === "off" ? redId : 0);
+    const want = withFill(base, which ? fillFor(which) : 0);
     let at = xfs.indexOf(want);
     if (at < 0) {
       let k = added.xfs.indexOf(want);
       if (k < 0) { k = added.xfs.length; added.xfs.push(want); }
       at = xfs.length + k;
     }
-    memo.set(s, at);
+    memo.set(key, at);
     return at;
   };
-  const cols = [target.cols.date, target.cols.motion, target.cols.caseName, target.cols.submitted].filter((c) => c >= 0);
+  // The owner (2026-11-18): Done "turning the hearing type and case name cells
+  // green", and Off calendar "should turn only those cells red". Marking takes
+  // the other mark off the rest of the row; "" takes both off it.
+  const cols = [target.cols.motion, target.cols.caseName].filter((c) => c >= 0);
+  const clear = mark === "" ? ["off", "done"] : [mark === "off" ? "done" : "off"];
   const nextSheet = restyleRow(sheetXml, target.row, (col, s) => {
     const marked = markOfXf(s);
-    if (mark === "off") return cols.includes(col) || marked ? (marked === "off" ? null : styleFor(s)) : null;
-    return marked === "off" ? styleFor(s) : null;
-  }, mark === "off" ? cols : [], (s) => (mark === "" && markOfXf(s) === "off" ? styleFor(s) : null));
+    if (mark && cols.includes(col)) return marked === mark ? null : styleFor(s, mark);
+    return clear.includes(marked) ? styleFor(s, "") : null;
+  }, mark ? cols : [], (s) => (clear.includes(markOfXf(s)) ? styleFor(s, "") : null));
   if (added.fills.length) {
     styles = styles.replace(/<fills\b([^>]*)>([\s\S]*?)<\/fills>/, (all, a, body) =>
       `${setAttr(`<fills${a}>`, "count", fills.length + added.fills.length)}${body}${added.fills.join("")}</fills>`);

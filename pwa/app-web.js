@@ -192,6 +192,7 @@ function closeTab(id) {
     else { activeId = null; syncShellTitle(); }
   }
   updateChrome();
+  if (caseWindow && !tabs.length) window.close();
 }
 
 function makeTabButton(id, initialLabel, text = false) {
@@ -509,17 +510,19 @@ const isExport = (name) => /\.txt(\.leak)?$/i.test(name)
   && !/^(ETA|DONE) .*\.txt$/i.test(name);
 const isCombined = (name) => /^combined text\.txt$/i.test(name);
 
-async function pickCaseFolder() {
+async function pickCaseFolder(opts = {}) {
   if (!window.showDirectoryPicker) { alert("This browser cannot open a folder. Open the text files instead."); return; }
   let dir;
   try { dir = await showPicker("showDirectoryPicker", { mode: "readwrite" }); }
   catch (e) { if (e && e.name !== "AbortError") alert(String(e.message || e)); return; }
-  await openCaseFolder(dir);
+  await openCaseFolder(dir, opts);
 }
 
 /** The case folder `dir` in one reader tab, as the pick above opens it; a
- *  tab already reading it is brought to the front instead. */
-async function openCaseFolder(dir) {
+ *  tab already reading it is brought to the front instead. `inWindow`: in a
+ *  window of its own (Home's, below), where the browser lets one open. */
+async function openCaseFolder(dir, { inWindow = false } = {}) {
+  if (inWindow && (await focusCaseWindow(dir))) return;
   for (const t of tabs) {
     if (!t.text) continue;
     let held = t.dir;
@@ -558,18 +561,57 @@ async function openCaseFolder(dir) {
   let file;
   try { file = await first.getFile(); }
   catch (e) { alert("Could not open " + first.name + ": " + (e.message || e)); return; }
+  if (inWindow && openCaseWindow(dir, { label: first.name, file, handle: first, text: true, dir, page: 0, caseFolder: true })) { rememberFolder(dir); return; }
   newTab({ initialLabel: first.name, file, handle: first, text: true, dir, focus: true, caseFolder: true });
   rememberFolder(dir);
 }
+
+// A CASE IN A WINDOW OF ITS OWN (the owner, 2026-11-18: "Now that it is acting
+// as a hub, it should open in a new tab when I open a case folder"; asked
+// which, "Its own window"). A case folder opened from Home (a row, or Open a
+// case folder) opens in a new window of the app through the same handoff a
+// tab moved to a window takes ("Separate windows"), so Home stays on screen
+// here. The window remembers it holds a case, and closes once its last tab
+// does. A second click on a case whose window still reads it brings that
+// window to the front. Where the browser blocks the window (a popup opened
+// after a dialog), the case opens in a tab here, as before.
+const caseWindows = []; // [{ win, name }]
+function openCaseWindow(dir, item) {
+  const token = openWindow({ items: Promise.resolve([item]), quiet: true });
+  if (!token) return false;
+  const h = handoffs.get(token);
+  caseWindows.push({ win: h.win, name: dir.name });
+  return true;
+}
+/** Bring forward a window of this app that reads `dir`; whether there was one. */
+async function focusCaseWindow(dir) {
+  for (let i = caseWindows.length - 1; i >= 0; i--) {
+    const cw = caseWindows[i];
+    if (!cw.win || cw.win.closed) { caseWindows.splice(i, 1); continue; }
+    if (cw.name !== dir.name) continue;
+    let held = [];
+    try { held = (cw.win.__shellCaseDirs && cw.win.__shellCaseDirs()) || []; } catch { held = []; }
+    for (const d of held) {
+      try { if (d && (await d.isSameEntry(dir))) { cw.win.focus(); return true; } } catch { /* gone */ }
+    }
+  }
+  return false;
+}
+// What another window of the app asks to know: the case folders this one's readers hold.
+Object.defineProperty(window, "__shellCaseDirs", {
+  value: () => tabs.filter((t) => t.text).map((t) => {
+    try { return t.iframe.contentWindow.__textReaderSource?.()?.dir || t.dir; } catch { return t.dir; }
+  }).filter(Boolean),
+});
 
 newTabBtn.addEventListener("click", () => pickFiles());
 document.getElementById("open-file")?.addEventListener("click", () => pickFiles());
 document.getElementById("combine-files")?.addEventListener("click", combineFiles);
 document.getElementById("images-to-pdf")?.addEventListener("click", imagesToPdf);
 const caseBtn = document.getElementById("open-case");
-if (caseBtn) caseBtn.addEventListener("click", (e) => { e.stopPropagation(); pickCaseFolder(); });
+if (caseBtn) caseBtn.addEventListener("click", (e) => { e.stopPropagation(); pickCaseFolder({ inWindow: true }); });
 const caseBtn2 = document.getElementById("open-case-tab");
-if (caseBtn2) caseBtn2.addEventListener("click", pickCaseFolder);
+if (caseBtn2) caseBtn2.addEventListener("click", () => pickCaseFolder());
 fileInput.addEventListener("change", () => {
   for (const f of fileInput.files) openLocalFile(f);
   fileInput.value = "";
@@ -652,7 +694,7 @@ function newWindowKey(e) {
 /** Open another window of the app, the size of this one. `items`, a promise
  *  of documents, makes it a move; `at` is its top left corner on the screen
  *  (a step down and right of this window, as a browser cascades its own). */
-function openWindow({ items = null, at = null } = {}) {
+function openWindow({ items = null, at = null, quiet = false } = {}) {
   const url = new URL("index.html", location.href);
   let token = null;
   if (items) {
@@ -663,10 +705,10 @@ function openWindow({ items = null, at = null } = {}) {
   const top = Math.round(at ? at.y : window.screenY + 32);
   const win = window.open(url.href, "_blank", `popup,width=${window.innerWidth},height=${window.innerHeight},left=${left},top=${top}`);
   if (!win) {
-    shellToast("The new window was blocked. Allow pop-ups for this app, then try again.", 6000);
+    if (!quiet) shellToast("The new window was blocked. Allow pop-ups for this app, then try again.", 6000);
     return null;
   }
-  if (token) handoffs.set(token, { items, ids: [], timer: 0 });
+  if (token) handoffs.set(token, { items, ids: [], timer: 0, win });
   return token;
 }
 
@@ -792,6 +834,8 @@ window.addEventListener("message", (e) => {
 
 // This window was opened to take documents from another one.
 const arrival = new URLSearchParams(location.search).get(WINDOW_PARAM);
+// A window opened for a case from Home's hub: it closes with its last tab.
+let caseWindow = false;
 if (arrival) {
   // A reload is a fresh window at Home, not a second helping of the documents.
   history.replaceState(null, "", location.pathname + location.hash);
@@ -804,9 +848,10 @@ if (arrival) {
       // Nothing came: the window it came from says why. An empty window
       // left behind would be one more to close.
       if (!items.length) { window.close(); return; }
+      if (items.some((it) => it.caseFolder)) caseWindow = true;
       items.forEach((it, i) => newTab({
         initialLabel: it.label || (it.file && it.file.name), file: it.file, handle: it.handle,
-        text: it.text, dir: it.dir, page: it.page, focus: i === 0,
+        text: it.text, dir: it.dir, page: it.page, focus: i === 0, caseFolder: !!it.caseFolder,
       }));
       from.postMessage({ type: "pdfviewer:took", token: arrival }, location.origin);
     });
@@ -1385,12 +1430,13 @@ async function renderCaseFoldersNow() {
     const pill = b.querySelector(".ci-status");
     pill.textContent = st.text;
     pill.classList.add("tone-" + st.tone);
+    if (!r.locked) compactStatus(pill, "f:" + r.name);
     b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "")
       + (sheet.state !== "none" ? `\nNo hearing on the list matched it (case numbers it carries: ${listingNumbers(r.listing).concat(hearingLib.caseNumbersIn(r.name)).filter((x, i, a) => a.indexOf(x) === i).join(", ") || "none"}).` : "");
     b.addEventListener("click", async () => {
       // Asked first, while the click still counts as one: a reader saves into the folder.
       if (!(await permitted(r.handle, "readwrite", true))) return;
-      try { await openCaseFolder(r.handle); }
+      try { await openCaseFolder(r.handle, { inWindow: true }); }
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
@@ -1413,6 +1459,29 @@ function iconise(b, name, label, extra = "") {
   b.setAttribute("aria-label", label);
   if (!b.title) b.title = label;
   return b;
+}
+
+/**
+ * PDF-Linker's status as a dot (the owner, 2026-11-18: "The finished time
+ * takes up too much space. It should be much smaller and expand to give that
+ * detail when pressed"): its tone's colour, pulsing for a run going; a press
+ * opens it to its words and a second closes it. Its press is its own, so it
+ * opens nothing else; which are open is kept across redraws.
+ */
+const statusOpen = new Set();
+function compactStatus(pill, key) {
+  pill.classList.add("compact");
+  pill.classList.toggle("expanded", statusOpen.has(key));
+  pill.setAttribute("role", "button");
+  pill.setAttribute("aria-expanded", statusOpen.has(key) ? "true" : "false");
+  pill.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const on = !pill.classList.contains("expanded");
+    pill.classList.toggle("expanded", on);
+    pill.setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) statusOpen.add(key); else statusOpen.delete(key);
+  });
 }
 
 /**
@@ -1469,7 +1538,7 @@ const HEARING_ROWS_MAX = 40;
 const DOWNLOADS_INDEX_MS = 60000; // Downloads' own names are read again this often
 let hearingLib = null;
 let sheetSeen = null;   // { key, hearings, sheets, readAt }
-let hearingsAll = false; // "Show done and off"
+let hearingsAll = false; // "Show off calendar"
 let hearingsShown = "";
 let downloadsIndexSeen = null; // { at, name, places }
 
@@ -1574,7 +1643,7 @@ async function writeEdits(h) {
     }
   } finally { editsBusy = false; }
 }
-async function setHearingMark(hg, mark) {
+async function setHearingMark(hg, mark, what = mark === "off" ? "off calendar" : mark === "done" ? "done" : "on calendar") {
   const h = await sheetHandle();
   if (!h) return;
   // Asked first, while the click still counts as one (PDF+ grants it).
@@ -1585,18 +1654,29 @@ async function setHearingMark(hg, mark) {
   edits.push({ sheet: hg.sheet, row: hg.row, caseName: hg.caseName, date: hg.date, mark });
   await editsSave();
   await writeEdits(h);
-  const what = mark === "off" ? "off calendar" : "on calendar";
   shellToast(edits.length
     ? `${hg.caseName} is marked ${what} here. ${h.name} looks open in Excel, so it is written as soon as Excel closes it.`
     : `${hg.caseName} marked ${what} in ${h.name}.`, 6000);
   hearingsShown = "";
   renderCaseFolders();
 }
+/** Done (the owner: "a button for me to indicate that I am done"): its Motion Type and Case Name cells green in the sheet; pressed again, Not done. */
+function doneButton(hg) {
+  const b = document.createElement("button");
+  b.className = "ci-done";
+  const done = hg.mark === "done";
+  b.classList.toggle("on", done);
+  b.setAttribute("aria-pressed", done ? "true" : "false");
+  b.title = done ? `Not done: take the green off ${hg.caseName}'s Motion Type and Case Name cells in the sheet` : `Done: fill ${hg.caseName}'s Motion Type and Case Name cells green in the sheet`;
+  iconise(b, "check", done ? "Not done" : "Done");
+  b.addEventListener("click", (e) => { e.stopPropagation(); setHearingMark(hg, done ? "" : "done", done ? "not done" : "done"); });
+  return b;
+}
 function calendarButton(hg) {
   const b = document.createElement("button");
   b.className = "ci-cal";
   const off = hg.mark !== "off";
-  b.title = off ? `Off calendar: fill ${hg.caseName}'s row red in the sheet` : `On calendar: take the red off ${hg.caseName}'s row in the sheet`;
+  b.title = off ? `Off calendar: fill ${hg.caseName}'s Motion Type and Case Name cells red in the sheet` : `On calendar: take the red off ${hg.caseName}'s row in the sheet`;
   iconise(b, off ? "calendar-x" : "calendar-check", off ? "Off calendar" : "On calendar");
   b.addEventListener("click", (e) => { e.stopPropagation(); setHearingMark(hg, off ? "off" : ""); });
   return b;
@@ -1674,7 +1754,7 @@ function openEcourt(hg) {
  * the set of rows on a hearing's row.
  */
 async function hearingItems(rows, sheet, dl, dlState, now) {
-  const empty = { items: [], all: [], open: [], downloaded: 0, matched: new Set() };
+  const empty = { items: [], all: [], open: [], shownAll: [], downloaded: 0, matched: new Set() };
   if (!sheet.hearings.length) return empty;
   // Where each case may stand: the folders listed (opened here, today's in
   // Downloads), then everything else in Downloads, by name.
@@ -1693,7 +1773,11 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
   }
   const all = hearingLib.upcoming(sheet.hearings, now, { all: true });
   const open = all.filter((h) => !h.mark);
-  const list = (hearingsAll ? all : open).slice(0, HEARING_ROWS_MAX);
+  // A hearing marked done stays listed, with its ✓, until it has passed (the
+  // owner: "There should be a checkmark next to it on the home screen
+  // indicating it is done"); one off calendar only with Show off calendar.
+  const shownAll = hearingsAll ? all : all.filter((h) => h.mark !== "off");
+  const list = shownAll.slice(0, HEARING_ROWS_MAX);
   const items = [];
   const owner = new Map();
   for (const hg of list) {
@@ -1712,7 +1796,7 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
     items.push(item);
   }
   const downloaded = open.filter((h) => { const p = hearingLib.findPlace(h, places); return p && (p.kind === "folder" || p.kind === "opened"); }).length;
-  return { items, all, open, downloaded, matched: new Set(owner.keys()) };
+  return { items, all, open, shownAll, downloaded, matched: new Set(owner.keys()) };
 }
 
 const LOCKED_STATUS = { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" };
@@ -1723,7 +1807,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const sumEl = document.getElementById("hearings-summary");
   if (!section || !listEl) return;
   section.hidden = false;
-  const { items, all, open, downloaded } = hv;
+  const { items, all, open, shownAll, downloaded } = hv;
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
     (hearingEdits || []).length, editsError ? 1 : 0,
@@ -1740,18 +1824,21 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     : sheet.state === "locked" ? `The browser wants your leave to read ${sheet.name} again`
       : `Read from ${sheet.name}${sheet.sheets && sheet.sheets.length ? " (" + sheet.sheets.join(", ") + ")" : ""}. Saved in Excel, it is read again on the next look.`;
   const allBtn = document.getElementById("hearings-all");
-  const marked = all.length - open.length;
-  allBtn.hidden = !marked;
-  allBtn.textContent = hearingsAll ? "Hide done and off" : `Show done and off (${marked})`;
+  const offCount = all.filter((h) => h.mark === "off").length;
+  const doneCount = all.filter((h) => h.mark === "done").length;
+  const marked = offCount;
+  allBtn.hidden = !offCount;
+  allBtn.textContent = hearingsAll ? "Hide off calendar" : `Show off calendar (${offCount})`;
 
   const notDl = open.length - downloaded;
-  sumEl.hidden = !open.length;
+  sumEl.hidden = !open.length && !doneCount;
   sumEl.textContent = "";
-  if (open.length) {
+  if (open.length || doneCount) {
     const add = (text, cls) => { const s = document.createElement("span"); s.textContent = text; if (cls) s.className = cls; sumEl.appendChild(s); };
     add(`${open.length} to work up`);
     add(`${downloaded} downloaded`, "hs-ok");
     if (notDl) add(`${notDl} not downloaded`, "hs-warn");
+    if (doneCount) add(`${doneCount} done`, "hs-ok");
     if (dlState !== "ok") add(dlState === "none" ? "Downloads not linked: only folders opened here are matched" : "Allow Downloads to match the folders in it", "hs-note");
   }
   const waiting = (hearingEdits || []).length;
@@ -1775,7 +1862,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     listEl.appendChild(p);
   }
   if (sheet.state === "ok" && !sheet.sheets.length) return empty(`No sheet in ${sheet.name} has a header row with Date and Case Name columns.`);
-  if (!items.length) { if (sheet.state === "ok") empty(marked ? "Every upcoming hearing is marked done or off calendar." : "No hearings from today on in the sheet."); return; }
+  if (!items.length) { if (sheet.state === "ok") empty(marked ? "Every upcoming hearing is off calendar." : "No hearings from today on in the sheet."); return; }
 
   let lastDay = null;
   for (const { hg, place, r, controls } of items) {
@@ -1798,6 +1885,14 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     b.className = "recent-item case-item hearing-item" + (folder ? " has-folder" : "");
     b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 18 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
     b.querySelector(".ri-name").textContent = hg.caseName;
+    if (hg.mark === "done") {
+      const tick = document.createElement("span");
+      tick.className = "ci-done-mark";
+      tick.innerHTML = icon("check", { size: 15, stroke: 2.5 });
+      tick.title = "Done: marked green in the sheet";
+      tick.setAttribute("aria-label", "Done");
+      b.querySelector(".ci-name-line").prepend(tick);
+    }
     let noteEl = null;
     if (hg.note) {
       // The note opens under the row; the * sits inside the row's button, so
@@ -1831,12 +1926,12 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (st && st.sub) where.push(st.sub);
     b.querySelector(".ci-where").textContent = where.join(" · ");
     const pill = b.querySelector(".ci-status");
-    const said = hg.mark === "done" ? { text: "Done", tone: "ok", title: "Marked green in the sheet: done." }
-      : hg.mark === "off" ? { text: "Off calendar", tone: "off", title: "Marked red in the sheet: off calendar, or nothing to work up." }
+    const said = hg.mark === "off" ? { text: "Off calendar", tone: "off", title: "Marked red in the sheet: off calendar, or nothing to work up." }
         : st || hearingLib.placeText(place);
     pill.textContent = said.text;
     pill.classList.add("tone-" + said.tone);
     if (hg.waiting) pill.classList.add("waiting");
+    if (st && said === st && !r.locked) compactStatus(pill, "f:" + r.name);
     const placeSaid = hearingLib.placeText(place);
     b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : hearingLib.isWebLink(hg.url) ? "Not downloaded: open the case in eCourt." : "Not downloaded.")
       + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`
@@ -1844,7 +1939,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     b.addEventListener("click", async () => {
       if (folder) {
         if (!(await permitted(folder, "readwrite", true))) return;
-        try { await openCaseFolder(folder); }
+        try { await openCaseFolder(folder, { inWindow: true }); }
         catch { shellToast(`“${place.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
       } else if (hearingLib.isWebLink(hg.url)) openEcourt(hg);
       else shellToast(place ? placeSaid.title : "No case folder for this case, and no eCourt link on its row in the sheet.", 5000);
@@ -1853,7 +1948,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (r && !r.locked) caseDraggable(row, r);
     // The folder's own buttons, on the first hearing of its case only.
     if (controls) for (const x of folderControls(r, line)) row.appendChild(x);
-    if (sheet.state === "ok" || sheet.state === "error") row.appendChild(calendarButton(hg));
+    if (sheet.state === "ok" || sheet.state === "error") { row.appendChild(doneButton(hg)); row.appendChild(calendarButton(hg)); }
     if (hearingLib.isWebLink(hg.url)) row.appendChild(ecourtButton(hg));
     else {
       // Its place kept, so the eCourt buttons stand in one column.
@@ -1865,7 +1960,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     listEl.appendChild(row);
     if (noteEl) listEl.appendChild(noteEl);
   }
-  if ((hearingsAll ? all : open).length > HEARING_ROWS_MAX) empty(`And ${(hearingsAll ? all : open).length - HEARING_ROWS_MAX} more in the sheet.`);
+  if (shownAll.length > HEARING_ROWS_MAX) empty(`And ${shownAll.length - HEARING_ROWS_MAX} more in the sheet.`);
 }
 
 document.getElementById("hearings-link")?.addEventListener("click", async () => {
@@ -2015,7 +2110,7 @@ async function renderTreeNow(dl, dlState, underDrag = false) {
   if (!nodes.length) {
     const p = document.createElement("p");
     p.className = "tree-empty";
-    p.textContent = "Add the folders you file cases into with +, then drag a case onto one to move it there.";
+    p.textContent = "Add the folders you file cases into with + Add, or drop several here from File Explorer; then drag a case onto one to move it there.";
     box.appendChild(p);
     return;
   }
@@ -2222,17 +2317,75 @@ async function retargetLauncher(dir, n, name) {
   } catch { return "unknown"; }
 }
 
+/** Put folders on the folders list (each once): { added: [names], already: [names] }. */
+async function addTreeRoots(handles) {
+  const roots = await treeRoots();
+  const added = [], already = [];
+  for (const h of handles) {
+    let dup = false;
+    for (const x of roots) { try { if (await x.isSameEntry(h)) { dup = true; break; } } catch { /* gone */ } }
+    if (dup) { already.push(h.name); continue; }
+    roots.push(h);
+    added.push(h.name);
+  }
+  if (added.length) {
+    await saveTreeRoots();
+    treeIndexSeen = null; treeShown = ""; hearingsShown = "";
+    renderCaseFolders();
+  }
+  return { added, already };
+}
+const namesSaid = (names) => (names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`);
+
 document.getElementById("tree-add")?.addEventListener("click", async () => {
   let h;
   try { h = await showPicker("showDirectoryPicker", { id: "tree", mode: "readwrite" }); }
   catch (e) { if (e && e.name !== "AbortError") shellToast(String(e.message || e), 5000); return; }
-  const roots = await treeRoots();
-  for (const x of roots) { try { if (await x.isSameEntry(h)) { shellToast(`${h.name} is on the list already.`, 4000); return; } } catch { /* gone */ } }
-  roots.push(h);
-  await saveTreeRoots();
-  treeIndexSeen = null; treeShown = ""; hearingsShown = "";
-  renderCaseFolders();
+  const { added } = await addTreeRoots([h]);
+  if (!added.length) shellToast(`${h.name} is on the list already.`, 4000);
 });
+
+// SEVERAL FOLDERS AT ONCE (the owner, 2026-11-18: "Can you make it so that I
+// can select multiple folders to add at once? I can't add my entire OneDrive
+// folder, because it holds system files, but each of individual folders I
+// have are inside of it"). The folder dialog picks one folder, and Chrome
+// refuses one holding system folders; but folders dropped on a page come as
+// handles (DataTransferItem.getAsFileSystemHandle), as many as were dragged.
+// So the folders selected in File Explorer are dropped on the list. The
+// handles are asked for at once, in the drop itself, as the API wants; files
+// among them are left out.
+{
+  const panel = document.getElementById("folder-tree");
+  const isOsDrop = (e) => !caseDrag && e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+  panel?.addEventListener("dragover", (e) => {
+    if (!isOsDrop(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    panel.classList.add("drop-folders");
+  });
+  panel?.addEventListener("dragleave", (e) => { if (!panel.contains(e.relatedTarget)) panel.classList.remove("drop-folders"); });
+  panel?.addEventListener("drop", async (e) => {
+    if (!isOsDrop(e)) return;
+    e.preventDefault();
+    e.stopPropagation(); // not opened as files by the shell's own drop
+    panel.classList.remove("drop-folders");
+    document.body.classList.remove("dragging");
+    const asks = [...e.dataTransfer.items].filter((it) => it.kind === "file" && typeof it.getAsFileSystemHandle === "function").map((it) => it.getAsFileSystemHandle());
+    if (!asks.length) { shellToast("This browser does not hand dropped folders to a page: add them one at a time with + Add.", 6000); return; }
+    const got = (await Promise.allSettled(asks)).map((x) => (x.status === "fulfilled" ? x.value : null));
+    const dirs = got.filter((h) => h && h.kind === "directory");
+    const files = got.filter((h) => h && h.kind === "file").length;
+    const refused = got.filter((h) => !h).length;
+    const { added, already } = await addTreeRoots(dirs);
+    const said = [];
+    if (added.length) said.push(`Added ${added.length} folder${added.length === 1 ? "" : "s"}: ${namesSaid(added)}`);
+    if (already.length) said.push(`${namesSaid(already)} ${already.length === 1 ? "was" : "were"} on the list already`);
+    if (files) said.push(`${files} file${files === 1 ? "" : "s"} left out (only folders go on the list)`);
+    if (refused) said.push(`${refused} the browser would not hand over (a folder holding system files)`);
+    shellToast(said.join(". ") + ".", 7000);
+  });
+}
 
 // ---- Home: open the case folder's Word documents ------------------------------
 //
@@ -2650,6 +2803,23 @@ document.getElementById("case-clear")?.addEventListener("click", async () => {
   try { await foldersTx("folders", "readwrite", (s) => { for (const k of forget) s.delete(k); }); } catch { /* ok */ }
   renderCaseFolders();
 });
+// Every window of the app hears what a reader in any of them says of its
+// folder: a case opened from Home reads in a window of its own, and Home,
+// in the hub's window, says the re-run started and the folder opened.
+let shellChannel = null;
+try { shellChannel = new BroadcastChannel("pdfplus-shell"); } catch { shellChannel = null; }
+function relay(msg) { try { shellChannel && shellChannel.postMessage(msg); } catch { /* not cloneable here: this window's own Home has it */ } }
+shellChannel?.addEventListener("message", async (e) => {
+  const d = e.data || {};
+  if (d.type === "run" && d.dir && d.dir.kind === "directory") {
+    for (let i = runsStarted.length - 1; i >= 0; i--) {
+      try { if (runsStarted[i].name === d.dir.name && (await runsStarted[i].handle.isSameEntry(d.dir))) runsStarted.splice(i, 1); } catch { /* gone */ }
+    }
+    runsStarted.push({ handle: d.dir, name: d.dir.name, at: d.at || Date.now(), how: d.how || "rerun" });
+  }
+  if ((d.type === "run" || d.type === "folder") && !dropzone.hidden) renderCaseFolders();
+});
+
 // A reader's Re-run PDF-Linker has started the run (text-reader.js,
 // rerunLinker): said on Home at once, ahead of the ETA marker PDF-Linker
 // writes once it is under way.
@@ -2661,14 +2831,16 @@ window.addEventListener("message", async (e) => {
   for (let i = runsStarted.length - 1; i >= 0; i--) {
     try { if (runsStarted[i].name === dir.name && (await runsStarted[i].handle.isSameEntry(dir))) runsStarted.splice(i, 1); } catch { /* gone */ }
   }
-  runsStarted.push({ handle: dir, name: dir.name, at: Date.now(), how: "rerun" });
+  const at = Date.now();
+  runsStarted.push({ handle: dir, name: dir.name, at, how: "rerun" });
+  relay({ type: "run", dir, at, how: "rerun" });
   if (!dropzone.hidden) renderCaseFolders();
 });
 // A reader tab says which case folder it attached, however it came to it.
 window.addEventListener("message", (e) => {
   if (e.origin !== location.origin || !e.data || e.data.type !== "textreader:folder") return;
   if (!tabs.some((t) => t.text && t.iframe.contentWindow === e.source)) return;
-  rememberFolder(e.data.dir);
+  rememberFolder(e.data.dir).then(() => relay({ type: "folder" }));
 });
 
 // The theme follows the viewer's toggle (same-origin storage events).

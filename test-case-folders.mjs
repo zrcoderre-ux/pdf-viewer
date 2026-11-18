@@ -317,31 +317,36 @@ async function browserPart() {
     check("…both found in Downloads today", got.map((r) => r.where), ["In Downloads today", "In Downloads today"]);
     check("the link now changes Downloads", await shell.textContent("#case-downloads"), "Change Downloads folder…");
 
-    console.log("7. a click opens the whole folder in one reader");
-    await shell.click("#case-list .case-row:nth-child(2) .case-item");
-    await shell.waitForFunction(() => document.querySelectorAll("iframe.tab-view").length === 1, null, { timeout: 15000 });
-    const reader = await (async () => { for (let k = 0; k < 100; k++) { const fr = shell.frames().find((x) => x.url().endsWith("/viewer/text-reader.html")); if (fr) return fr; await shell.waitForTimeout(100); } return null; })();
+    console.log("7. a click opens the whole folder in one reader, in a window of its own");
+    // The owner: Home is a hub, so a case opens in its own window and Home stays.
+    const [caseWin] = await Promise.all([app.waitForEvent("page", { timeout: 15000 }), shell.click("#case-list .case-row:nth-child(2) .case-item")]);
+    await caseWin.waitForFunction(() => document.querySelectorAll("iframe.tab-view").length === 1, null, { timeout: 15000 });
+    const reader = await (async () => { for (let k = 0; k < 100; k++) { const fr = caseWin.frames().find((x) => x.url().endsWith("/viewer/text-reader.html")); if (fr) return fr; await caseWin.waitForTimeout(100); } return null; })();
     await reader.waitForFunction(() => { const s = window.__textReaderSource && window.__textReaderSource(); return !!(s && s.dir && s.handle); }, null, { timeout: 20000 });
     check("the reader holds the case folder", await reader.evaluate(() => window.__textReaderSource().dir.name), "Case Beta");
     check("…open at its first export", await reader.evaluate(() => window.__textReaderSource().handle.name), "Decl Ashdale.txt");
+    check("…Home still on screen here, no tab opened in its window", [await shell.evaluate(() => document.getElementById("dropzone").hidden), await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length)], [false, 0]);
 
     console.log("8. back at Home: the folder opened is one row, as both");
-    await shell.click("#home-tab");
     await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item .ci-where")].some((e) => e.textContent.includes("Opened")), null, { timeout: 10000 });
     got = await rows();
     check("still two rows", got.length, 2);
     check("…Case Beta in Downloads today and opened here", got.find((r) => r.name === "Case Beta").where.startsWith("In Downloads today · Opened "), true);
     check("…and the Clear for opened folders is offered", await shell.isVisible("#case-clear"), true);
 
-    console.log("9. a click on a folder already open goes to its tab");
+    console.log("9. a click on a folder already open brings its window forward");
+    let second = null;
+    const onPage = (p) => { second = p; };
+    app.on("page", onPage);
     await shell.click("#case-list .case-item:has-text('Case Beta')");
     await shell.waitForTimeout(800);
-    check("no second reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 1);
-    check("…its tab in front", await shell.evaluate(() => document.getElementById("dropzone").hidden), true);
+    app.off("page", onPage);
+    check("no second window", second, null);
+    check("…and no second reader", await caseWin.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 1);
 
     console.log("9b. Re-run PDF-Linker started: Home says so before the ETA is written");
+    // The reader's shell is the case's window; Home, in this one, hears it all the same.
     await reader.evaluate(() => window.parent.postMessage({ type: "textreader:run", dir: window.__textReaderSource().dir }, location.origin));
-    await shell.click("#home-tab");
     await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].some((b) => b.textContent.includes("Case Beta") && b.querySelector(".ci-status").textContent.startsWith("Re-run started")), null, { timeout: 10000 });
     got = await rows();
     check("Case Beta: started, listed with the runs going", [got.find((r) => r.name === "Case Beta").status, got.findIndex((r) => r.name === "Case Beta") < 2], ["Re-run started — waiting for its ETA", true]);
@@ -359,6 +364,11 @@ async function browserPart() {
       await beta.removeEntry("ETA (estimating...).txt");
       const w = await (await beta.getFileHandle("DONE 3.20PM.txt", { create: true })).createWritable(); await w.close();
     });
+
+    console.log("9c. the case's window closes with its last tab");
+    caseWin.on("dialog", (d) => d.accept().catch(() => {}));
+    await Promise.all([caseWin.waitForEvent("close", { timeout: 10000 }), caseWin.click(".tab .tab-close")]);
+    check("closed", caseWin.isClosed(), true);
 
     console.log("10. the run ends: the row says so on the next look");
     if (await shell.evaluate(() => document.getElementById("dropzone").hidden)) await shell.click("#home-tab");

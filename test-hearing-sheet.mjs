@@ -18,8 +18,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeZip } from "./viewer/zip.js";
+import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
-  readHearings, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
+  readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
   hyperlinkOfFormula, dateNote, namesMatch, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
 } from "./viewer/hearing-sheet.js";
 
@@ -137,7 +138,21 @@ check("row 10: a note naming a date keeps it", [h(10).note, h(10).date], ["Conti
 check("a plain date is no note", [h(3).note, h(7).note], ["", ""]);
 check("dates in words are no note", ["Fri, Nov 20, 2026", "November 20th", "11/20", "TBD", "Check POS 11/20"].map(dateNote), ["", "", "", "TBD", "Check POS 11/20"]);
 
-console.log("4b. Off calendar and On calendar, written into the sheet");
+console.log("4b. Done, Off calendar and On calendar, written into the sheet");
+/** Each cell's mark in a row of sheet 1, by column letter: { A: "done" | "off" | "", … }. */
+async function cellMarks(b, rowN) {
+  const u8 = b instanceof Uint8Array ? b : new Uint8Array(await b.arrayBuffer());
+  const ents = zipEntries(u8);
+  const part = async (n) => readEntry(u8, ents.find((e) => e.name === n));
+  const st = parseStyles(await part("xl/styles.xml"));
+  const row = new RegExp(`<row r="${rowN}"[^>]*>([\\s\\S]*?)</row>`).exec(await part("xl/worksheets/sheet1.xml"))[1];
+  const out = {};
+  for (const m of row.matchAll(/<c r="([A-Z]+)\d+"(?:[^>]*?\ss="(\d+)")?/g)) {
+    const f = st[Number(m[2] || 0)] && st[Number(m[2] || 0)].fill;
+    out[m[1]] = f ? markOfColor(f.hex, f.tint) : "";
+  }
+  return out;
+}
 const after = async (b) => (await readHearings(b, NOW)).hearings;
 const at = (list, row) => list.find((x) => x.row === row);
 const offBytes = await markHearing(bytes, h(3), "off");
@@ -153,6 +168,14 @@ list = await after(await markHearing(bytes, h(6), ""));
 check("On calendar on a row marked red by hand", at(list, 6).mark, "");
 list = await after(await markHearing(bytes, h(4), "off"));
 check("Off calendar over a green row", at(list, 4).mark, "off");
+// The owner: Done turns "the hearing type and case name cells green"; Off calendar "only those cells red".
+check("Off calendar: the Motion Type and Case Name cells only", await cellMarks(offBytes, 3), { A: "", B: "off", C: "off" });
+const doneBytes = await markHearing(bytes, h(3), "done");
+check("Done: the Motion Type and Case Name cells green, and only they", await cellMarks(doneBytes, 3), { A: "", B: "done", C: "done" });
+check("…the row reads as done, its date still a date", [at(await after(doneBytes), 3).mark, at(await after(doneBytes), 3).date], ["done", h(3).date]);
+check("Done over Off calendar: green where it was red", await cellMarks(await markHearing(offBytes, h(3), "done"), 3), { A: "", B: "done", C: "done" });
+check("Not done: the green off again", await cellMarks(await markHearing(doneBytes, h(3), ""), 3), { A: "", B: "", C: "" });
+check("Off calendar over a row green by hand: the green elsewhere in the row taken off", await cellMarks(await markHearing(bytes, h(4), "off"), 4), { B: "off", C: "off", D: "" });
 list = await after(await markHearing(bytes, h(8), "off"));
 check("Off calendar on a row with a yellow highlight", at(list, 8).mark, "off");
 const yellowBack = await after(await markHearing(await markHearing(bytes, h(8), "off"), h(8), ""));
@@ -345,30 +368,41 @@ async function browserPart() {
       window.open = (url) => { window.__opened.push(url); return null; };
       window.dispatchEvent(new Event("focus"));
     }, { sheetBytes });
-    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 4, null, { timeout: 10000 });
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 5, null, { timeout: 10000 });
     const rows = () => shell.$$eval("#hearing-list .hearing-item", (bs) => bs.map((b) => ({
       name: b.querySelector(".ri-name").textContent, where: b.querySelector(".ci-where").textContent, status: b.querySelector(".ci-status").textContent,
     })));
     let got = await rows();
-    check("the unmarked hearings from today on, by date", got.map((r) => r.name.slice(0, 11)), ["25STCV12345", "24STCV00777", "26STCV09999", "22STCV05555"]);
+    check("the hearings from today on, by date, the one off calendar left out", got.map((r) => r.name.slice(0, 11)), ["25STCV12345", "24STCV00777", "26STCV09999", "23STCV04444", "22STCV05555"]);
     check("a case downloaded says what PDF-Linker has done in it; the rest where the case stands", got.map((r) => r.status.replace(/^Finished .*/, "Finished")),
-      ["Finished", "Not downloaded", "Not run yet", "Zip in Downloads"]);
+      ["Finished", "Not downloaded", "Not run yet", "Not run yet", "Zip in Downloads"]);
+    check("the one done carries a ✓, and only it", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => !!r.querySelector(".ci-done-mark"))), [false, false, false, true, false]);
+    check("…its Done button pressed", await shell.$$eval("#hearing-list .ci-done", (bs) => bs.map((b) => b.getAttribute("aria-pressed"))), ["false", "false", "false", "true", "false"]);
     check("…an Order Template Input sheet three days old is no sign of Doe v. Globex", got[1].status, "Not downloaded");
     check("…a folder in Downloads, by its name", got[0].where, "Demurrer · 25STCV12345 ACME");
     check("…a folder opened elsewhere, by its Register of Actions", got[2].where, "Motion to Compel · Initech compel");
     check("grouped under their days", await shell.$$eval("#hearing-list .hearing-day", (d) => d.length), 3);
-    check("the summary", await shell.textContent("#hearings-summary"), "4 to work up2 downloaded2 not downloaded");
+    check("the summary", await shell.textContent("#hearings-summary"), "4 to work up2 downloaded2 not downloaded1 done");
+    // The owner: "The finished time takes up too much space ... expand to give that detail when pressed".
+    const acmePill = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE")) .ci-status');
+    check("PDF-Linker's status is a dot; where the case stands keeps its words", await shell.$$eval("#hearing-list .ci-status", (ps) => ps.map((p) => p.classList.contains("compact"))), [true, false, true, true, false]);
+    check("…the dot is small", (await acmePill.boundingBox()).width <= 24, true);
+    await acmePill.click();
+    check("a press opens it to its words", [await acmePill.evaluate((p) => p.classList.contains("expanded")), (await acmePill.boundingBox()).width > 60], [true, true]);
+    check("…and opens nothing else", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 0);
+    await acmePill.click();
+    check("a second press closes it", await acmePill.evaluate((p) => p.classList.contains("expanded")), false);
     const buttons = () => shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => ({
       ecourt: !!r.querySelector(".ci-ecourt:not(.ci-ecourt-gap)"), line: !!r.querySelector(".ci-line"),
     })));
     check("the eCourt buttons stand where the sheet links the case; Prioritize where the case is downloaded", await buttons(),
-      [{ ecourt: true, line: true }, { ecourt: true, line: false }, { ecourt: true, line: true }, { ecourt: false, line: false }]);
+      [{ ecourt: true, line: true }, { ecourt: true, line: false }, { ecourt: true, line: true }, { ecourt: false, line: true }, { ecourt: false, line: false }]);
 
     console.log("9. Case folders: only the folders no hearing on the list claims, above the hearings");
     const caseNames = () => shell.$$eval("#case-list .case-item .ri-name", (x) => x.map((e) => e.textContent).sort());
     await shell.waitForFunction(() => !document.getElementById("case-folders").hidden && document.querySelectorAll("#case-list .case-item").length === 1, null, { timeout: 10000 });
     // The owner: "cases that are done and off don't need to be shown in the Case Folders rows".
-    check("Case Zeta only: the folder whose hearing is marked done is not listed", await caseNames(), ["Case Zeta"]);
+    check("Case Zeta only: the folder whose hearing is done is on that hearing's row", await caseNames(), ["Case Zeta"]);
     check("the list stands above the hearings", await shell.evaluate(() => !!(document.getElementById("case-folders").compareDocumentPosition(document.getElementById("hearings")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
     check("the Downloads link is in the Hearings heading", await shell.evaluate(() => !!document.querySelector("#hearings #case-downloads")), true);
 
@@ -385,15 +419,15 @@ async function browserPart() {
       return JSON.parse(await f.text()).rank;
     }), 1);
 
-    console.log("11. Show done and off");
-    check("the button counts them", await shell.textContent("#hearings-all"), "Show done and off (2)");
+    console.log("11. Show off calendar");
+    check("the button counts them", await shell.textContent("#hearings-all"), "Show off calendar (1)");
     await shell.click("#hearings-all");
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 6, null, { timeout: 10000 });
     got = await rows();
-    check("green says Done, red Off calendar", got.filter((r) => /Done|Off/.test(r.status)).map((r) => r.status), ["Done", "Off calendar"]);
-    check("…set apart", await shell.$$eval("#hearing-list .hearing-row.mark-done, #hearing-list .hearing-row.mark-off", (x) => x.length), 2);
+    check("red says Off calendar", got.filter((r) => /Off/.test(r.status)).map((r) => r.status), ["Off calendar"]);
+    check("…set apart", await shell.$$eval("#hearing-list .hearing-row.mark-off", (x) => x.length), 1);
     await shell.waitForFunction(() => document.querySelectorAll("#case-list .case-item").length === 1, null, { timeout: 10000 });
-    check("the done hearing's folder moves onto its row", await caseNames(), ["Case Zeta"]);
+    check("the Case folders list unchanged", await caseNames(), ["Case Zeta"]);
 
     console.log("12. every folder on a hearing: no Case folders list");
     await shell.evaluate(async () => {
@@ -440,6 +474,21 @@ async function browserPart() {
     await shell.waitForFunction(() => !/waiting to be written/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 10000 });
     check("once Excel lets go, the next look writes it: the red is off", (await sheetNow()).mark, "");
 
+    console.log("14b. Done: a ✓ here, the Motion Type and Case Name cells green in the sheet");
+    const vanceRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("22STCV05555 Vance v. Stark"))');
+    const vanceNow = async () => {
+      const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
+      return (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName.startsWith("22STCV05555"));
+    };
+    check("the row offers Done", await vanceRow.locator(".ci-done").getAttribute("aria-label"), "Done");
+    await vanceRow.locator(".ci-done").click();
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("22STCV05555") && r.querySelector(".ci-done-mark")), null, { timeout: 10000 });
+    check("…a ✓ before its name, and it stays listed", [await vanceRow.locator(".ci-done-mark").count(), await vanceRow.locator(".ci-done").getAttribute("aria-pressed")], [1, "true"]);
+    check("…the sheet's row reads as done", (await vanceNow()).mark, "done");
+    await vanceRow.locator(".ci-done").click();
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("22STCV05555") && !r.querySelector(".ci-done-mark")), null, { timeout: 10000 });
+    check("pressed again: not done, here and in the sheet", [await vanceRow.locator(".ci-done-mark").count(), (await vanceNow()).mark], [0, ""]);
+
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);
     await shell.evaluate(async () => {
@@ -479,6 +528,25 @@ async function browserPart() {
     check("…with its status and its buttons", [/^Finished /.test(await acmeRow.locator(".ci-status").textContent()), await acmeRow.locator(".ci-line").count()], [true, 1]);
     check("…and the case folder shows in the list, closed", await shell.$$eval("#tree-list .tree-node.leaf .tree-name", (x) => x.map((e) => e.textContent)), ["25STCV12345 ACME"]);
     await shell.click("#move-bar .mb-cancel");
+
+    console.log("15b. several folders at once, dropped from File Explorer");
+    // A drop from the computer hands its folders as handles; the test hands
+    // the same through a stand-in for the browser's DataTransfer.
+    await shell.evaluate(async () => {
+      const top = await navigator.storage.getDirectory();
+      const mk = async (n) => { try { await top.removeEntry(n, { recursive: true }); } catch { /* none */ } return top.getDirectoryHandle(n, { create: true }); };
+      const a = await mk("Judge A"), b = await mk("Judge B");
+      const filed = await top.getDirectoryHandle("Filed");
+      const file = await top.getFileHandle("Hearings.xlsx");
+      const item = (h) => ({ kind: "file", getAsFileSystemHandle: async () => h });
+      const ev = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "dataTransfer", { value: { types: ["Files"], items: [item(a), item(b), item(filed), item(file)], files: [] } });
+      document.getElementById("folder-tree").dispatchEvent(ev);
+    });
+    await shell.waitForFunction(() => document.querySelectorAll("#tree-list .tree-node.root").length === 4, null, { timeout: 10000 });
+    check("each folder dropped is on the list, once", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads", "Filed", "Judge A", "Judge B"]);
+    check("…and it says so", await shell.textContent("#shell-toast"), "Added 2 folders: Judge A, Judge B. Filed was on the list already. 1 file left out (only folders go on the list).");
+    check("…no tab opened for the file dropped with them", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 0);
 
     console.log("16. a move refused while a run goes in the folder");
     await shell.evaluate(async () => {

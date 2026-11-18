@@ -246,6 +246,8 @@ body.home-open .tab-view.active { display: none; }
 .home-tree .recent-head h2 { font-size: 12px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--c-text-3); margin: 0 0 8px; }
 .tree-list { border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card); padding: 4px 0; }
 .tree-empty { margin: 0; padding: 10px 12px; color: var(--c-text-3); font-size: 12.5px; }
+.tree-hint { margin: 6px 2px 0; color: var(--c-text-3); font-size: 11.5px; }
+.home-tree.drop-folders .tree-list { outline: 2px dashed var(--c-accent); outline-offset: 2px; background: var(--c-accent-soft); }
 .tree-node { display: flex; align-items: center; gap: 4px; padding: 4px 8px 4px calc(8px + var(--depth, 0) * 16px); font-size: 13px; cursor: pointer; user-select: none; border-radius: 6px; margin: 0 4px; }
 .tree-node:hover { background: var(--c-card-hover); }
 .tree-node.root { font-weight: 600; }
@@ -397,7 +399,14 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .case-item .ci-status.tone-ok { color: #16a34a; background: rgba(34, 197, 94, 0.12); }
 .case-item .ci-status.tone-warn { color: #d97706; background: rgba(234, 179, 8, 0.14); }
 @keyframes case-pulse { 50% { opacity: 0.3; } }
-@media (prefers-reduced-motion: reduce) { .case-item .ci-status.tone-run::before { animation: none; } }
+/* PDF-Linker's status as a dot, opened to its words on a press (compactStatus). */
+.case-item .ci-status.compact { cursor: pointer; }
+.case-item .ci-status.compact:not(.expanded) { box-sizing: content-box; width: 9px; height: 9px; max-width: none; padding: 0; border: 7px solid transparent; border-radius: 50%; background: currentColor; background-clip: content-box; font-size: 0; margin-right: 2px; }
+.case-item .ci-status.compact:not(.expanded)::before { display: none; }
+.case-item .ci-status.compact.tone-idle:not(.expanded) { color: var(--c-text-3); opacity: 0.7; }
+.case-item .ci-status.compact.tone-run:not(.expanded) { animation: case-pulse 1.4s ease-in-out infinite; }
+.case-item .ci-status.compact:not(.expanded):hover { box-shadow: 0 0 0 3px var(--c-accent-soft) inset; }
+@media (prefers-reduced-motion: reduce) { .case-item .ci-status.tone-run::before, .case-item .ci-status.compact.tone-run { animation: none; } }
 .case-empty { margin: 0; padding: 12px 14px; color: var(--c-text-3); font-size: 12.5px; }
 /* Home's Hearings list (app-web.js, "Home: hearings"). */
 .ci-ecourt { flex: none; margin-right: 14px; padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 999px; background: transparent; color: var(--c-text-3); font-size: 12px; cursor: pointer; white-space: nowrap; }
@@ -419,8 +428,13 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .hearing-day { padding: 7px 14px 5px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c-text-3); background: var(--c-accent-soft); border-bottom: 1px solid var(--c-border); }
 .hearing-item .ri-icon { color: var(--c-accent); }
 .hearing-item.has-folder .ri-icon { color: #eab308; }
-.hearing-row.mark-done, .hearing-row.mark-off { opacity: 0.6; }
-.hearing-row.mark-done .ri-name, .hearing-row.mark-off .ri-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+.hearing-row.mark-off { opacity: 0.6; }
+.hearing-row.mark-off .ri-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+.ci-done-mark { flex: none; display: inline-flex; align-self: center; margin-right: 4px; color: #16a34a; }
+.ci-done { flex: none; margin-right: 8px; border: 1px solid var(--c-border); background: transparent; color: var(--c-text-3); cursor: pointer; opacity: 0.55; }
+.case-row:hover .ci-done, .ci-done:focus-visible, .ci-done.on { opacity: 1; }
+.ci-done:hover, .ci-done:focus-visible { background: rgba(34, 197, 94, 0.12); color: #16a34a; border-color: rgba(22, 163, 74, 0.6); }
+.ci-done.on { background: rgba(34, 197, 94, 0.16); color: #16a34a; border-color: rgba(22, 163, 74, 0.6); }
 .case-item .ci-status.tone-off { color: #dc2626; background: rgba(239, 68, 68, 0.12); }
 .hearings-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -4px 0 10px; font-size: 12.5px; color: var(--c-text-3); }
 .hearings-summary .hs-ok { color: #16a34a; }

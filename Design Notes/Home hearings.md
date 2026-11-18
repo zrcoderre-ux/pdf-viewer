@@ -259,5 +259,39 @@ room".
 - **Width.** Home's column beside the Folders list is no longer held to 760px
   (`.home-layout` up to 1340px), so the case name has the row.
 
+## Done, two cells, a ✓; the status as a dot; several folders at once (2026-11-18)
+
+- **Done.** The owner: "Add a button for me to indicate that I am done
+  (turning the hearing type and case name cells green in the excel sheet (the
+  off calendar should turn only those cells red.) There should be a checkmark
+  next to it on the home screen indicating it is done." Each hearing row has
+  **Done** (`doneButton`, a ✓; pressed again, **Not done**). `markHearing`
+  now takes "done", "off" or "": done fills the Motion Type and Case Name
+  cells green (the sheet's own green where it has one, else Excel's Light
+  Green, 92D050), off fills those same two red, and either takes the other
+  mark off the rest of the row and the row's own style; "" takes both off.
+  The Date and Date Submitted cells are no longer coloured. A done hearing now
+  STAYS listed, with a green ✓ before its name (`ci-done-mark`), until it has
+  passed, and its pill says the folder's status as for any other; only one off
+  calendar is set aside, behind **Show off calendar** (was Show done and off).
+  The summary counts the done. Its folder is on its row, so Case folders never
+  lists it.
+- **The status as a dot.** The owner: "The finished time takes up too much
+  space. It should be much smaller and expand to give that detail when
+  pressed." PDF-Linker's status, on a hearing row and in Case folders, is a dot
+  in its tone's colour (pulsing for a run going; `compactStatus`), opened to
+  its words on a press and closed on a second, kept open across redraws
+  (`statusOpen`). Where the case stands (Not downloaded, Zip in Downloads),
+  Off calendar and Click to allow keep their words: they are what the row is
+  read for.
+- **Several folders at once.** The owner: "Can you make it so that I can
+  select multiple folders to add at once? I can't add my entire OneDrive
+  folder, because it holds system files." The folder dialog picks one folder,
+  and Chrome refuses one holding system folders, but folders dropped on a page
+  come as handles (`DataTransferItem.getAsFileSystemHandle`, asked for in the
+  drop itself). So the folders selected in File Explorer are dropped on the
+  Folders list (`addTreeRoots`): each added once, files and refused ones left
+  out and said, and the shell's own file drop stands aside there.
+
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

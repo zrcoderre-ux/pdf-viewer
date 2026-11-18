@@ -23,16 +23,21 @@ Fill a row (or its case name cell) **green** when it is done, and **red** when
 it is off calendar or you otherwise don't have to work on it. Those rows drop
 out of the list. **Show done and off** brings them back, struck through.
 
-## Off calendar and On calendar
+## Done, Off calendar and On calendar
 
-Each hearing has an **Off calendar** button. It fills the row red in your
-sheet, just as you would by hand, and the hearing leaves the list. With **Show
-done and off**, a red row has **On calendar**, which takes the red off.
+Each hearing has a **✓ Done** button. It fills the hearing's **Motion Type**
+and **Case Name** cells green in your sheet, and a green ✓ appears before the
+case name on Home. A done hearing stays on the list until its date has passed.
+Press ✓ again (Not done) to take the green off.
 
-If the workbook is open in Excel, Windows won't let anything else write to
-it. Home still shows the change, says it is waiting, and writes it into the
-sheet as soon as Excel closes the workbook. It doesn't overwrite what you saved
-in the meantime.
+**Off calendar** fills the same two cells red, and the hearing leaves the list.
+**Show off calendar** brings those back, with **On calendar** to take the red
+off.
+
+If the workbook is open in Excel, Windows won't let anything else write to it.
+Home still shows the change, says it is waiting, and writes it into the sheet
+as soon as Excel closes the workbook. It doesn't overwrite what you saved in
+the meantime.
 
 ## Notes
 
@@ -52,7 +57,9 @@ folders opened in the app, the hearing row *is* that folder:
 - The folder's buttons are on the row: **Word**, **Log to share**,
   **Prioritize** (or its place in PDF-Linker's line with ▲ ▼ ✕) and **Take
   over** when a run stopped part-way.
-- Click the row to open the folder in one reader.
+- Click the row to open the folder in one reader, in a window of its own, so
+  Home stays where it is. Clicking it again brings that window forward, and the
+  window closes when you close its last tab.
 
 Otherwise the pill says **Zip in Downloads** (not extracted yet) or **Not
 downloaded**; click the row, or **eCourt**, to open the case in eCourt.
@@ -69,7 +76,11 @@ number for the surest match.
 
 The buttons on a row are icons; hover one for its name. From left to right:
 Word (open the folder's Word documents), Log to share, Prioritize (PDF-Linker's
-line), Off calendar or On calendar, and eCourt.
+line), Done, Off calendar or On calendar, and eCourt.
+
+PDF-Linker's status is a small dot: green finished, amber something to answer
+or a run that looks stopped, blue (pulsing) running, grey not run yet. Click
+the dot to read it in full ("Finished 2:40 PM"), and again to close it.
 
 ## Case folders not on the hearings list
 
@@ -83,7 +94,8 @@ is on a hearing, the list is not shown. **Link Downloads…** is in the Hearings
 ## Folders: moving a case into a folder
 
 The **Folders** list on the left of Home shows Downloads and the folders you
-add with **+ Add** (the folders you file cases into). Click a folder to open
+add with **+ Add** (the folders you file cases into). To add several at once,
+select them in File Explorer and drop them on the list. Click a folder to open
 it, as in File Explorer.
 
 Drag a case's row (a hearing with its folder, or a row in Case folders) onto a

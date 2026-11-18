@@ -46,6 +46,28 @@ from a newer checkout), every folder is read as in a browser.
 
 A folder in both is one row ("In Downloads today · Opened 3:14 PM").
 
+## A case opens in a window of its own (2026-11-18)
+
+The owner: "Now that it is acting as a hub, it should open in a new tab when I
+open a case folder"; asked whether a tab kept behind Home or a window, "Its own
+window". A case folder opened from Home (a Case folders or hearing row, or
+Home's Open a case folder) opens in a new window of the app
+(`openCaseFolder(dir, { inWindow: true })`, `openCaseWindow`), through the
+handoff a tab moved to a window takes ("Separate windows" in app-web.js; the
+item now carries `caseFolder`, so the reader there opens it as a case folder).
+Home stays on screen in its own window. That window (`caseWindow`) closes with
+its last tab. A click on a case whose window still reads it brings that window
+forward (`focusCaseWindow`, asking the window's `__shellCaseDirs`), rather than
+opening a second reader on the folder. Where the browser blocks the window (a
+popup opened after the folder dialog, in a browser), the case opens in a tab
+here as before. The strip's Case folder button still opens in the window it is
+in.
+
+The reader's notices to its shell ("textreader:run", "textreader:folder") now
+reach Home in another window: every shell relays them on the `pdfplus-shell`
+BroadcastChannel (`relay`), and Home records the start (`runsStarted`) and
+looks again. Tests: `test-case-folders.mjs` parts 7–9c.
+
 ## Status
 
 `folderStatus` reads the run's own traces as the reader's run bar does
