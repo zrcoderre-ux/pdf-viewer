@@ -249,6 +249,11 @@ async function browserPart() {
       await put(acme, "Demurrer.pdf", "%PDF-1.4 stand-in");
       await put(acme, "DONE 2.40PM.txt", "");
       await put(dl, "22STCV05555.zip", "zip stand-in");
+      // A case folder no hearing on the list claims, and one whose hearing is marked done.
+      const zeta = await dl.getDirectoryHandle("Case Zeta", { create: true });
+      await put(zeta, "Complaint.pdf", "%PDF-1.4 stand-in");
+      const umbrella = await dl.getDirectoryHandle("23STCV04444 Umbrella", { create: true });
+      await put(umbrella, "Strike.pdf", "%PDF-1.4 stand-in");
       // A folder opened here, named by no case number: its Register of Actions carries it.
       const elsewhere = await top.getDirectoryHandle("Elsewhere", { create: true });
       const doe = await elsewhere.getDirectoryHandle("Initech compel", { create: true });
@@ -279,25 +284,38 @@ async function browserPart() {
     })));
     let got = await rows();
     check("the unmarked hearings from today on, by date", got.map((r) => r.name.slice(0, 11)), ["25STCV12345", "24STCV00777", "26STCV09999", "22STCV05555"]);
-    check("their download status", got.map((r) => r.status), ["Downloaded", "Not downloaded", "Downloaded", "Zip in Downloads"]);
-    check("…a folder in Downloads, by its name, with its run", got[0].where.startsWith("Demurrer · 25STCV12345 ACME — Finished "), true);
-    check("…a folder opened elsewhere, by its Register of Actions", got[2].where.startsWith("Motion to Compel · Initech compel"), true);
+    check("a case downloaded says what PDF-Linker has done in it; the rest where the case stands", got.map((r) => r.status.replace(/^Finished .*/, "Finished")),
+      ["Finished", "Not downloaded", "Not run yet", "Zip in Downloads"]);
+    check("…a folder in Downloads, by its name", got[0].where, "Demurrer · 25STCV12345 ACME");
+    check("…a folder opened elsewhere, by its Register of Actions", got[2].where, "Motion to Compel · Initech compel");
     check("grouped under their days", await shell.$$eval("#hearing-list .hearing-day", (d) => d.length), 3);
     check("the summary", await shell.textContent("#hearings-summary"), "4 to work up2 downloaded2 not downloaded");
-    check("the eCourt buttons stand where the sheet links the case", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => !!r.querySelector(".ci-ecourt:not(.ci-ecourt-gap)"))), [true, true, true, false]);
+    const buttons = () => shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => ({
+      ecourt: !!r.querySelector(".ci-ecourt:not(.ci-ecourt-gap)"), line: !!r.querySelector(".ci-line"),
+    })));
+    check("the eCourt buttons stand where the sheet links the case; Prioritize where the case is downloaded", await buttons(),
+      [{ ecourt: true, line: true }, { ecourt: true, line: false }, { ecourt: true, line: true }, { ecourt: false, line: false }]);
 
-    console.log("9. a click on eCourt, and on a case not downloaded");
+    console.log("9. Case folders: only the folders no hearing on the list claims, above the hearings");
+    const caseNames = () => shell.$$eval("#case-list .case-item .ri-name", (x) => x.map((e) => e.textContent).sort());
+    await shell.waitForFunction(() => !document.getElementById("case-folders").hidden && document.querySelectorAll("#case-list .case-item").length === 2, null, { timeout: 10000 });
+    check("Case Zeta, and the folder whose hearing is marked done", await caseNames(), ["23STCV04444 Umbrella", "Case Zeta"]);
+    check("…which says its hearing", (await shell.$$eval("#case-list .case-item", (bs) => bs.map((b) => b.querySelector(".ci-where").textContent))).some((w) => w.startsWith("Hearing ") && w.includes("(done)")), true);
+    check("the list stands above the hearings", await shell.evaluate(() => !!(document.getElementById("case-folders").compareDocumentPosition(document.getElementById("hearings")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
+    check("the Downloads link is in the Hearings heading", await shell.evaluate(() => !!document.querySelector("#hearings #case-downloads")), true);
+
+    console.log("10. eCourt, and a case folder's buttons on its hearing's row");
     await shell.click("#hearing-list .hearing-row:nth-of-type(3) .ci-ecourt");
     await shell.click("#hearing-list .hearing-row:nth-of-type(3) .hearing-item");
     check("eCourt opens the sheet's link, twice", await shell.evaluate(() => window.__opened), ["https://civil.lacourt.org/ecourt/ecms/case?id=222", "https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
-
-    console.log("10. the case folders list says each one's hearing");
-    await shell.waitForFunction(() => document.querySelectorAll("#case-list .case-item").length === 2, null, { timeout: 10000 });
-    const cases = await shell.$$eval("#case-list .case-row", (rs) => rs.map((r) => ({ name: r.querySelector(".ri-name").textContent, where: r.querySelector(".ci-where").textContent, ecourt: !!r.querySelector(".ci-ecourt") })));
-    const acme = cases.find((c) => c.name === "25STCV12345 ACME");
-    const doe = cases.find((c) => c.name === "Initech compel");
-    check("ACME: its hearing, with an eCourt button", [acme.where.includes("· Demurrer"), acme.where.startsWith("Hearing "), acme.ecourt], [true, true, true]);
-    check("Initech: its hearing, matched by the Register of Actions", [doe.where.startsWith("Hearing "), doe.where.includes("Motion to Compel")], [true, true]);
+    await shell.click("#hearing-list .hearing-row:nth-of-type(2) .ci-line-add");
+    await shell.waitForFunction(() => document.querySelector("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), null, { timeout: 10000 });
+    check("Prioritize on the hearing puts its folder first in line", await shell.textContent("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), "1st");
+    check("…written into the folder", await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const f = await (await (await dl.getDirectoryHandle("25STCV12345 ACME")).getFileHandle("PDF-Linker Priority.json")).getFile();
+      return JSON.parse(await f.text()).rank;
+    }), 1);
 
     console.log("11. Show done and off");
     check("the button counts them", await shell.textContent("#hearings-all"), "Show done and off (2)");
@@ -306,6 +324,17 @@ async function browserPart() {
     got = await rows();
     check("green says Done, red Off calendar", got.filter((r) => /Done|Off/.test(r.status)).map((r) => r.status), ["Done", "Off calendar"]);
     check("…set apart", await shell.$$eval("#hearing-list .hearing-row.mark-done, #hearing-list .hearing-row.mark-off", (x) => x.length), 2);
+    await shell.waitForFunction(() => document.querySelectorAll("#case-list .case-item").length === 1, null, { timeout: 10000 });
+    check("the done hearing's folder moves onto its row", await caseNames(), ["Case Zeta"]);
+
+    console.log("12. every folder on a hearing: no Case folders list");
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      await dl.removeEntry("Case Zeta", { recursive: true });
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForFunction(() => document.getElementById("case-folders").hidden, null, { timeout: 10000 });
+    check("the list is hidden", await shell.evaluate(() => document.getElementById("case-folders").hidden), true);
     check("no page errors", errors, []);
   } finally {
     await browser.close();

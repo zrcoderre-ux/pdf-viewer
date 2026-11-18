@@ -68,9 +68,8 @@ its name is matched by its files only once it is in the Case folders list, since
 reading every old folder of Downloads is what Home stopped doing for speed (Home
 case folders.md, "In PDF+ only the day's folders are read").
 
-The pill says **Downloaded** (a folder; the row's second line names it, with
-PDF-Linker's status off `cachedListing`), **Zip in Downloads**, **Files in
-Downloads**, or **Not downloaded**. A click opens the case folder in one
+The pill says PDF-Linker's status where a folder is found (below), else **Zip in
+Downloads**, **Files in Downloads**, or **Not downloaded**. A click opens the case folder in one
 reader, or, not downloaded, the case in eCourt; the **eCourt** button opens it
 either way.
 
@@ -81,12 +80,39 @@ From today on, unmarked, by date, grouped under their days, at most
 and the not. **Show done and off** adds the marked rows, set apart and struck
 through. Past hearings are not listed.
 
-## On the Case folders list
+## One list: the hearing carries its case folder (2026-11-18)
 
-Each case folder's row starts its second line with its hearing
-(`hearingForPlace`: the next one on or after today for its case, else the
-latest before; "Hearing Fri, Nov 20 · Demurrer", "(done)" or "(off calendar)"
-where marked) and carries an **eCourt** button where the sheet links it.
+The owner: "lets integrate the Hearings and Casefolders. Move Casefolder up to
+the top, and only if there are some that don't match (ideally this will never
+happen) then add the word, log to share and prioritize buttons to the hearings
+instead." So a hearing whose case folder is found IS that folder's row:
+
+- `hearingItems` matches every hearing on the list (the unmarked ones from
+  today on, or all of them with **Show done and off**) before the folders'
+  statuses are read. A Downloads folder it matches that the Case folders list
+  did not hold (not today's, not opened here) joins the look's `rows`, so its
+  status, place in PDF-Linker's line and run start are read like any other.
+- The hearing's pill is PDF-Linker's status (`statusText`), its second line
+  names the folder (and a run's start, `runningSub`), its icon is the folder's,
+  and it carries the folder's own buttons (`folderControls`: Word, Log to
+  share, Prioritize or its place with ▲ ▼ ✕, Take over). Only the first
+  hearing of a case carries them, so a case heard twice shows its line
+  controls once. A hearing with no folder keeps the pill of where its case
+  stands (Not downloaded, Zip in Downloads, Files in Downloads), and one marked
+  green or red says Done or Off calendar.
+- **Case folders** now stands above the hearings and lists only the folders no
+  hearing on the list is matched to (headed "Case folders not on the hearings
+  list"): a folder whose hearing is past or marked done or off, one whose case
+  is not on the sheet, one the matching missed. Each still says its hearing
+  where the sheet has one (`hearingForPlace`: the next for its case, else the
+  latest before, "(done)" or "(off calendar)" where marked) and carries an
+  **eCourt** button where the sheet links it. It is hidden when there is none,
+  and lists every folder, as before, while no sheet is linked.
+- PDF-Linker's line is every row in line, not only those the Case folders list
+  shows (`line`, `lineShown`), and `rowsShown` holds both lists' rows, so ▲ ▼ ✕
+  on a hearing row move the same line.
+- The Downloads link moved into the Hearings heading ("Link Downloads…"),
+  since the Case folders list may be hidden and Downloads serves the matching.
 
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

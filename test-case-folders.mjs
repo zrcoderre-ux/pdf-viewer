@@ -271,7 +271,7 @@ async function browserPart() {
 
     console.log("5. the list on Home, before Downloads is linked");
     await shell.waitForFunction(() => !document.getElementById("case-folders").hidden, null, { timeout: 10000 });
-    check("it offers to link Downloads", await shell.textContent("#case-downloads"), "Show today's from Downloads…");
+    check("it offers to link Downloads", await shell.textContent("#case-downloads"), "Link Downloads…");
     check("…and says what it will list", (await shell.textContent("#case-list")).startsWith("Case folders you open here"), true);
 
     console.log("6. Downloads linked: today's case folders, a run going first");

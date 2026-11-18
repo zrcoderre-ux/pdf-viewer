@@ -26,18 +26,27 @@ out of the list. **Show done and off** brings them back, struck through.
 ## Download status
 
 Each hearing is matched to its case by the case number, in the case name or in
-the eCourt link. The pill says:
+the eCourt link. When its case folder is found, in Downloads or among the
+folders opened in the app, the hearing row *is* that folder:
 
-- **Downloaded**: a case folder for it is in Downloads or among the folders
-  opened in the app. The line under the name gives the folder and what
-  PDF-Linker has done in it. Click the row to open the folder.
-- **Zip in Downloads**: the case's zip has not been extracted yet.
-- **Not downloaded**: nothing for it yet. Click the row, or **eCourt**, to open
-  the case in eCourt.
+- The pill says what PDF-Linker has done in it (Not run yet, Running — ETA …,
+  Finished …), and the line under the name names the folder.
+- The folder's buttons are on the row: **Word**, **Log to share**,
+  **Prioritize** (or its place in PDF-Linker's line with ▲ ▼ ✕) and **Take
+  over** when a run stopped part-way.
+- Click the row to open the folder in one reader.
+
+Otherwise the pill says **Zip in Downloads** (not extracted yet) or **Not
+downloaded**; click the row, or **eCourt**, to open the case in eCourt.
 
 A folder is recognised by the case number in its name, or by the Register of
 Actions the E-Court Export saves into it. Name case folders with their case
 number for the surest match.
 
-The Case folders list below shows each folder's hearing date and motion too,
-with its own **eCourt** button.
+## Case folders not on the hearings list
+
+Above the hearings, Home lists only the case folders that match no hearing on
+the list: a case whose hearing is past or marked done or off, one not on the
+sheet, or one the matching missed. Each says its hearing where the sheet has
+one, with the same buttons. When every folder is on a hearing, the list is not
+shown. **Link Downloads…** is in the Hearings heading.
