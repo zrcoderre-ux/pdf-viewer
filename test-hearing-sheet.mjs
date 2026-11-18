@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { makeZip } from "./viewer/zip.js";
 import {
   readHearings, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
-  hyperlinkOfFormula, dateNote, markHearing, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  hyperlinkOfFormula, dateNote, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -193,6 +193,12 @@ const places = [
 check("a folder ahead of a zip and loose files", findPlace(h(3), places).kind, "folder");
 check("a zip ahead of loose files", findPlace(h(3), places.slice(0, 2)).kind, "zip");
 check("none", findPlace(h(6), places), null);
+const DAY = 86400000;
+check("an Order Template Input sheet from today counts", looseFileCounts("Order_Template_Input_25STCV12345.xlsx", NOW - 3600000, NOW), true);
+check("…one two days old still does", looseFileCounts("Order_Template_Input_25STCV12345 (1).xlsx", NOW - 2 * DAY, NOW), true);
+check("…one older is left over from an earlier motion in the case", looseFileCounts("Order_Template_Input_25STCV12345.xlsx", NOW - 2 * DAY - 60000, NOW), false);
+check("…as is one whose time could not be read", looseFileCounts("Order_Template_Input_25STCV12345.xlsx", 0, NOW), false);
+check("any other loose file counts, however old", looseFileCounts("Register of Actions 25STCV12345.pdf", NOW - 30 * DAY, NOW), true);
 check("said: not downloaded", placeText(null).text, "Not downloaded");
 check("said: downloaded", [placeText({ name: "x", kind: "folder" }).text, placeText({ name: "x", kind: "folder" }).tone], ["Downloaded", "ok"]);
 
@@ -295,6 +301,14 @@ async function browserPart() {
       await put(acme, "Demurrer.pdf", "%PDF-1.4 stand-in");
       await put(acme, "DONE 2.40PM.txt", "");
       await put(dl, "22STCV05555.zip", "zip stand-in");
+      // An Order Template Input sheet from an earlier motion in Doe v. Globex,
+      // three days old (OPFS writes now, so its time is given back older).
+      await put(dl, "Order_Template_Input_24STCV00777.xlsx", "xlsx stand-in");
+      const realGetFile = FileSystemFileHandle.prototype.getFile;
+      FileSystemFileHandle.prototype.getFile = async function () {
+        const f = await realGetFile.apply(this, arguments);
+        return this.name === "Order_Template_Input_24STCV00777.xlsx" ? new File([f], f.name, { lastModified: Date.now() - 3 * 86400000 }) : f;
+      };
       // A case folder no hearing on the list claims, and one whose hearing is marked done.
       const zeta = await dl.getDirectoryHandle("Case Zeta", { create: true });
       await put(zeta, "Complaint.pdf", "%PDF-1.4 stand-in");
@@ -332,6 +346,7 @@ async function browserPart() {
     check("the unmarked hearings from today on, by date", got.map((r) => r.name.slice(0, 11)), ["25STCV12345", "24STCV00777", "26STCV09999", "22STCV05555"]);
     check("a case downloaded says what PDF-Linker has done in it; the rest where the case stands", got.map((r) => r.status.replace(/^Finished .*/, "Finished")),
       ["Finished", "Not downloaded", "Not run yet", "Zip in Downloads"]);
+    check("…an Order Template Input sheet three days old is no sign of Doe v. Globex", got[1].status, "Not downloaded");
     check("…a folder in Downloads, by its name", got[0].where, "Demurrer · 25STCV12345 ACME");
     check("…a folder opened elsewhere, by its Register of Actions", got[2].where, "Motion to Compel · Initech compel");
     check("grouped under their days", await shell.$$eval("#hearing-list .hearing-day", (d) => d.length), 3);

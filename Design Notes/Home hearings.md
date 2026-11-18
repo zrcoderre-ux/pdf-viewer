@@ -80,6 +80,17 @@ From today on, unmarked, by date, grouped under their days, at most
 and the not. **Show done and off** adds the marked rows, set apart and struck
 through. Past hearings are not listed.
 
+**An old Order Template Input sheet is no sign (2026-11-18).** The E-Court
+Export leaves `Order_Template_Input_<case number>.xlsx` loose in Downloads,
+where its Word macro looks for it, and it stays there once that motion is
+worked up. The owner: get rid of the Files in Downloads detection for those
+"more than 2 days old", since one is most likely left over from a previous
+motion in the same case: its case number matches, but it says nothing of this
+hearing's papers. `looseFileCounts` (`ORDER_TEMPLATE_RE`, `LOOSE_STALE_MS`):
+`downloadsIndex` reads the time of those sheets only, and leaves out one more
+than two days old (or one whose time cannot be read). Every other loose file
+counts at any age.
+
 ## One list: the hearing carries its case folder (2026-11-18)
 
 The owner: "lets integrate the Hearings and Casefolders. Move Casefolder up to

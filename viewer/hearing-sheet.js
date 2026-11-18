@@ -661,6 +661,25 @@ export function placeMatches(hearing, place) {
   return fw.every((w) => cw.has(w));
 }
 
+// The E-Court extension's Order Template Input sheet ("Order_Template_Input_
+// 25STCV12345.xlsx", order-template.js filenameFor; Chrome adds " (1)" to a
+// second): it lands loose in Downloads, where the Word macro looks for it,
+// and stays there after that motion is worked up. The owner (2026-11-18):
+// one more than two days old is most likely left over from a previous motion
+// in the same case, so its case number matches but it says nothing of
+// whether the papers for this hearing are downloaded.
+export const ORDER_TEMPLATE_RE = /^Order[ _-]?Template[ _-]?Input(?![a-z])/i;
+export const LOOSE_STALE_MS = 2 * 86400000;
+
+/**
+ * Whether a loose file in Downloads (`name`, written at `at`, ms) counts as
+ * the case's: not an Order Template Input sheet more than LOOSE_STALE_MS old.
+ */
+export function looseFileCounts(name, at, now) {
+  if (!ORDER_TEMPLATE_RE.test(String(name || ""))) return true;
+  return typeof at === "number" && at > 0 && now - at <= LOOSE_STALE_MS;
+}
+
 /**
  * The best place a hearing's case stands, of `places`
  * ([{ name, kind: "opened" | "folder" | "zip" | "file", numbers?, ... }]):

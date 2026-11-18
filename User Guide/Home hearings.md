@@ -57,6 +57,10 @@ folders opened in the app, the hearing row *is* that folder:
 Otherwise the pill says **Zip in Downloads** (not extracted yet) or **Not
 downloaded**; click the row, or **eCourt**, to open the case in eCourt.
 
+An **Order Template Input** sheet in Downloads more than two days old does not
+count toward Files in Downloads: it is most likely from an earlier motion in
+the same case.
+
 A folder is recognised by the case number in its name, or by the Register of
 Actions the E-Court Export saves into it. Name case folders with their case
 number for the surest match.

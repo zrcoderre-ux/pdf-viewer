@@ -1595,8 +1595,9 @@ function placeOfRow(r) {
 
 /**
  * Downloads' own entries as places a hearing's case may stand: its folders,
- * its zips and the loose files whose names carry a case number. Names only
- * (no file is opened), read again every DOWNLOADS_INDEX_MS.
+ * its zips and the loose files whose names carry a case number, but no Order
+ * Template Input sheet more than two days old. Names only (no file is opened
+ * but those sheets, for their time), read again every DOWNLOADS_INDEX_MS.
  */
 async function downloadsIndex(dl) {
   const now = Date.now();
@@ -1605,7 +1606,14 @@ async function downloadsIndex(dl) {
   for await (const [name, entry] of dl.entries()) {
     if (entry.kind === "directory") places.push({ name, kind: "folder", handle: entry });
     else if (/\.zip$/i.test(name)) places.push({ name, kind: "zip" });
-    else if (hearingLib.caseNumbersIn(name).length) places.push({ name, kind: "file" });
+    else if (hearingLib.caseNumbersIn(name).length) {
+      // An Order Template Input sheet left from an earlier motion in the case
+      // is no sign of this hearing's papers (looseFileCounts): only its time
+      // is read, and only for it.
+      let at = 0;
+      if (hearingLib.ORDER_TEMPLATE_RE.test(name)) { try { at = (await entry.getFile()).lastModified; } catch { at = 0; } }
+      if (hearingLib.looseFileCounts(name, at, now)) places.push({ name, kind: "file" });
+    }
   }
   downloadsIndexSeen = { at: now, name: dl.name, places };
   return places;
