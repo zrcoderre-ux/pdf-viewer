@@ -577,7 +577,12 @@ fileInput.addEventListener("change", () => {
 
 // Drag and drop anywhere on the shell.
 ["dragenter", "dragover"].forEach((ev) =>
-  document.addEventListener(ev, (e) => { e.preventDefault(); document.body.classList.add("dragging"); })
+  document.addEventListener(ev, (e) => {
+    e.preventDefault();
+    // A case folder dragged from Home onto the Folders list is no file drop.
+    if (caseDrag) { if (e.dataTransfer) e.dataTransfer.dropEffect = "none"; return; }
+    document.body.classList.add("dragging");
+  })
 );
 ["dragleave", "drop"].forEach((ev) =>
   document.addEventListener(ev, (e) => {
@@ -1210,7 +1215,7 @@ async function todayInDownloads(dl, now) {
       try { dir = await dl.getDirectoryHandle(f.name); } catch { continue; }
       let listing;
       try { listing = await readListing(dir); } catch { continue; }
-      if (caseLib.isCaseListing(listing)) rows.push({ name: f.name, handle: dir, listing, today: true, opened: 0, activity: f.at });
+      if (caseLib.isCaseListing(listing)) rows.push({ name: f.name, handle: dir, listing, today: true, opened: 0, activity: f.at, parent: dl, root: dl, chain: [f.name] });
     }
     return rows;
   }
@@ -1226,7 +1231,7 @@ async function todayInDownloads(dl, now) {
   const look = async (dir) => {
     const listing = await cachedListing(dir, now);
     if (!listing || !caseLib.isCaseListing(listing) || !caseLib.isToday(dir.name, listing, now, zipsToday)) return;
-    rows.push({ name: dir.name, handle: dir, listing, today: true, opened: 0 });
+    rows.push({ name: dir.name, handle: dir, listing, today: true, opened: 0, parent: dl, root: dl, chain: [dir.name] });
   };
   // A few at a time: a synced Downloads answers slowly, one folder after another.
   for (let i = 0; i < subs.length; i += 4) await Promise.all(subs.slice(i, i + 4).map(look));
@@ -1331,6 +1336,7 @@ async function renderCaseFoldersNow() {
   rowsShown = [...shown, ...hv.matched];
   compactLine(line);
   showDownloadsLink(dl, dlState);
+  renderTree(dl, dlState);
   try { await renderHearings(sheet, hv, dlState, now, line); } catch (e) { console.warn(e); }
   // Hidden where every folder is on a hearing's row; listed as before where no sheet is linked.
   section.hidden = !shown.length && sheet.state !== "none";
@@ -1375,7 +1381,8 @@ async function renderCaseFoldersNow() {
     const pill = b.querySelector(".ci-status");
     pill.textContent = st.text;
     pill.classList.add("tone-" + st.tone);
-    b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "");
+    b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "")
+      + (sheet.state !== "none" ? `\nNo hearing on the list matched it (case numbers it carries: ${listingNumbers(r.listing).concat(hearingLib.caseNumbersIn(r.name)).filter((x, i, a) => a.indexOf(x) === i).join(", ") || "none"}).` : "");
     b.addEventListener("click", async () => {
       // Asked first, while the click still counts as one: a reader saves into the folder.
       if (!(await permitted(r.handle, "readwrite", true))) return;
@@ -1383,6 +1390,7 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
+    if (!r.locked) caseDraggable(row, r);
     if (r.hearing && hearingLib.isWebLink(r.hearing.url)) row.appendChild(ecourtButton(r.hearing));
     for (const x of folderControls(r, line)) row.appendChild(x);
     listEl.appendChild(row);
@@ -1604,7 +1612,7 @@ async function downloadsIndex(dl) {
   if (downloadsIndexSeen && downloadsIndexSeen.name === dl.name && now - downloadsIndexSeen.at < DOWNLOADS_INDEX_MS) return downloadsIndexSeen.places;
   const places = [];
   for await (const [name, entry] of dl.entries()) {
-    if (entry.kind === "directory") places.push({ name, kind: "folder", handle: entry });
+    if (entry.kind === "directory") places.push({ name, kind: "folder", handle: entry, parent: dl, root: dl, chain: [name] });
     else if (/\.zip$/i.test(name)) places.push({ name, kind: "zip" });
     else if (hearingLib.caseNumbersIn(name).length) {
       // An Order Template Input sheet left from an earlier motion in the case
@@ -1658,6 +1666,13 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
     try { idx = await downloadsIndex(dl); } catch { idx = []; }
     for (const p of idx) if (!(p.kind === "folder" && rows.some((r) => r.name === p.name))) places.push({ ...p });
   }
+  // The folders on the Folders list, where a case moved from Home stands: it
+  // stays on its hearing's row until the hearing has passed.
+  for (const p of await treeIndex()) {
+    let dup = false;
+    for (const r of rows) if (r.name === p.name) { try { if (await r.handle.isSameEntry(p.handle)) { dup = true; break; } } catch { /* gone */ } }
+    if (!dup && !places.some((x) => x.kind === "folder" && x.handle && x.name === p.name && x.root === p.root && x.chain.join("/") === p.chain.join("/"))) places.push({ ...p });
+  }
   const all = hearingLib.upcoming(sheet.hearings, now, { all: true });
   const open = all.filter((h) => !h.mark);
   const list = (hearingsAll ? all : open).slice(0, HEARING_ROWS_MAX);
@@ -1669,7 +1684,7 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
     if (!r && place && place.kind === "folder" && place.handle) {
       const listing = await cachedListing(place.handle, now);
       if (listing) {
-        r = { name: place.name, handle: place.handle, listing, opened: 0, today: false, inDownloads: true };
+        r = { name: place.name, handle: place.handle, listing, opened: 0, today: false, parent: place.parent || null, root: place.root || null, chain: place.chain || [place.name], inTree: !!place.inTree };
         rows.push(r);
         place.row = r;
       }
@@ -1695,7 +1710,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
     (hearingEdits || []).length, editsError ? 1 : 0,
     ...items.map(({ hg, place, r, controls }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.url, hg.submitted, hg.submittedText,
-      place ? place.kind + ":" + place.name : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
+      place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
   if (sig === hearingsShown) return;
   hearingsShown = sig;
@@ -1794,7 +1809,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
     if (hg.submitted || hg.submittedText) where.push("Submitted " + (hg.submitted ? hearingLib.shortDate(hg.submitted, now) : hg.submittedText));
-    if (folder) where.push(place.name);
+    if (folder) where.push(place.name + (r && r.inTree ? ` (in ${r.chain.length > 1 ? r.chain[r.chain.length - 2] : r.root.name})` : ""));
     if (st && st.sub) where.push(st.sub);
     b.querySelector(".ci-where").textContent = where.join(" · ");
     const pill = b.querySelector(".ci-status");
@@ -1806,7 +1821,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (hg.waiting) pill.classList.add("waiting");
     const placeSaid = hearingLib.placeText(place);
     b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : hearingLib.isWebLink(hg.url) ? "Not downloaded: open the case in eCourt." : "Not downloaded.")
-      + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}.`
+      + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`
       + (hg.waiting ? `\nMarked ${hg.mark === "off" ? "off" : "on"} calendar here; not yet written into ${sheet.name} (open in Excel?).` : "");
     b.addEventListener("click", async () => {
       if (folder) {
@@ -1817,6 +1832,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       else shellToast(place ? placeSaid.title : "No case folder for this case, and no eCourt link on its row in the sheet.", 5000);
     });
     row.appendChild(b);
+    if (r && !r.locked) caseDraggable(row, r);
     // The folder's own buttons, on the first hearing of its case only.
     if (controls) for (const x of folderControls(r, line)) row.appendChild(x);
     if (sheet.state === "ok" || sheet.state === "error") row.appendChild(calendarButton(hg));
@@ -1859,6 +1875,345 @@ document.getElementById("hearings-link")?.addEventListener("click", async () => 
 document.getElementById("hearings-all")?.addEventListener("click", () => {
   hearingsAll = !hearingsAll;
   hearingsShown = "";
+  renderCaseFolders();
+});
+
+// ---- Home: folders -----------------------------------------------------------
+//
+// The owner (2026-11-18): "I want to add the ability to drag and drop them
+// into another folder straight from the hearings menu. Can you add a file
+// explorer style folder list to the left side?" And: "They should still
+// remain in the Hearing list until the hearing date has passed."
+//
+// The FOLDERS LIST (#folder-tree) holds Downloads (once linked) and the
+// folders the operator adds (+), kept as handles in the folders database
+// (`places` → "treeRoots"), with write leave asked at the pick. Each opens
+// like File Explorer's, a level at a time; a folder whose name carries a case
+// number is a case folder and opens no further. A case folder's row, on a
+// hearing or in Case folders, is dragged onto a folder of the list; the move
+// bar asks, and Move moves it (viewer/case-move.js, moveFolder: a page can
+// move files but not folders, so it is moved file by file into a folder of
+// the same name, and the emptied one is taken away). Refused while
+// PDF-Linker runs in it or a reader tab holds it (moveBlocker), and where a
+// file would land on another. The click on Move is the one the write leave
+// is asked on.
+//
+// A moved folder stays on its hearing's row: the list's own folders are
+// looked through for case folders (treeIndex: their folders, and one level
+// further under any whose name is no case's), as Downloads is. In PDF+, the
+// folder's PDF-Linker launcher is rewritten to name its new place (main.js
+// "pdfplus:folder-path"; retargetLauncher), so Re-run and Take over still
+// reach it.
+const TREE_KIDS_MAX = 300;
+const TREE_INDEX_MS = 60000;
+const SPRING_OPEN_MS = 800;
+let moveLib = null;
+let treeRootsSeen = null;     // the handles added, in order
+const treeOpen = new Set();   // keys of the folders opened: "<root>/<name>/<name>"
+let treeShown = "";
+let treeBusy = false, treeAgain = false;
+let treeIndexSeen = null;     // { at, places }
+let caseDrag = null;          // the row being dragged, while it is
+
+async function treeRoots() {
+  if (!treeRootsSeen) {
+    try { treeRootsSeen = ((await foldersTx("places", "readonly", (st) => st.get("treeRoots"))) || []).filter((h) => h && h.kind === "directory"); }
+    catch { treeRootsSeen = []; }
+  }
+  return treeRootsSeen;
+}
+async function saveTreeRoots() {
+  try { await foldersTx("places", "readwrite", (st) => st.put(treeRootsSeen, "treeRoots")); }
+  catch { shellToast("The folders list could not be kept: this browser is not storing anything for the app.", 6000); }
+}
+/** A folder's own folders, by name: [{ name, handle }], sorted as File Explorer sorts. */
+async function subfolders(dir) {
+  const out = [];
+  for await (const [name, h] of dir.entries()) if (h.kind === "directory" && !name.startsWith(".")) out.push({ name, handle: h });
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+}
+const isCaseName = (name) => !!hearingLib && hearingLib.caseNumbersIn(name).length > 0;
+
+/**
+ * The case folders standing in the folders the operator added: each one's
+ * own folders, and those one level further under any whose name carries no
+ * case number (a folder per judge, per month). Names only; read again every
+ * TREE_INDEX_MS, and at once after a move.
+ */
+async function treeIndex() {
+  const now = Date.now();
+  if (treeIndexSeen && now - treeIndexSeen.at < TREE_INDEX_MS) return treeIndexSeen.places;
+  const places = [];
+  for (const root of await treeRoots()) {
+    if (!(await permitted(root, "read", false))) continue;
+    let kids;
+    try { kids = await subfolders(root); } catch { continue; }
+    for (const k of kids) {
+      places.push({ name: k.name, kind: "folder", handle: k.handle, parent: root, root, chain: [k.name], inTree: true });
+      if (isCaseName(k.name)) continue;
+      let grand;
+      try { grand = await subfolders(k.handle); } catch { continue; }
+      for (const g of grand) places.push({ name: g.name, kind: "folder", handle: g.handle, parent: k.handle, root, chain: [k.name, g.name], inTree: true });
+    }
+  }
+  treeIndexSeen = { at: now, places };
+  return places;
+}
+
+/** Draw the folders list: each root, and under each folder opened its own folders. */
+async function renderTree(dl, dlState, underDrag = false) {
+  if (treeBusy) { treeAgain = true; return; }
+  treeBusy = true;
+  try {
+    do { treeAgain = false; await renderTreeNow(dl, dlState, underDrag); } while (treeAgain);
+  } catch (e) { console.warn(e); }
+  finally { treeBusy = false; }
+}
+async function renderTreeNow(dl, dlState, underDrag = false) {
+  const box = document.getElementById("tree-list");
+  // Never redrawn under a drag, but for a folder the drag springs open.
+  if (!box || (caseDrag && !underDrag)) return;
+  if (!hearingLib) hearingLib = await import("./viewer/hearing-sheet.js");
+  const roots = [];
+  if (dl && dlState === "ok") roots.push({ handle: dl, fixed: true });
+  for (const h of await treeRoots()) roots.push({ handle: h, fixed: false, locked: !(await permitted(h, "read", false)) });
+  // The nodes, depth first, each opened one's folders read now.
+  const nodes = [];
+  const add = async (handle, depth, key, root, chain, extra = {}) => {
+    const open = treeOpen.has(key);
+    const node = { handle, depth, key, root, chain, name: handle.name, open, leaf: depth > 0 && isCaseName(handle.name), ...extra };
+    nodes.push(node);
+    if (!open || node.leaf || node.locked) return;
+    let kids = [];
+    try { kids = await subfolders(handle); } catch { node.unreadable = true; return; }
+    node.kids = kids.length;
+    for (const k of kids.slice(0, TREE_KIDS_MAX)) await add(k.handle, depth + 1, key + "/" + k.name, root, [...chain, k.name]);
+    if (kids.length > TREE_KIDS_MAX) nodes.push({ more: kids.length - TREE_KIDS_MAX, depth: depth + 1, key: key + "/…" });
+  };
+  for (const [i, r] of roots.entries()) await add(r.handle, 0, (r.fixed ? "dl" : "r" + i) + ":" + r.handle.name, r.handle, [], { fixed: r.fixed, locked: !!r.locked, rootIndex: r.fixed ? -1 : i - (roots[0] && roots[0].fixed ? 1 : 0) });
+  const sig = nodes.map((n) => [n.key, n.open ? 1 : 0, n.leaf ? 1 : 0, n.locked ? 1 : 0, n.kids || 0, n.more || 0, n.unreadable ? 1 : 0].join("|")).join("\n") + "\n" + dlState;
+  if (sig === treeShown) return;
+  treeShown = sig;
+  box.textContent = "";
+  if (!nodes.length) {
+    const p = document.createElement("p");
+    p.className = "tree-empty";
+    p.textContent = "Add the folders you file cases into with +, then drag a case onto one to move it there.";
+    box.appendChild(p);
+    return;
+  }
+  for (const n of nodes) {
+    const el = document.createElement("div");
+    el.className = "tree-node" + (n.leaf ? " leaf" : "") + (n.depth === 0 ? " root" : "");
+    el.style.setProperty("--depth", n.depth);
+    if (n.more) {
+      el.classList.add("tree-more");
+      el.textContent = `and ${n.more} more`;
+      box.appendChild(el);
+      continue;
+    }
+    const caret = document.createElement("span");
+    caret.className = "tree-caret";
+    caret.textContent = n.leaf ? "" : n.open ? "▾" : "▸";
+    el.appendChild(caret);
+    el.insertAdjacentHTML("beforeend", `<span class="tree-icon">${icon("folder", { size: 15 })}</span>`);
+    const label = document.createElement("span");
+    label.className = "tree-name";
+    label.textContent = n.name;
+    el.appendChild(label);
+    el.title = n.leaf ? `${n.name}: a case folder` : n.locked ? `${n.name}: click to let PDF+ read it again` : `${n.name}${n.unreadable ? " could not be read" : ""}. Drag a case here to move it into this folder.`;
+    if (n.depth === 0 && !n.fixed) {
+      const x = document.createElement("button");
+      x.className = "tree-remove";
+      x.textContent = "✕";
+      x.title = `Take ${n.name} off the folders list (nothing on disk changes)`;
+      x.setAttribute("aria-label", x.title);
+      x.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const roots = await treeRoots();
+        roots.splice(n.rootIndex, 1);
+        await saveTreeRoots();
+        treeIndexSeen = null; treeShown = ""; hearingsShown = "";
+        renderCaseFolders();
+      });
+      el.appendChild(x);
+    }
+    el.addEventListener("click", async () => {
+      if (n.locked) { if (await permitted(n.handle, "readwrite", true)) { treeShown = ""; treeIndexSeen = null; renderCaseFolders(); } return; }
+      if (n.leaf) return;
+      if (treeOpen.has(n.key)) treeOpen.delete(n.key); else treeOpen.add(n.key);
+      treeShown = "";
+      renderTree(dl, dlState);
+    });
+    if (!n.leaf && !n.locked) dropTarget(el, n, dl, dlState);
+    box.appendChild(el);
+  }
+}
+
+/** A case folder's row may be dragged onto the folders list. */
+function caseDraggable(row, r) {
+  row.draggable = true;
+  row.classList.add("draggable");
+  row.addEventListener("dragstart", (e) => {
+    caseDrag = r;
+    document.body.classList.add("case-dragging");
+    try { e.dataTransfer.setData("text/plain", r.name); e.dataTransfer.effectAllowed = "move"; } catch { /* no data */ }
+  });
+  row.addEventListener("dragend", () => {
+    caseDrag = null;
+    document.body.classList.remove("case-dragging");
+    for (const x of document.querySelectorAll(".tree-node.drop-here")) x.classList.remove("drop-here");
+  });
+}
+function dropTarget(el, n, dl, dlState) {
+  let spring = 0;
+  el.addEventListener("dragover", (e) => {
+    if (!caseDrag) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    el.classList.add("drop-here");
+    // Held over a closed folder, it opens, as File Explorer's do.
+    if (!spring && !n.open) spring = setTimeout(() => { treeOpen.add(n.key); treeShown = ""; renderTree(dl, dlState, true); }, SPRING_OPEN_MS);
+  });
+  el.addEventListener("dragleave", () => { el.classList.remove("drop-here"); clearTimeout(spring); spring = 0; });
+  el.addEventListener("drop", (e) => {
+    if (!caseDrag) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(spring); spring = 0;
+    el.classList.remove("drop-here");
+    const r = caseDrag;
+    caseDrag = null;
+    document.body.classList.remove("case-dragging");
+    askMove(r, n);
+  });
+}
+
+// The move bar: asks, then says how the move goes.
+let moveBar = null;
+function showMoveBar() {
+  if (!moveBar) {
+    moveBar = document.createElement("div");
+    moveBar.id = "move-bar";
+    moveBar.setAttribute("role", "dialog");
+    moveBar.innerHTML = `<span class="mb-text"></span><button class="mb-go">Move</button><button class="mb-cancel">Cancel</button>`;
+    document.body.appendChild(moveBar);
+  }
+  moveBar.hidden = false;
+  return moveBar;
+}
+function askMove(r, n) {
+  const bar = showMoveBar();
+  const where = [n.root.name, ...n.chain].join(" › ");
+  bar.querySelector(".mb-text").textContent = `Move “${r.name}” into ${where}?`;
+  const go = bar.querySelector(".mb-go"), cancel = bar.querySelector(".mb-cancel");
+  go.disabled = false; cancel.disabled = false;
+  go.hidden = false; cancel.textContent = "Cancel";
+  go.onclick = () => moveCase(r, n);
+  cancel.onclick = () => { bar.hidden = true; };
+  go.focus();
+}
+
+/** Whether a reader tab holds the folder. */
+async function inReader(dir) {
+  for (const t of tabs) {
+    if (!t.text) continue;
+    let held = t.dir;
+    try { held = t.iframe.contentWindow.__textReaderSource?.()?.dir || held; } catch { /* not ready */ }
+    try { if (held && (await held.isSameEntry(dir))) return true; } catch { /* gone */ }
+  }
+  return false;
+}
+
+async function moveCase(r, n) {
+  const bar = showMoveBar();
+  const text = bar.querySelector(".mb-text");
+  const go = bar.querySelector(".mb-go"), cancel = bar.querySelector(".mb-cancel");
+  const done = (msg) => { text.textContent = msg; go.hidden = true; cancel.disabled = false; cancel.textContent = "Close"; cancel.onclick = () => { bar.hidden = true; }; };
+  go.disabled = true; cancel.disabled = true;
+  if (!moveLib) moveLib = await import("./viewer/case-move.js");
+  const src = r.handle, target = n.handle;
+  // Asked on this click: the folder, the one holding it, and the target.
+  for (const h of [src, r.parent, target]) {
+    if (h && !(await permitted(h, "readwrite", true))) return done(`“${r.name}” was not moved: PDF+ may not write into ${h.name}.`);
+  }
+  let state = "";
+  try { state = caseLib.folderStatus(await readListing(src), Date.now()).state; } catch { /* unreadable: the move finds out */ }
+  if (runsStarted.some((x) => x.name === r.name)) state = "starting";
+  const why = moveLib.moveBlocker({ state, inReader: await inReader(src) });
+  if (why) return done(`“${r.name}” was not moved: ${why}`);
+  // The opened-here records of this folder, to point at its new place.
+  const records = [];
+  for (const rec of await foldersAll()) {
+    if (rec.name !== r.name) continue;
+    try { if (await rec.handle.isSameEntry(src)) records.push(rec); } catch { /* gone */ }
+  }
+  let res;
+  try {
+    res = await moveLib.moveFolder(src, target, { parent: r.parent || null, onFile: (i, total) => { text.textContent = `Moving “${r.name}”: ${i} of ${total} files…`; } });
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    done(`“${r.name}” was ${/^(a folder cannot|it is already|this browser|.* already has )/.test(msg) ? "not moved" : "only partly moved (drag it onto the same folder again to finish)"}: ${msg}.`);
+    afterMove(r, n);
+    return;
+  }
+  for (const rec of records) {
+    try { await foldersTx("folders", "readwrite", (st) => st.put({ ...rec, handle: res.dir })); } catch { /* listed again once opened */ }
+  }
+  const launcher = await retargetLauncher(res.dir, n, r.name);
+  const notes = [];
+  if (res.left) notes.push(`the empty folder is left where it was`);
+  if (launcher === "unknown") notes.push("its PDF-Linker launcher still names the old place, so run PDF-Linker on it afresh before using Re-run");
+  if (launcher === "browser") notes.push("its PDF-Linker launcher still names the old place (PDF+ rewrites it; a browser cannot)");
+  done(`Moved “${r.name}” into ${n.name}${res.moved ? ` (${res.moved} files)` : ""}.${notes.length ? " Note: " + notes.join("; ") + "." : ""}`);
+  treeOpen.add(n.key);
+  afterMove(r, n);
+}
+function afterMove(r) {
+  downloadsIndexSeen = null;
+  treeIndexSeen = null;
+  downloadsSeen.delete(r.name);
+  caseShown = ""; hearingsShown = ""; treeShown = "";
+  renderCaseFolders();
+}
+
+/**
+ * Point the moved folder's PDF-Linker launcher at its new place: "ok", "none"
+ * (no launcher, or one that names no place), "browser" (no PDF+ to say the
+ * place), "unknown" (PDF+ could not say it for sure).
+ */
+async function retargetLauncher(dir, n, name) {
+  const run = await import("./viewer/run-request.js");
+  let launcher;
+  try { launcher = await run.folderLauncher(dir); } catch { launcher = null; }
+  if (!launcher || !launcher.token) return "none";
+  const native = window.pdfplusNative;
+  if (!native || typeof native.folderPath !== "function") return "browser";
+  try {
+    const fh = await dir.getFileHandle(launcher.name);
+    const file = await fh.getFile();
+    // The folders from the list's root down to the moved one (n.chain: the
+    // root's own folders down to the folder dropped on).
+    const now = await native.folderPath({ root: n.root.name, chain: [...n.chain, name], launcher: { name: launcher.name, size: file.size } });
+    if (!now) return "unknown";
+    const text = moveLib.retargetLauncher(await file.text(), run.folderPathOfToken(launcher.token), now);
+    const w = await fh.createWritable();
+    await w.write(text);
+    await w.close();
+    return "ok";
+  } catch { return "unknown"; }
+}
+
+document.getElementById("tree-add")?.addEventListener("click", async () => {
+  let h;
+  try { h = await showPicker("showDirectoryPicker", { id: "tree", mode: "readwrite" }); }
+  catch (e) { if (e && e.name !== "AbortError") shellToast(String(e.message || e), 5000); return; }
+  const roots = await treeRoots();
+  for (const x of roots) { try { if (await x.isSameEntry(h)) { shellToast(`${h.name} is on the list already.`, 4000); return; } } catch { /* gone */ } }
+  roots.push(h);
+  await saveTreeRoots();
+  treeIndexSeen = null; treeShown = ""; hearingsShown = "";
   renderCaseFolders();
 });
 

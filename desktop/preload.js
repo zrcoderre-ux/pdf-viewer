@@ -6,7 +6,8 @@
 // the browser, the path of a File the user picked (to tell whether two handles
 // are one file), the files Windows hands over while the app runs, Home's
 // update button and app-files setting, and the names of the folders in
-// Downloads that changed today (Home's Case folders list). main.js checks
+// Downloads that changed today (Home's Case folders list), and where a
+// case folder Home moved now is (for its PDF-Linker launcher). main.js checks
 // every path against the files it was given; a page cannot name one of its
 // own.
 
@@ -49,6 +50,17 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
   installUpdate: () => ipcRenderer.invoke("pdfplus:update-install"),
   onUpdateProgress: (cb) => { ipcRenderer.on("pdfplus:update-progress", (_e, pct) => cb(pct)); },
   downloadsToday: (since) => ipcRenderer.invoke("pdfplus:downloads-today", Number(since) || 0),
+  // Where a case folder Home moved now is, for its PDF-Linker launcher
+  // (main.js, "pdfplus:folder-path"): "" where main.js cannot say for sure.
+  folderPath: (req) => {
+    const r = req && typeof req === "object" ? req : {};
+    const l = r.launcher && typeof r.launcher === "object" ? r.launcher : {};
+    return ipcRenderer.invoke("pdfplus:folder-path", {
+      root: String(r.root || ""),
+      chain: Array.isArray(r.chain) ? r.chain.map(String) : [],
+      launcher: { name: String(l.name || ""), size: Number(l.size) },
+    });
+  },
   source: () => ipcRenderer.invoke("pdfplus:source"),
   chooseSourceFolder: () => ipcRenderer.invoke("pdfplus:source-choose"),
   useBuiltInSource: () => ipcRenderer.invoke("pdfplus:source-builtin"),

@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { makeZip } from "./viewer/zip.js";
 import {
   readHearings, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
-  hyperlinkOfFormula, dateNote, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  hyperlinkOfFormula, dateNote, namesMatch, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -183,7 +183,14 @@ const noNum = { caseName: "Jane Doe v. Initech Corp.", caseNumber: "" };
 check("no number: the folder's words in the case name", placeMatches(noNum, { name: "Doe Initech" }), true);
 check("…one word is not enough", placeMatches(noNum, { name: "Doe" }), false);
 check("…a word the case name lacks", placeMatches(noNum, { name: "Doe Globex" }), false);
-check("…a folder with another case's number", placeMatches(noNum, { name: "24STCV00777 Doe Initech" }), false);
+check("…a folder with a number the sheet does not give: by its words", placeMatches(noNum, { name: "24STCV00777 Doe Initech" }), true);
+// On 0.2.88 a folder named for its parties matched no hearing that had a number.
+check("a hearing with a number, a folder named for its parties", placeMatches(h(3), { name: "ACME v Roe" }), true);
+check("…a folder named for one party and the motion", placeMatches(h(3), { name: "ACME Demurrer" }), true);
+check("…another case's party with the motion is not it", placeMatches(h(3), { name: "Globex Demurrer" }), false);
+check("…nor a folder carrying another case's number, whatever its words", placeMatches(h(3), { name: "25STCV99999 ACME v Roe" }), false);
+check("…nor a short word alone", placeMatches({ caseName: "Roe v. Doe", motion: "", caseNumber: "25STCV12345" }, { name: "Roe" }), false);
+check("…nor a loose Register of Actions for a case the sheet numbers not", placeMatches(noNum, { name: "Register of Actions 24STCV00777.pdf" }), false);
 check("filler words left out", nameWords("ACME HOLDINGS, LP, et al. vs TAYLOR ROE 25STCV12345"), ["acme", "holdings", "taylor", "roe"]);
 const places = [
   { name: "25STCV12345.zip", kind: "zip" },
@@ -208,7 +215,7 @@ check("every one from today on", upcoming(hearings, NOW, { all: true }).map((x) 
 check("days said", [dayText(day(2026, 11, 18), NOW), dayText(day(2026, 11, 19), NOW), dayText(day(2027, 1, 8), NOW).includes("2027")], ["Today", "Tomorrow", true]);
 check("Date Submitted said short", [shortDate(day(2026, 11, 12), NOW), shortDate(day(2025, 11, 12), NOW)], ["11/12", "11/12/25"]);
 check("a folder's hearing: the next one for its case", hearingForPlace(hearings, { name: "Jane Doe Initech", numbers: ["26STCV09999"] }, NOW).row, 5);
-check("…else the latest past one", hearingForPlace(hearings, { name: "Doe Initech" }, NOW).row, 8);
+check("…else the latest past one", hearingForPlace(hearings, { name: "Doe Initech", numbers: ["99STCV99999"] }, NOW).row, 8);
 
 // ---- the list on Home -----------------------------------------------------------
 
@@ -432,6 +439,62 @@ async function browserPart() {
     await shell.evaluate(() => { FileSystemFileHandle.prototype.createWritable = window.__realWritable; window.dispatchEvent(new Event("focus")); });
     await shell.waitForFunction(() => !/waiting to be written/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 10000 });
     check("once Excel lets go, the next look writes it: the red is off", (await sheetNow()).mark, "");
+
+    console.log("15. the Folders list: drag a case onto a folder to move it there");
+    check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);
+    await shell.evaluate(async () => {
+      const top = await navigator.storage.getDirectory();
+      try { await top.removeEntry("Filed", { recursive: true }); } catch { /* none */ }
+      const filed = await top.getDirectoryHandle("Filed", { create: true });
+      await filed.getDirectoryHandle("November", { create: true });
+      const db = await new Promise((resolve, reject) => { const req = indexedDB.open("pdfviewer-folders", 1); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
+      await new Promise((resolve) => { const tx = db.transaction("places", "readwrite"); tx.objectStore("places").put([filed], "treeRoots"); tx.oncomplete = resolve; });
+      db.close();
+    });
+    await shell.reload();
+    await shell.waitForFunction(() => document.querySelectorAll("#tree-list .tree-node.root").length === 2, null, { timeout: 10000 });
+    check("…and a folder added beside it", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads", "Filed"]);
+    await shell.click('#tree-list .tree-node:has(.tree-name:text-is("Filed"))');
+    await shell.waitForFunction(() => [...document.querySelectorAll("#tree-list .tree-name")].some((e) => e.textContent === "November"), null, { timeout: 10000 });
+    check("a click opens a folder, as File Explorer's do", await shell.$$eval("#tree-list .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads", "Filed", "November"]);
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-row.draggable").length >= 2, null, { timeout: 10000 });
+    const acmeRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE"))');
+    check("a hearing that carries its folder can be dragged; one that has none cannot", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.filter((r) => r.textContent.includes("24STCV00777")).map((r) => r.draggable)), [false]);
+    await acmeRow.dragTo(shell.locator('#tree-list .tree-node:has(.tree-name:text-is("November"))'));
+    await shell.waitForSelector("#move-bar:not([hidden])", { timeout: 5000 });
+    check("the move bar asks first", await shell.textContent("#move-bar .mb-text"), "Move “25STCV12345 ACME” into Filed › November?");
+    await shell.click("#move-bar .mb-go");
+    await shell.waitForFunction(() => /^Moved /.test(document.querySelector("#move-bar .mb-text").textContent), null, { timeout: 15000 });
+    check("it says it moved", (await shell.textContent("#move-bar .mb-text")).startsWith("Moved “25STCV12345 ACME” into November"), true);
+    check("on disk: out of Downloads, into Filed › November, every file with it", await shell.evaluate(async () => {
+      const top = await navigator.storage.getDirectory();
+      const names = async (d) => { const out = []; for await (const [n] of d.entries()) out.push(n); return out.sort(); };
+      const dl = await top.getDirectoryHandle("Downloads");
+      const nov = await (await top.getDirectoryHandle("Filed")).getDirectoryHandle("November");
+      return { dl: (await names(dl)).includes("25STCV12345 ACME"), moved: await names(await nov.getDirectoryHandle("25STCV12345 ACME")) };
+    }), { dl: false, moved: ["DONE 2.40PM.txt", "Demurrer.pdf", "PDF-Linker Priority.json"] });
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-item")].some((b) => b.textContent.includes("(in November)")), null, { timeout: 15000 });
+    const moved = await acmeRow.locator(".ci-where").textContent();
+    check("the hearing still carries its folder, at its new place", moved, "Demurrer · 25STCV12345 ACME (in November)");
+    check("…with its status and its buttons", [/^Finished /.test(await acmeRow.locator(".ci-status").textContent()), await acmeRow.locator(".ci-line").count()], [true, 1]);
+    check("…and the case folder shows in the list, closed", await shell.$$eval("#tree-list .tree-node.leaf .tree-name", (x) => x.map((e) => e.textContent)), ["25STCV12345 ACME"]);
+    await shell.click("#move-bar .mb-cancel");
+
+    console.log("16. a move refused while a run goes in the folder");
+    await shell.evaluate(async () => {
+      const top = await navigator.storage.getDirectory();
+      const init = await (await top.getDirectoryHandle("Elsewhere")).getDirectoryHandle("Initech compel");
+      const w = await (await init.getFileHandle("ETA ~6.04PM (1 of 3).txt", { create: true })).createWritable(); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    });
+    const initRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("26STCV09999 Jane Doe v. Initech"))');
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("26STCV09999") && /Running/.test(r.textContent)), null, { timeout: 15000 });
+    await initRow.dragTo(shell.locator('#tree-list .tree-node:has(.tree-name:text-is("Filed"))'));
+    await shell.waitForSelector("#move-bar:not([hidden])", { timeout: 5000 });
+    await shell.click("#move-bar .mb-go");
+    await shell.waitForFunction(() => /was not moved/.test(document.querySelector("#move-bar .mb-text").textContent), null, { timeout: 10000 });
+    check("it says why", await shell.textContent("#move-bar .mb-text"), "“Initech compel” was not moved: PDF-Linker is running on it: wait for the run to finish.");
+    check("…and the folder is where it was", await shell.evaluate(async () => { try { await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Elsewhere")).getDirectoryHandle("Initech compel"); return true; } catch { return false; } }), true);
     check("no page errors", errors, []);
   } finally {
     await browser.close();

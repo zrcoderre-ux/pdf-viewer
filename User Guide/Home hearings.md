@@ -72,3 +72,18 @@ the list: a case whose hearing is past or marked done or off, one not on the
 sheet, or one the matching missed. Each says its hearing where the sheet has
 one, with the same buttons. When every folder is on a hearing, the list is not
 shown. **Link Downloads…** is in the Hearings heading.
+
+## Folders: moving a case into a folder
+
+The **Folders** list on the left of Home shows Downloads and the folders you
+add with **+ Add** (the folders you file cases into). Click a folder to open
+it, as in File Explorer.
+
+Drag a case's row (a hearing with its folder, or a row in Case folders) onto a
+folder. Home asks "Move … into …?" and **Move** moves the whole case folder
+there. The hearing keeps its folder, its PDF-Linker status and its buttons
+until the hearing date has passed.
+
+Home won't move a folder while PDF-Linker is running on it, while it is open in
+a reader tab, or where a file of the same name is already there. In PDF+, the
+folder's Re-run PDF-Linker launcher is updated to its new place.

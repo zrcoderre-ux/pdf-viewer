@@ -167,5 +167,77 @@ date is passed down to the rows below. The row shows a * after the case name
 (inside the row's button, its click its own); a click opens the note under the
 row and a second closes it, and which are open survives redraws (`notesOpen`).
 
+## Matched by name where a number cannot decide (2026-11-18)
+
+The owner, on 0.2.88: "The consolidation didn't work ... I am still seeing
+both the case folder and hearing entries for the same cases ... the word, log
+share and prioritize buttons are still only on the case folders." The rule
+was by case number alone wherever the sheet's row gave one, so a folder named
+for its parties (no number in its name, no Register of Actions in it) matched
+no hearing, stayed in Case folders with its buttons, and its hearing said Not
+downloaded. Now (`placeMatches`) the numbers decide only where both sides have
+one (and a place carrying another case's number is never the case); else the
+names do (`namesMatch`): every word of the place's name that says anything
+stands in the case name or the motion ("ACME Demurrer"), two of them the case
+name's or one of four letters or more. A folder's own filler ("case", "copy",
+"new", "motion") is no word. The hover now says the case number read off each
+hearing, and on an unmatched folder the numbers it carries, so a miss can be
+read off the screen.
+
+## The Folders list: drag a case into a folder (2026-11-18)
+
+The owner: "I want to add the ability to drag and drop them into another
+folder straight from the hearings menu. Can you add a file explorer style
+folder list to the left side?" And: "They should still remain in the Hearing
+list until the hearing date has passed."
+
+- **The list** (`#folder-tree`, left of Home; above it under 960px) holds
+  Downloads once linked and the folders added with **+ Add** (handles in
+  `places` → `"treeRoots"`, write leave asked at the pick; ✕ takes one off the
+  list, nothing on disk changes). A folder opens a level at a time on a click;
+  one whose name carries a case number is a case folder and opens no further,
+  and is no drop target. Held over a closed folder for `SPRING_OPEN_MS`, a drag
+  opens it. Redrawn only where it changed, and never under a drag.
+- **The drag.** A row carrying a case folder (a hearing's, or one in Case
+  folders) is `draggable`; dropped on a folder of the list, the move bar asks
+  ("Move “…” into Filed › November?"), and **Move** moves it: the click is the
+  one write leave is asked on, for the folder, the one holding it and the
+  target. The shell's own file-drop overlay stands aside while a case is
+  dragged (`caseDrag`).
+- **The move** (`viewer/case-move.js`, `moveFolder`). Chrome moves FILES on
+  the disk (FileSystemFileHandle.move(), Chrome 111) but not folders (the
+  launch left directory moves out; MDN marks Chrome's move() partial), so a
+  folder of the same name is made at the target and each file moved into it
+  (on one drive, a rename), subfolders the same way, and the emptied folder
+  taken away through the folder holding it, or its own remove(), else left
+  (and said). Nothing is copied. Refused before anything moves where a file
+  would land on another (`collisions`), into the folder itself or one inside
+  it, where it already is, while PDF-Linker runs in it or a run looks stopped
+  part-way, and while a reader tab holds it (`moveBlocker`, `inReader`). A
+  move stopped part-way is finished by dragging it onto the same folder again
+  (a same-named folder there is used, not a clash). Opened-here records of
+  the folder are pointed at its new place.
+- **PDF-Linker's launcher.** It records the folder's path (the Re-run token,
+  and the run's own command line), so a moved folder's Re-run would ask
+  PDF-Linker for the old place. In PDF+, main.js answers where the folder now
+  is (`pdfplus:folder-path`: the list root's name, the folders from it down,
+  and the launcher's name and size, answered only where exactly one place it
+  knows fits) and the launcher is rewritten (`retargetLauncher`: the token,
+  and every mention of the old path as a whole path, either slash, any case on
+  Windows). In a browser the move bar says the launcher still names the old
+  place.
+- **Still on its hearing's row.** `treeIndex` looks through the list's own
+  folders for case folders (each one's folders, and one level further under
+  any whose name carries no case number: a folder per judge or month), names
+  only, every `TREE_INDEX_MS` and at once after a move; `hearingItems` matches
+  them as it matches Downloads, so the hearing keeps its folder, status and
+  buttons ("… (in November)") until the hearing has passed.
+
+Tests: `test-case-move.mjs` (the launcher rewrite and the refusals in node;
+the move itself over OPFS: a Text Files subfolder with it, a clash refused, a
+move finished, never into itself) and `test-hearing-sheet.mjs` parts 15–16
+(the list, a drag onto a folder, the hearing keeping its folder, a move refused
+while a run goes).
+
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

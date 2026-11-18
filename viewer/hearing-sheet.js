@@ -635,7 +635,9 @@ export function restyleRow(xml, rowN, cellStyle, need = [], rowStyle = () => nul
 // ---- matching a hearing to its case folder -------------------------------------
 
 const STOP = new Set(["v", "vs", "versus", "et", "al", "the", "of", "and", "a", "an", "in", "re", "inc", "llc", "lp", "llp", "corp",
-  "corporation", "co", "company", "ltd", "pc", "an", "individual", "matter", "estate", "trust", "trustee", "people", "state", "california"]);
+  "corporation", "co", "company", "ltd", "pc", "an", "individual", "matter", "estate", "trust", "trustee", "people", "state", "california",
+  // A folder's own words that name no party.
+  "case", "cases", "folder", "copy", "new", "files", "hearing", "motion"]);
 /** The words of a name that say which case it is: lower-cased, no case numbers, no filler. */
 export function nameWords(text) {
   const bare = String(text || "").replace(CASE_NO_RE, " ");
@@ -645,20 +647,36 @@ export function nameWords(text) {
 /**
  * Whether a place (a folder, a zip, a file) is the hearing's case:
  * `place` is { name, numbers? (case numbers in the files inside it) }.
- * By case number wherever the hearing has one: the place's name, or a file
- * in it ("Register of Actions 25STCV12345.pdf", which the E-Court Export
- * saves). Where the sheet gives no number, by name: every word of the
- * folder's name that says which case it is stands in the case name, and
- * there are two such words at least ("Doe Acme" for "Doe v. Acme Corp.").
+ * By case number where both have one: the place's name, or a file in it
+ * ("Register of Actions 25STCV12345.pdf", which the E-Court Export saves);
+ * a place carrying another case's number is never this one. Where either
+ * side has none, by name (namesMatch).
+ *
+ * The owner (2026-11-18), on 0.2.88: "I am still seeing both the case folder
+ * and hearing entries for the same cases." The rule was by number alone
+ * wherever the sheet gave one, so a folder named for its parties, with no
+ * Register of Actions in it, matched no hearing at all.
  */
 export function placeMatches(hearing, place) {
   const nums = new Set([...caseNumbersIn(place.name), ...((place.numbers) || [])]);
-  if (hearing.caseNumber) return nums.has(hearing.caseNumber);
-  if (nums.size) return false;
-  const fw = nameWords(String(place.name).replace(/\.zip$/i, ""));
-  if (fw.length < 2) return false;
-  const cw = new Set(nameWords(hearing.caseName));
-  return fw.every((w) => cw.has(w));
+  if (hearing.caseNumber && nums.size) return nums.has(hearing.caseNumber);
+  return namesMatch(hearing, place.name);
+}
+
+/**
+ * Whether a place's name names the hearing's case: every word of it that
+ * says anything (nameWords) stands in the case name or the motion ("ACME
+ * Demurrer" for a demurrer in ACME v. Roe), and of them two at least are the
+ * case name's, or one of four letters or more ("ACME", not "Roe").
+ */
+export function namesMatch(hearing, placeName) {
+  const fw = nameWords(String(placeName || "").replace(/\.(zip|pdf|docx?|xlsx)$/i, ""));
+  if (!fw.length) return false;
+  const caseWords = new Set(nameWords(hearing.caseName));
+  const motionWords = new Set(nameWords(hearing.motion));
+  if (!fw.every((w) => caseWords.has(w) || motionWords.has(w))) return false;
+  const naming = fw.filter((w) => caseWords.has(w));
+  return naming.length >= 2 || (naming.length === 1 && naming[0].length >= 4);
 }
 
 // The E-Court extension's Order Template Input sheet ("Order_Template_Input_

@@ -765,6 +765,41 @@ function registerUpdateIpc() {
     return { name: path.basename(dir), folders };
   });
 
+  // Where a case folder Home just moved now is (pwa/app-web.js, "Home:
+  // folders"), so its PDF-Linker launcher can be made to name it
+  // (viewer/case-move.js, retargetLauncher). A page holds folders by handle
+  // and cannot learn a path; the page says the name of the folder it dropped
+  // into the tree under (`root`), the folders from there down to the moved
+  // one (`chain`), and the launcher it read there (name and size). main.js
+  // answers only where exactly one place it knows (a folder the user gave the
+  // app, Downloads) has that chain under it and the launcher of that size in
+  // it, and remembers it for the Word button; else "".
+  ipcMain.handle("pdfplus:folder-path", async (event, req) => {
+    if (!fromApp(event) || !req || typeof req !== "object") return "";
+    const part = (x) => typeof x === "string" && x && x !== "." && x !== ".." && !/[\\/\0]/.test(x);
+    const root = req.root, chain = Array.isArray(req.chain) ? req.chain : [];
+    const launcher = req.launcher && typeof req.launcher === "object" ? req.launcher : null;
+    if (!part(root) || !chain.length || chain.length > 8 || !chain.every(part) || !launcher || !part(launcher.name) || !Number.isFinite(Number(launcher.size))) return "";
+    const roots = knownFoldersNamed(root);
+    try {
+      const dl = app.getPath("downloads");
+      const same = process.platform === "win32" ? path.basename(dl).toLowerCase() === root.toLowerCase() : path.basename(dl) === root;
+      if (same && !roots.some((x) => pathKey(x) === pathKey(dl))) roots.push(dl);
+    } catch { /* no Downloads */ }
+    const hits = [];
+    for (const r of roots) {
+      const p = path.join(r, ...chain);
+      try {
+        if (!(await fsp.stat(p)).isDirectory()) continue;
+        if ((await fsp.stat(path.join(p, launcher.name))).size !== Number(launcher.size)) continue;
+        if (!hits.some((x) => pathKey(x) === pathKey(p))) hits.push(p);
+      } catch { /* not there */ }
+    }
+    if (hits.length !== 1) return "";
+    rememberFolder(hits[0]);
+    return hits[0];
+  });
+
   ipcMain.handle("pdfplus:version", (event) => (fromApp(event) ? app.getVersion() : ""));
 
   ipcMain.handle("pdfplus:update-check", async (event) => {
