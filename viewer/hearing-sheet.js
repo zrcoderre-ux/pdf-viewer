@@ -17,6 +17,7 @@
 // from its <hyperlinks> and rels, or a HYPERLINK() formula.
 
 import { zipEntries, readEntry, parseSharedStrings, colIndex, unescapeXml } from "./xlsx-read.js";
+import { replaceParts, colLetters } from "./xlsx-write.js";
 
 // ---- case numbers -------------------------------------------------------------
 
@@ -159,36 +160,38 @@ function isDateFormat(code) {
  * styles.xml as each cell style (the `s=` index) needs it:
  * [{ fill: { hex, tint } | null, date: bool }].
  */
-export function parseStyles(xml, theme = OFFICE_THEME) {
-  xml = String(xml || "");
-  let indexed = INDEXED;
+/** The indexed palette a styles.xml uses: its own <indexedColors>, else Excel's. */
+function indexedOf(xml) {
   const ic = /<indexedColors>([\s\S]*?)<\/indexedColors>/.exec(xml);
   if (ic) {
     const over = [...ic[1].matchAll(/<rgbColor\s[^>]*rgb="([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})"/g)].map((m) => m[1].slice(-6).toUpperCase());
-    if (over.length) indexed = over;
+    if (over.length) return over;
   }
+  return INDEXED;
+}
+/** The colour of one <fill>'s body ({ hex, tint }), or null for none. */
+function fillColor(body, theme, indexed) {
+  const pat = /<patternFill\b([^>]*)\/?>/.exec(body);
+  const type = pat ? attrOf(pat[1], "patternType") : null;
+  if (pat && type && type !== "none") {
+    const fg = /<fgColor\b[^>]*\/?>/.exec(body);
+    const bg = /<bgColor\b[^>]*\/?>/.exec(body);
+    return colorOf(fg && fg[0], theme, indexed) || colorOf(bg && bg[0], theme, indexed);
+  }
+  // A gradient: its first stop.
+  const stop = /<stop\b[^>]*>\s*(<color\b[^>]*\/?>)/.exec(body);
+  return stop ? colorOf(stop[1], theme, indexed) : null;
+}
+const FILL_RE = /<fill>([\s\S]*?)<\/fill>|<fill\/>/g;
+
+export function parseStyles(xml, theme = OFFICE_THEME) {
+  xml = String(xml || "");
+  const indexed = indexedOf(xml);
   const fmts = new Map();
   for (const m of xml.matchAll(/<numFmt\s[^>]*\/?>/g)) fmts.set(Number(attrOf(m[0], "numFmtId")), attrOf(m[0], "formatCode") || "");
   const fills = [];
   const fillsXml = /<fills\b[^>]*>([\s\S]*?)<\/fills>/.exec(xml);
-  if (fillsXml) {
-    for (const m of fillsXml[1].matchAll(/<fill>([\s\S]*?)<\/fill>|<fill\/>/g)) {
-      const body = m[1] || "";
-      const pat = /<patternFill\b([^>]*)\/?>/.exec(body);
-      const type = pat ? attrOf(pat[1], "patternType") : null;
-      let color = null;
-      if (pat && type && type !== "none") {
-        const fg = /<fgColor\b[^>]*\/?>/.exec(body);
-        const bg = /<bgColor\b[^>]*\/?>/.exec(body);
-        color = colorOf(fg && fg[0], theme, indexed) || colorOf(bg && bg[0], theme, indexed);
-      } else {
-        // A gradient: its first stop.
-        const stop = /<stop\b[^>]*>\s*(<color\b[^>]*\/?>)/.exec(body);
-        if (stop) color = colorOf(stop[1], theme, indexed);
-      }
-      fills.push(color);
-    }
-  }
+  if (fillsXml) for (const m of fillsXml[1].matchAll(FILL_RE)) fills.push(fillColor(m[1] || "", theme, indexed));
   const out = [];
   const xfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml);
   if (xfs) {
@@ -362,7 +365,9 @@ export function headerColumns(row) {
  * `mark` is "done" (green), "off" (red) or "": the fill of the row's
  * Date, Motion Type or Case Name cell, else of the row itself.
  * `caseNumber` is the first case number in the case name, the rest of the
- * row, or the link's caseNumber= parameter.
+ * row, or the link's caseNumber= parameter. `note` is the words the owner
+ * wrote in the row's Date cell, "" for none (dateNote). `part` and `cols`
+ * (the sheet's zip part and its columns) are what markHearing writes by.
  */
 export async function readHearings(data, now = Date.now()) {
   if (data && typeof data.arrayBuffer === "function" && !(data instanceof Uint8Array)) data = new Uint8Array(await data.arrayBuffer());
@@ -422,8 +427,15 @@ export async function readHearings(data, now = Date.now()) {
       const dc = cell(r, cols.date);
       let d = dateOf(dc);
       // A row with a date and no case is a date written over the cases under it.
-      if (!caseName) { if (d.at) lastDate = d; continue; }
-      if (!d.at && !d.text) d = lastDate; else lastDate = d;
+      if (!caseName) { if (d.at && !d.text) lastDate = d; continue; }
+      // Words in the Date cell beside a case are the owner's note on it
+      // (dateNote): the row keeps a date the words name ("Continued to
+      // 1/5/27"), else takes the one above it; only a plain date is the one
+      // the rows below it take.
+      const note = dateNote(d.text);
+      if (note) { if (!d.at) d = lastDate.at ? lastDate : { at: 0, text: "No date" }; }
+      else if (!d.at && !d.text) d = lastDate;
+      else lastDate = d;
       const motionCell = cell(r, cols.motion);
       const sub = dateOf(cell(r, cols.submitted));
       // The case name's own link first, then any other cell's in the row.
@@ -443,11 +455,181 @@ export async function readHearings(data, now = Date.now()) {
         motion: String((motionCell && motionCell.v) || "").replace(/\s+/g, " ").trim(),
         caseName, caseNumber, url,
         submitted: sub.at, submittedText: sub.at ? "" : sub.text,
-        mark,
+        mark, note,
+        part: sh.part, cols,
       });
     }
   }
   return { hearings, sheets: read };
+}
+
+/**
+ * The note in a Date cell's text, or "": the cell's words where they say more
+ * than a date ("Check POS", "TBD", "Continued to 1/5/27"); a date alone, in
+ * any form textToDate reads ("Fri, Nov 20, 2026", "11/20"), is no note.
+ */
+const DATE_WORDS = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b\.?|(?<=\d)(?:st|nd|rd|th)\b/gi;
+export function dateNote(text) {
+  const t = String(text || "").trim();
+  if (!t) return "";
+  return /[a-z]/i.test(t.replace(DATE_WORDS, "")) ? t : "";
+}
+
+// ---- marking a hearing in the sheet ---------------------------------------------
+//
+// The owner (2026-11-18): "Add off calendar and on calendar toggles. These
+// would change the color of the excel sheet accordingly." Off calendar fills
+// the row's cells red, as the owner marks them by hand; On calendar takes the
+// red off. The workbook is copied part for part (xlsx-write.js, replaceParts)
+// and only styles.xml and the one sheet are rewritten: a new cell style is a
+// copy of the cell's own (its font, borders, number format, alignment) with
+// only the fill changed, so a date stays a date and a link keeps its look.
+
+const RED_FILL = '<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/><bgColor indexed="64"/></patternFill></fill>';
+
+/** The <fill> entries of a styles.xml, raw, with what each means (markOfColor). */
+function fillsOf(xml, theme) {
+  const indexed = indexedOf(xml);
+  const block = /<fills\b[^>]*>([\s\S]*?)<\/fills>/.exec(xml);
+  if (!block) return [];
+  return [...block[1].matchAll(FILL_RE)].map((m) => {
+    const c = fillColor(m[1] || "", theme, indexed);
+    return { raw: m[0], mark: c ? markOfColor(c.hex, c.tint) : "" };
+  });
+}
+/** The <xf> entries of <cellXfs>, raw. */
+function cellXfsOf(xml) {
+  const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml);
+  return block ? [...block[1].matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map((m) => m[0]) : [];
+}
+/** An <xf> with its fillId set (applyFill with it). */
+function withFill(xf, fillId) {
+  const open = /^<xf\b[^>]*?(?=\/?>)/.exec(xf)[0];
+  let tag = /\sfillId="/.test(open) ? open.replace(/\sfillId="[^"]*"/, ` fillId="${fillId}"`) : open + ` fillId="${fillId}"`;
+  tag = /\sapplyFill="/.test(tag) ? tag.replace(/\sapplyFill="[^"]*"/, ' applyFill="1"') : tag + ' applyFill="1"';
+  return tag + xf.slice(open.length);
+}
+function setAttr(tag, name, value) {
+  return new RegExp(`\\s${name}="`).test(tag) ? tag.replace(new RegExp(`\\s${name}="[^"]*"`), ` ${name}="${value}"`) : tag.replace(/(\/?>)$/, ` ${name}="${value}"$1`);
+}
+
+/**
+ * The workbook with hearing `hg`'s row marked `mark` ("off": filled red;
+ * "": its red taken off), as new bytes. The row is found afresh in `data`
+ * (the file as it stands now, which Excel may have changed): at `hg.row` of
+ * `hg.sheet` where its case name still stands there, else the row of that
+ * sheet holding the same case name and date; none, and it throws.
+ * Off fills the Date, Motion Type, Case Name and Date Submitted cells and any
+ * other cell of the row already marked, with the red the sheet's own off rows
+ * use where it has one; On takes the off fills off every cell of the row and
+ * off the row's own style, and leaves any other fill (a yellow highlight) be.
+ */
+export async function markHearing(data, hg, mark) {
+  if (data && typeof data.arrayBuffer === "function" && !(data instanceof Uint8Array)) data = new Uint8Array(await data.arrayBuffer());
+  const { hearings } = await readHearings(data);
+  const same = (h) => h.sheet === hg.sheet && h.caseName === hg.caseName;
+  const target = hearings.find((h) => same(h) && h.row === hg.row)
+    || hearings.find((h) => same(h) && h.date === hg.date);
+  if (!target) throw new Error(`the row for ${hg.caseName} is no longer in the sheet`);
+  const entries = zipEntries(data);
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const text = async (name) => { const e = byName.get(name); return e ? readEntry(data, e) : ""; };
+  const theme = parseTheme(await text("xl/theme/theme1.xml"));
+  let styles = await text("xl/styles.xml");
+  const sheetXml = await text(target.part);
+  if (!styles || !sheetXml) throw new Error("the workbook has no styles or no sheet part");
+  const fills = fillsOf(styles, theme);
+  const xfs = cellXfsOf(styles);
+  const markOfXf = (s) => {
+    const m = /\sfillId="(\d+)"/.exec(xfs[s] || "");
+    return m && fills[+m[1]] ? fills[+m[1]].mark : "";
+  };
+  // The red: the one the sheet's own off rows use, else a plain red added once.
+  let redId = fills.findIndex((f) => f.mark === "off");
+  const added = { fills: [], xfs: [] };
+  if (mark === "off" && redId < 0) { redId = fills.length; added.fills.push(RED_FILL); }
+  // One new style per old one, reused where an identical one stands.
+  const memo = new Map();
+  const styleFor = (s) => {
+    if (memo.has(s)) return memo.get(s);
+    const base = xfs[s] || xfs[0] || '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>';
+    const want = withFill(base, mark === "off" ? redId : 0);
+    let at = xfs.indexOf(want);
+    if (at < 0) {
+      let k = added.xfs.indexOf(want);
+      if (k < 0) { k = added.xfs.length; added.xfs.push(want); }
+      at = xfs.length + k;
+    }
+    memo.set(s, at);
+    return at;
+  };
+  const cols = [target.cols.date, target.cols.motion, target.cols.caseName, target.cols.submitted].filter((c) => c >= 0);
+  const nextSheet = restyleRow(sheetXml, target.row, (col, s) => {
+    const marked = markOfXf(s);
+    if (mark === "off") return cols.includes(col) || marked ? (marked === "off" ? null : styleFor(s)) : null;
+    return marked === "off" ? styleFor(s) : null;
+  }, mark === "off" ? cols : [], (s) => (mark === "" && markOfXf(s) === "off" ? styleFor(s) : null));
+  if (added.fills.length) {
+    styles = styles.replace(/<fills\b([^>]*)>([\s\S]*?)<\/fills>/, (all, a, body) =>
+      `${setAttr(`<fills${a}>`, "count", fills.length + added.fills.length)}${body}${added.fills.join("")}</fills>`);
+  }
+  if (added.xfs.length) {
+    styles = styles.replace(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/, (all, a, body) =>
+      `${setAttr(`<cellXfs${a}>`, "count", xfs.length + added.xfs.length)}${body}${added.xfs.join("")}</cellXfs>`);
+  }
+  const replace = { [target.part]: nextSheet };
+  if (added.fills.length || added.xfs.length) replace["xl/styles.xml"] = styles;
+  return replaceParts(data, replace);
+}
+
+/**
+ * The sheet XML with row `rowN`'s cells restyled: `cellStyle(col, s)` gives a
+ * cell its new style index, or null to leave it; `need` lists the columns
+ * the row must have (a missing one is added, empty, in column order, styled
+ * by cellStyle(col, 0)); `rowStyle(s)` does the same for the row's own style.
+ */
+export function restyleRow(xml, rowN, cellStyle, need = [], rowStyle = () => null) {
+  const rowRe = /<row\b([^>]*?)(\/>|>([\s\S]*?)<\/row>)/g;
+  let m, seq = 0;
+  while ((m = rowRe.exec(xml))) {
+    seq++;
+    const rn = parseInt(attrOf(m[1], "r") || "", 10);
+    if ((Number.isFinite(rn) ? rn : seq) === rowN) break;
+  }
+  if (!m) throw new Error("row " + rowN + " is not in the sheet");
+  let open = `<row${m[1].replace(/\s+$/, "")}>`;
+  const rs = attrOf(m[1], "s");
+  if (rs != null && attrOf(m[1], "customFormat") === "1") {
+    const ns = rowStyle(Number(rs));
+    if (ns != null) open = setAttr(open, "s", ns);
+  }
+  let inner = m[3] || "";
+  const have = new Set();
+  inner = inner.replace(/<c\b([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g, (cell, attrs) => {
+    const ref = attrOf(attrs, "r");
+    if (!ref) return cell;
+    const col = colIndex(ref.replace(/\d+$/, ""));
+    have.add(col);
+    const ns = cellStyle(col, Number(attrOf(attrs, "s") || 0));
+    if (ns == null) return cell;
+    const openTag = /^<c\b[^>]*?\/?>/.exec(cell)[0];
+    return setAttr(openTag, "s", ns) + cell.slice(openTag.length);
+  });
+  for (const col of [...need].sort((a, b) => a - b)) {
+    if (have.has(col)) continue;
+    const ns = cellStyle(col, 0);
+    if (ns == null) continue;
+    const ref = colLetters(col) + rowN;
+    const add = `<c r="${ref}" s="${ns}"/>`;
+    // Before the first cell to its right.
+    let at = inner.length;
+    for (const c of inner.matchAll(/<c\b([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g)) {
+      const r = attrOf(c[1], "r");
+      if (r && colIndex(r.replace(/\d+$/, "")) > col) { at = c.index; break; }
+    }
+    inner = inner.slice(0, at) + add + inner.slice(at);
+  }
+  return xml.slice(0, m.index) + open + inner + "</row>" + xml.slice(m.index + m[0].length);
 }
 
 // ---- matching a hearing to its case folder -------------------------------------

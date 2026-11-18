@@ -114,5 +114,47 @@ instead." So a hearing whose case folder is found IS that folder's row:
 - The Downloads link moved into the Hearings heading ("Link Downloads…"),
   since the Case folders list may be hidden and Downloads serves the matching.
 
+## Off calendar and On calendar (2026-11-18)
+
+The owner: "Add off calendar and on calendar toggles. These would change the
+color of the excel sheet accordingly." Each hearing row carries **Off
+calendar** (or, on a row marked off, **On calendar**). `markHearing`
+(hearing-sheet.js) rewrites only `xl/styles.xml` and the row's sheet,
+copying every other part through (`xlsx-write.js`, `replaceParts`):
+
+- The row is found afresh in the file as it now stands, at its row where its
+  case name still stands there, else by case name and date in that sheet;
+  neither, and the change is dropped with a word.
+- **Off** fills the Date, Motion Type, Case Name and Date Submitted cells (a
+  missing one is added, empty), and any other cell of the row already marked,
+  with the red the sheet's own off rows use (the first fill `markOfColor`
+  reads as off), else a plain FF0000 added once. **On** takes the off fills
+  off every cell of the row and off the row's own style, and leaves any other
+  fill be (a yellow highlight stays).
+- A new cell style is a copy of the cell's own `<xf>` with only `fillId` (and
+  `applyFill`) changed, so a date keeps its number format and a link its font;
+  an identical style already there is reused.
+
+**Excel holds the file.** Windows refuses another program's write to a
+workbook Excel has open. So a toggle is an EDIT, kept in the folders database
+(`places` → `"hearingEdits"`) and written at once where it can be
+(`writeEdits`, asked for write leave on the click). Refused, it waits: the
+list shows the row as marked (`withEdits`, a dashed pill), the summary says
+how many changes wait for Excel to close the sheet, and every look (`loadSheet`,
+with the leave already given) tries again, applying the change to whatever
+Excel saved meanwhile. Tested by refusing `createWritable` and letting it
+through.
+
+## Notes in the Date column
+
+The owner: "I sometimes write notes in the date column next to the case. Those
+should get an * that expands when clicked." `dateNote`: the Date cell's text is
+a note where it holds words beyond a date (month and day names and ordinals
+are a date's own words). The row takes the date the note names ("Continued to
+1/5/27"), else the one above it, else is listed under "No date"; only a plain
+date is passed down to the rows below. The row shows a * after the case name
+(inside the row's button, its click its own); a click opens the note under the
+row and a second closes it, and which are open survives redraws (`notesOpen`).
+
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

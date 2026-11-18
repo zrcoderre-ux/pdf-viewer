@@ -23,6 +23,24 @@ Fill a row (or its case name cell) **green** when it is done, and **red** when
 it is off calendar or you otherwise don't have to work on it. Those rows drop
 out of the list. **Show done and off** brings them back, struck through.
 
+## Off calendar and On calendar
+
+Each hearing has an **Off calendar** button. It fills the row red in your
+sheet, just as you would by hand, and the hearing leaves the list. With **Show
+done and off**, a red row has **On calendar**, which takes the red off.
+
+If the workbook is open in Excel, Windows won't let anything else write to
+it. Home still shows the change, says it is waiting, and writes it into the
+sheet as soon as Excel closes the workbook. It doesn't overwrite what you saved
+in the meantime.
+
+## Notes
+
+Anything you type in a case's **Date** cell that isn't just a date is a note.
+A **\*** appears after the case name; click it to read the note, and click
+again to close it. The hearing keeps the date written above it, or the date
+the note names ("Continued to 1/5/27").
+
 ## Download status
 
 Each hearing is matched to its case by the case number, in the case name or in

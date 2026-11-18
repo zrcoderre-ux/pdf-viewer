@@ -1462,6 +1462,10 @@ async function loadSheet() {
   const h = await sheetHandle();
   if (!h) return { state: "none", name: "", hearings: [], sheets: [] };
   if (!(await permitted(h, "read", false))) return { state: "locked", name: h.name, hearings: [], sheets: [] };
+  // Off / On calendar changes not yet in the file: written now where PDF+ may
+  // write (asked on the click that made them; a look asks nothing).
+  const edits = await editsAll();
+  if (edits.length && (await permitted(h, "readwrite", false))) await writeEdits(h);
   try {
     const file = await h.getFile();
     const key = `${h.name}|${file.size}|${file.lastModified}`;
@@ -1469,12 +1473,114 @@ async function loadSheet() {
       const { hearings, sheets } = await hearingLib.readHearings(file);
       sheetSeen = { key, hearings, sheets, readAt: file.lastModified };
     }
-    return { state: "ok", name: h.name, ...sheetSeen };
+    return { state: "ok", name: h.name, ...sheetSeen, hearings: withEdits(sheetSeen.hearings) };
   } catch (e) {
     const last = sheetSeen || { hearings: [], sheets: [] };
-    return { state: "error", name: h.name, ...last, error: (e && e.message) || String(e) };
+    return { state: "error", name: h.name, ...last, hearings: withEdits(last.hearings), error: (e && e.message) || String(e) };
   }
 }
+
+// ---- Off calendar / On calendar, written into the sheet ----------------------
+//
+// The owner (2026-11-18): "Add off calendar and on calendar toggles. These
+// would change the color of the excel sheet accordingly." A toggle is kept as
+// an EDIT (in the folders database, `places` → "hearingEdits", so a restart
+// keeps it) and written at once where it can be: the file is read as it
+// stands and only its styles and the one sheet are rewritten
+// (hearing-sheet.js, markHearing). Excel holds a workbook it has open against
+// writing, so while it does the write fails, the edit waits, the list shows
+// it as made ("waiting"), and every look tries again: it lands once Excel
+// closes the workbook, over whatever Excel saved. A row the sheet no longer
+// has is dropped with a word.
+let hearingEdits = null;   // [{ sheet, row, caseName, date, mark }]
+let editsError = "";       // why the last write failed, "" when none waits
+let editsBusy = false;
+const sameHearing = (a, b) => a.sheet === b.sheet && a.row === b.row && a.caseName === b.caseName;
+async function editsAll() {
+  if (!hearingEdits) {
+    try { hearingEdits = (await foldersTx("places", "readonly", (st) => st.get("hearingEdits"))) || []; }
+    catch { hearingEdits = []; }
+  }
+  return hearingEdits;
+}
+async function editsSave() {
+  try { await foldersTx("places", "readwrite", (st) => st.put(hearingEdits, "hearingEdits")); } catch { /* kept for this session only */ }
+}
+/** The hearings as Home shows them: each one an edit waits on marked as the edit says. */
+function withEdits(hearings) {
+  const edits = hearingEdits || [];
+  if (!edits.length) return hearings;
+  return hearings.map((hg) => {
+    const e = edits.find((x) => sameHearing(x, hg));
+    return e ? { ...hg, mark: e.mark, waiting: true } : hg;
+  });
+}
+async function writeEdits(h) {
+  if (editsBusy) return;
+  editsBusy = true;
+  try {
+    const edits = await editsAll();
+    while (edits.length) {
+      const e = edits[0];
+      let out;
+      try { out = await hearingLib.markHearing(await h.getFile(), e, e.mark); }
+      catch (x) {
+        if (x && x.name === "NotReadableError") { editsError = x.message || String(x); return; }
+        edits.shift();
+        await editsSave();
+        shellToast(`${e.caseName} was not marked in ${h.name}: ${(x && x.message) || x}.`, 8000);
+        continue;
+      }
+      let w = null;
+      try {
+        w = await h.createWritable();
+        await w.write(out);
+        await w.close();
+      } catch (x) {
+        try { if (w) await w.abort(); } catch { /* already gone */ }
+        editsError = (x && x.message) || String(x);
+        return;
+      }
+      edits.shift();
+      await editsSave();
+      editsError = "";
+      sheetSeen = null;
+    }
+  } finally { editsBusy = false; }
+}
+async function setHearingMark(hg, mark) {
+  const h = await sheetHandle();
+  if (!h) return;
+  // Asked first, while the click still counts as one (PDF+ grants it).
+  if (!(await permitted(h, "readwrite", true))) { shellToast(`PDF+ may not write into ${h.name}, so it was not changed.`, 6000); return; }
+  const edits = await editsAll();
+  const i = edits.findIndex((e) => sameHearing(e, hg));
+  if (i >= 0) edits.splice(i, 1);
+  edits.push({ sheet: hg.sheet, row: hg.row, caseName: hg.caseName, date: hg.date, mark });
+  await editsSave();
+  await writeEdits(h);
+  const what = mark === "off" ? "off calendar" : "on calendar";
+  shellToast(edits.length
+    ? `${hg.caseName} is marked ${what} here. ${h.name} looks open in Excel, so it is written as soon as Excel closes it.`
+    : `${hg.caseName} marked ${what} in ${h.name}.`, 6000);
+  hearingsShown = "";
+  renderCaseFolders();
+}
+function calendarButton(hg) {
+  const b = document.createElement("button");
+  b.className = "ci-cal";
+  const off = hg.mark !== "off";
+  b.textContent = off ? "Off calendar" : "On calendar";
+  b.title = off ? `Mark ${hg.caseName} off calendar: its row in the sheet is filled red` : `Put ${hg.caseName} back on calendar: the red comes off its row in the sheet`;
+  b.addEventListener("click", (e) => { e.stopPropagation(); setHearingMark(hg, off ? "off" : ""); });
+  return b;
+}
+
+// Notes typed in a case's Date cell (hearing-sheet.js, dateNote): a * after
+// the case name, opened and closed with a click; which are open is kept
+// across redraws.
+const notesOpen = new Set();
+const noteKey = (hg) => `${hg.sheet}|${hg.row}|${hg.caseName}`;
 
 /** The case numbers the files in a listing carry ("Register of Actions 25STCV12345.pdf"). */
 function listingNumbers(listing) {
@@ -1579,7 +1685,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const { items, all, open, downloaded } = hv;
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
-    ...items.map(({ hg, place, r, controls }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.url, hg.submitted, hg.submittedText,
+    (hearingEdits || []).length, editsError ? 1 : 0,
+    ...items.map(({ hg, place, r, controls }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.url, hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
   if (sig === hearingsShown) return;
@@ -1605,6 +1712,15 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     add(`${downloaded} downloaded`, "hs-ok");
     if (notDl) add(`${notDl} not downloaded`, "hs-warn");
     if (dlState !== "ok") add(dlState === "none" ? "Downloads not linked: only folders opened here are matched" : "Allow Downloads to match the folders in it", "hs-note");
+  }
+  const waiting = (hearingEdits || []).length;
+  if (waiting) {
+    sumEl.hidden = false;
+    const w = document.createElement("span");
+    w.className = "hs-warn";
+    w.textContent = `${waiting} calendar change${waiting === 1 ? "" : "s"} waiting to be written: close ${sheet.name} in Excel`;
+    w.title = editsError ? `The last try said: ${editsError}` : "";
+    sumEl.appendChild(w);
   }
 
   listEl.textContent = "";
@@ -1639,8 +1755,33 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     row.className = "case-row hearing-row" + (hg.mark ? " mark-" + hg.mark : "");
     const b = document.createElement("button");
     b.className = "recent-item case-item hearing-item" + (folder ? " has-folder" : "");
-    b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 18 })}</span><span class="ci-main"><span class="ri-name"></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 18 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
     b.querySelector(".ri-name").textContent = hg.caseName;
+    let noteEl = null;
+    if (hg.note) {
+      // The note opens under the row; the * sits inside the row's button, so
+      // its click is its own and opens nothing else.
+      const key = noteKey(hg);
+      const star = document.createElement("span");
+      star.className = "ci-note-mark";
+      star.textContent = "*";
+      star.title = "Note: " + hg.note;
+      star.setAttribute("role", "button");
+      star.setAttribute("aria-label", "Show the note on " + hg.caseName);
+      b.querySelector(".ci-name-line").appendChild(star);
+      noteEl = document.createElement("div");
+      noteEl.className = "hearing-note";
+      noteEl.textContent = hg.note;
+      noteEl.hidden = !notesOpen.has(key);
+      star.classList.toggle("open", !noteEl.hidden);
+      star.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        noteEl.hidden = !noteEl.hidden;
+        star.classList.toggle("open", !noteEl.hidden);
+        if (noteEl.hidden) notesOpen.delete(key); else notesOpen.add(key);
+      });
+    }
     const where = [];
     if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
@@ -1654,9 +1795,11 @@ async function renderHearings(sheet, hv, dlState, now, line) {
         : st || hearingLib.placeText(place);
     pill.textContent = said.text;
     pill.classList.add("tone-" + said.tone);
+    if (hg.waiting) pill.classList.add("waiting");
     const placeSaid = hearingLib.placeText(place);
     b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : hearingLib.isWebLink(hg.url) ? "Not downloaded: open the case in eCourt." : "Not downloaded.")
-      + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}.`;
+      + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}.`
+      + (hg.waiting ? `\nMarked ${hg.mark === "off" ? "off" : "on"} calendar here; not yet written into ${sheet.name} (open in Excel?).` : "");
     b.addEventListener("click", async () => {
       if (folder) {
         if (!(await permitted(folder, "readwrite", true))) return;
@@ -1668,6 +1811,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     row.appendChild(b);
     // The folder's own buttons, on the first hearing of its case only.
     if (controls) for (const x of folderControls(r, line)) row.appendChild(x);
+    if (sheet.state === "ok" || sheet.state === "error") row.appendChild(calendarButton(hg));
     if (hearingLib.isWebLink(hg.url)) row.appendChild(ecourtButton(hg));
     else {
       // Its place kept, so the eCourt buttons stand in one column.
@@ -1678,6 +1822,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       row.appendChild(gap);
     }
     listEl.appendChild(row);
+    if (noteEl) listEl.appendChild(noteEl);
   }
   if ((hearingsAll ? all : open).length > HEARING_ROWS_MAX) empty(`And ${(hearingsAll ? all : open).length - HEARING_ROWS_MAX} more in the sheet.`);
 }

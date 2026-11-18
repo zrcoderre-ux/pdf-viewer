@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { makeZip } from "./viewer/zip.js";
 import {
   readHearings, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
-  hyperlinkOfFormula, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  hyperlinkOfFormula, dateNote, markHearing, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -71,7 +71,8 @@ console.log("4. a workbook");
 const shared = ["Hearings", "Date", "Motion Type", "Case Name", "Date Submitted",
   "Demurrer", "25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE",
   "MSJ", "24STCV00777 Doe v. Globex", "Motion to Compel", "Jane Doe v. Initech Corp.",
-  "Motion to Strike", "23STCV04444 Roe v. Umbrella", "Fee Motion", "BC654321 Smith v. Wayne", "11/25/2026", "TBD"];
+  "Motion to Strike", "23STCV04444 Roe v. Umbrella", "Fee Motion", "BC654321 Smith v. Wayne", "11/25/2026", "TBD",
+  "Check POS", "20STCV02020 Note v. Case", "Continued to 12/4/2026", "21STCV03030 Moved v. Later"];
 const si = shared.map((s) => `<si><t>${s.replace(/&/g, "&amp;")}</t></si>`).join("");
 // Fills: 0 none, 1 gray125, 2 Good green (rgb), 3 red (rgb), 4 theme accent6 tinted, 5 yellow.
 // cellXfs: 0 default, 1 date (14), 2 green, 3 red, 4 theme green, 5 green date, 6 yellow.
@@ -95,6 +96,8 @@ const sheet1 = `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlfor
 <row r="6">${c("A6", 46348, { s: 3 })}${c("B6", S("Motion to Strike"), { t: "s", s: 3 })}${c("C6", S("23STCV04444 Roe v. Umbrella"), { t: "s", s: 3 })}</row>
 <row r="7" s="4" customFormat="1">${c("A7", S("11/25/2026"), { t: "s" })}${c("B7", S("Fee Motion"), { t: "s" })}${c("C7", S("BC654321 Smith v. Wayne"), { t: "s" })}</row>
 <row r="8">${c("A8", 46300, { s: 1 })}${c("B8", S("Demurrer"), { t: "s", s: 6 })}${c("C8", S("Jane Doe v. Initech Corp."), { t: "s" })}</row>
+<row r="9">${c("A9", S("Check POS"), { t: "s" })}${c("B9", S("MSJ"), { t: "s" })}${c("C9", S("20STCV02020 Note v. Case"), { t: "s" })}</row>
+<row r="10">${c("A10", S("Continued to 12/4/2026"), { t: "s" })}${c("B10", S("Demurrer"), { t: "s" })}${c("C10", S("21STCV03030 Moved v. Later"), { t: "s" })}</row>
 </sheetData><hyperlinks><hyperlink ref="C3" r:id="rId1"/><hyperlink ref="C4" r:id="rId2"/></hyperlinks></worksheet>`;
 const sheet1Rels = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://civil.lacourt.org/ecourt/ecms/case?id=111" TargetMode="External"/>
@@ -118,7 +121,7 @@ const bytes = await makeZip([
 ]);
 const { hearings, sheets } = await readHearings(bytes, NOW);
 check("the visible sheet only", sheets, ["Calendar"]);
-check("six hearings under the header", hearings.length, 6);
+check("eight hearings under the header", hearings.length, 8);
 const h = (row) => hearings.find((x) => x.row === row);
 check("row 3: date, motion, number, link, no mark", (({ date, motion, caseNumber, url, mark }) => ({ date, motion, caseNumber, url, mark }))(h(3)),
   { date: day(2026, 11, 20), motion: "Demurrer", caseNumber: "25STCV12345", url: "https://civil.lacourt.org/ecourt/ecms/case?id=111", mark: "" });
@@ -129,6 +132,48 @@ check("row 5: the HYPERLINK formula's link and its caseNumber", [h(5).url, h(5).
 check("row 6: red is off", h(6).mark, "off");
 check("row 7: the row's own theme-green fill, a date typed as text", [h(7).mark, h(7).date, h(7).caseNumber], ["done", day(2026, 11, 25), "BC654321"]);
 check("row 8: a yellow cell is no mark", h(8).mark, "");
+check("row 9: words in the Date cell are a note; the date is the one above", [h(9).note, h(9).date], ["Check POS", h(8).date]);
+check("row 10: a note naming a date keeps it", [h(10).note, h(10).date], ["Continued to 12/4/2026", day(2026, 12, 4)]);
+check("a plain date is no note", [h(3).note, h(7).note], ["", ""]);
+check("dates in words are no note", ["Fri, Nov 20, 2026", "November 20th", "11/20", "TBD", "Check POS 11/20"].map(dateNote), ["", "", "", "TBD", "Check POS 11/20"]);
+
+console.log("4b. Off calendar and On calendar, written into the sheet");
+const after = async (b) => (await readHearings(b, NOW)).hearings;
+const at = (list, row) => list.find((x) => x.row === row);
+const offBytes = await markHearing(bytes, h(3), "off");
+let list = await after(offBytes);
+check("Off calendar: the row reads as off", at(list, 3).mark, "off");
+check("…its date still a date, its link still its link", [at(list, 3).date, at(list, 3).url], [h(3).date, h(3).url]);
+check("…no other row changed", list.filter((x) => x.row !== 3).map((x) => x.mark), hearings.filter((x) => x.row !== 3).map((x) => x.mark));
+const onBytes = await markHearing(offBytes, at(list, 3), "");
+list = await after(onBytes);
+check("On calendar: the red is off again", at(list, 3).mark, "");
+check("…and the date is still a date", at(list, 3).date, h(3).date);
+list = await after(await markHearing(bytes, h(6), ""));
+check("On calendar on a row marked red by hand", at(list, 6).mark, "");
+list = await after(await markHearing(bytes, h(4), "off"));
+check("Off calendar over a green row", at(list, 4).mark, "off");
+list = await after(await markHearing(bytes, h(8), "off"));
+check("Off calendar on a row with a yellow highlight", at(list, 8).mark, "off");
+const yellowBack = await after(await markHearing(await markHearing(bytes, h(8), "off"), h(8), ""));
+check("…On calendar again leaves the yellow motion cell as it was", at(yellowBack, 8).mark, "");
+list = await after(await markHearing(bytes, h(7), "off"));
+check("Off calendar on a row styled green as a whole", at(list, 7).mark, "off");
+let moved = null;
+try { await markHearing(bytes, { ...h(3), caseName: "Nobody v. Nothing" }, "off"); } catch (e) { moved = e.message; }
+check("a row no longer in the sheet is refused", moved, "the row for Nobody v. Nothing is no longer in the sheet");
+check("a row found by its case and date where it moved", (await after(await markHearing(bytes, { ...h(5), row: 99 }, "off"))).find((x) => x.row === 5).mark, "off");
+// A workbook with no red anywhere gets one added.
+const noRed = await makeZip([
+  { name: "xl/workbook.xml", data: workbook.replace('<sheet name="Old" sheetId="2" state="hidden" r:id="rId2"/>', "") },
+  { name: "xl/_rels/workbook.xml.rels", data: wbRels },
+  { name: "xl/sharedStrings.xml", data: `<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${si}</sst>` },
+  { name: "xl/styles.xml", data: styles.replace('<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/></patternFill></fill>', '<fill><patternFill patternType="solid"><fgColor rgb="FF0000FF"/></patternFill></fill>') },
+  { name: "xl/worksheets/sheet1.xml", data: sheet1 },
+  { name: "xl/worksheets/_rels/sheet1.xml.rels", data: sheet1Rels },
+]);
+const noRedOff = await markHearing(noRed, (await after(noRed)).find((x) => x.row === 3), "off");
+check("a sheet with no red of its own gets one", at(await after(noRedOff), 3).mark, "off");
 
 console.log("5. matching a hearing to its folder");
 check("a folder named by its number", placeMatches(h(3), { name: "25STCV12345 ACME v Roe" }), true);
@@ -152,8 +197,8 @@ check("said: not downloaded", placeText(null).text, "Not downloaded");
 check("said: downloaded", [placeText({ name: "x", kind: "folder" }).text, placeText({ name: "x", kind: "folder" }).tone], ["Downloaded", "ok"]);
 
 console.log("6. the list");
-check("upcoming, unmarked, by date", upcoming(hearings, NOW).map((x) => x.row), [3, 5]);
-check("every one from today on", upcoming(hearings, NOW, { all: true }).map((x) => x.row), [3, 4, 5, 6, 7]);
+check("upcoming, unmarked, by date", upcoming(hearings, NOW).map((x) => x.row), [3, 5, 10]);
+check("every one from today on", upcoming(hearings, NOW, { all: true }).map((x) => x.row), [3, 4, 5, 6, 7, 10]);
 check("days said", [dayText(day(2026, 11, 18), NOW), dayText(day(2026, 11, 19), NOW), dayText(day(2027, 1, 8), NOW).includes("2027")], ["Today", "Tomorrow", true]);
 check("Date Submitted said short", [shortDate(day(2026, 11, 12), NOW), shortDate(day(2025, 11, 12), NOW)], ["11/12", "11/12/25"]);
 check("a folder's hearing: the next one for its case", hearingForPlace(hearings, { name: "Jane Doe Initech", numbers: ["26STCV09999"] }, NOW).row, 5);
@@ -183,7 +228,7 @@ async function startServer(cwd) {
   return { base: `http://127.0.0.1:${port}`, stop: () => { try { proc.kill("SIGTERM"); } catch { /* gone */ } } };
 }
 
-/** A one-sheet workbook of `rows` ({ date (ms), motion, name, link?, fill? "green" | "red" }), as Excel writes one. */
+/** A one-sheet workbook of `rows` ({ date (ms) or note (words in the Date cell), motion, name, link?, fill? "green" | "red" }), as Excel writes one. */
 async function workbookOf(rows) {
   const strs = [];
   const S = (t) => { let i = strs.indexOf(t); if (i < 0) { i = strs.length; strs.push(t); } return i; };
@@ -193,7 +238,8 @@ async function workbookOf(rows) {
   const links = [], rels = [];
   rows.forEach((r, i) => {
     const n = i + 2, st = xs[r.fill] || 0;
-    body += `<row r="${n}"><c r="A${n}" s="${st || 1}"><v>${serial(r.date)}</v></c><c r="B${n}" t="s"${st ? ` s="${st}"` : ""}><v>${S(r.motion)}</v></c><c r="C${n}" t="s"${st ? ` s="${st}"` : ""}><v>${S(r.name)}</v></c></row>`;
+    const dateCell = r.note ? `<c r="A${n}" t="s"${st ? ` s="${st}"` : ""}><v>${S(r.note)}</v></c>` : `<c r="A${n}" s="${st || 1}"><v>${serial(r.date)}</v></c>`;
+    body += `<row r="${n}">${dateCell}<c r="B${n}" t="s"${st ? ` s="${st}"` : ""}><v>${S(r.motion)}</v></c><c r="C${n}" t="s"${st ? ` s="${st}"` : ""}><v>${S(r.name)}</v></c></row>`;
     if (r.link) { links.push(`<hyperlink ref="C${n}" r:id="rId${n}"/>`); rels.push(`<Relationship Id="rId${n}" Type="h" Target="${r.link.replace(/&/g, "&amp;")}" TargetMode="External"/>`); }
   });
   const ns = `xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`;
@@ -233,7 +279,7 @@ async function browserPart() {
     const inDays = (n) => today.getTime() + n * 86400000 + 3600000; // an hour past midnight: a DST day is still that day
     const sheetBytes = [...new Uint8Array(await (await workbookOf([
       { date: inDays(2), motion: "Demurrer", name: "25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE", link: "https://civil.lacourt.org/ecourt/ecms/case?id=111" },
-      { date: inDays(2), motion: "MSJ", name: "24STCV00777 Doe v. Globex", link: "https://civil.lacourt.org/ecourt/ecms/case?id=222" },
+      { note: "Check POS", motion: "MSJ", name: "24STCV00777 Doe v. Globex", link: "https://civil.lacourt.org/ecourt/ecms/case?id=222" },
       { date: inDays(3), motion: "Motion to Compel", name: "26STCV09999 Jane Doe v. Initech", link: "https://civil.lacourt.org/ecourt/ecms/case?id=333" },
       { date: inDays(3), motion: "Motion to Strike", name: "23STCV04444 Roe v. Umbrella", fill: "green" },
       { date: inDays(4), motion: "Fee Motion", name: "BC654321 Smith v. Wayne", fill: "red" },
@@ -335,6 +381,42 @@ async function browserPart() {
     });
     await shell.waitForFunction(() => document.getElementById("case-folders").hidden, null, { timeout: 10000 });
     check("the list is hidden", await shell.evaluate(() => document.getElementById("case-folders").hidden), true);
+
+    console.log("13. a note in the Date cell: a * that opens it");
+    const doeRow = '#hearing-list .hearing-row:has(.ri-name:text-is("24STCV00777 Doe v. Globex"))';
+    const doe = shell.locator(doeRow);
+    check("the note's * stands after the case name, only there", await shell.$$eval("#hearing-list .ci-note-mark", (x) => x.length), 1);
+    check("…on Doe v. Globex", await doe.locator(".ci-note-mark").count(), 1);
+    const opened = (await shell.evaluate(() => window.__opened.length));
+    await doe.locator(".ci-note-mark").click();
+    check("a click opens the note under the row", await shell.evaluate(() => { const n = document.querySelector(".hearing-note"); return n && !n.hidden ? n.textContent : null; }), "Check POS");
+    check("…and opens nothing else", await shell.evaluate(() => window.__opened.length), opened);
+    await doe.locator(".ci-note-mark").click();
+    check("a second click closes it", await shell.evaluate(() => document.querySelector(".hearing-note").hidden), true);
+
+    console.log("14. Off calendar and On calendar, written into the sheet");
+    const sheetNow = async () => {
+      const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
+      return (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName.startsWith("24STCV00777"));
+    };
+    check("the row offers Off calendar", await doe.locator(".ci-cal").textContent(), "Off calendar");
+    await doe.locator(".ci-cal").click();
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.querySelector(".ci-cal").textContent === "On calendar"), null, { timeout: 10000 });
+    check("the sheet's row is filled red", (await sheetNow()).mark, "off");
+    check("…its note and link kept", [(await sheetNow()).note, (await sheetNow()).url], ["Check POS", "https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
+    check("the row says Off calendar", await doe.locator(".ci-status").textContent(), "Off calendar");
+    // Excel holding the workbook: the write is refused.
+    await shell.evaluate(() => {
+      window.__realWritable = FileSystemFileHandle.prototype.createWritable;
+      FileSystemFileHandle.prototype.createWritable = async function () { if (this.name === "Hearings.xlsx") throw new DOMException("The file is in use", "NoModificationAllowedError"); return window.__realWritable.apply(this, arguments); };
+    });
+    await doe.locator(".ci-cal").click();
+    await shell.waitForFunction(() => /waiting to be written/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 10000 });
+    check("while Excel holds it: shown on calendar here, and said to be waiting", [await doe.locator(".ci-cal").textContent(), await doe.locator(".ci-status.waiting").count() === 1], ["Off calendar", true]);
+    check("…the sheet not yet changed", (await sheetNow()).mark, "off");
+    await shell.evaluate(() => { FileSystemFileHandle.prototype.createWritable = window.__realWritable; window.dispatchEvent(new Event("focus")); });
+    await shell.waitForFunction(() => !/waiting to be written/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 10000 });
+    check("once Excel lets go, the next look writes it: the red is off", (await sheetNow()).mark, "");
     check("no page errors", errors, []);
   } finally {
     await browser.close();
