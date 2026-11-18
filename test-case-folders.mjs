@@ -205,7 +205,7 @@ console.log("4c. PDF-Linker's line");
   check("the line never passes RANK_MAX", changeLine(Array.from({ length: RANK_MAX }, (_, i) => i), "x", "add").length, RANK_MAX);
   check("places said as people say them", [1, 2, 3, 4, 11, 12, 13, 21, 22, 101].map(ordinal), ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "101st"]);
   check("the hover says what the place does and when it ends",
-    [/2nd in PDF-Linker's line/.test(lineTitle(2, "Case X")), /below-normal CPU priority/.test(lineTitle(2, "Case X")), /leaves the line when a run of it finishes/.test(lineTitle(2, "Case X"))], [true, true, true]);
+    [/2nd in PDF-Linker's line/.test(lineTitle(2, "Case X")), /below-normal CPU priority/.test(lineTitle(2, "Case X")), /keeps its place for 24 hours from when it was given, through any re-run/.test(lineTitle(2, "Case X"))], [true, true, true]);
   const run = { state: "running", at: NOW - MIN };
   const done = { state: "done", at: NOW - 5 * MIN };
   check("the line first, in its order; then the runs going; then the newest",
@@ -472,43 +472,66 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Gamma" && r.querySelector(".ci-status").textContent.startsWith("Taken over")), null, { timeout: 10000 });
     check("…and the row says so until the new run's ETA", [await shell.textContent(`${gammaRow} .ci-status`), await shell.$$eval("#case-list .ci-takeover", (bs) => bs.length)], ["Taken over — waiting for its ETA", 0]);
 
-    console.log("15. PDF-Linker's line: Prioritize, move up, take out, spent by a finish");
+    console.log("15. PDF-Linker's line: Prioritize on a run going, move up, take out, kept 24 hours");
     await shell.evaluate(() => { Date.now = () => new Date().getTime(); window.dispatchEvent(new Event("focus")); });
     const rowOf = (name) => `#case-list .case-row:has(.ri-name:text-is('${name}'))`;
     const readPlace = (name) => shell.evaluate(async (name) => {
       const dir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle(name);
-      try { return JSON.parse(await (await (await dir.getFileHandle("PDF-Linker Priority.json")).getFile()).text()).rank; }
-      catch { return 0; }
+      try { return JSON.parse(await (await (await dir.getFileHandle("PDF-Linker Priority.json")).getFile()).text()); }
+      catch { return null; }
     }, name);
     const order = () => shell.$$eval("#case-list .case-row", (rs) => rs.map((r) => [r.querySelector(".ri-name").textContent, (r.querySelector(".ci-place") || {}).textContent || ""]));
+    // The owner: "reserve the prioritize button for when that run is already going".
+    await shell.waitForSelector(`${rowOf("Case Gamma")} .ci-line-add`, { timeout: 10000 });
+    check("a finished case offers no Prioritize", await shell.$$eval(`${rowOf("Case Alpha")} .ci-line-add`, (b) => b.length), 0);
+    await shell.evaluate(async () => {
+      const alpha = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Alpha");
+      const w = await (await alpha.getFileHandle("ETA ~6.04PM (1 of 4).txt", { create: true })).createWritable(); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    });
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
-    check("a row not in line offers Prioritize", await shell.getAttribute(`${rowOf("Case Alpha")} .ci-line-add`, "aria-label"), "Prioritize");
+    check("…one whose run is going does", await shell.getAttribute(`${rowOf("Case Alpha")} .ci-line-add`, "aria-label"), "Prioritize");
     await shell.click(`${rowOf("Case Alpha")} .ci-line-add`);
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-place`, { timeout: 10000 });
-    check("Prioritize: 1st in line, its place written into the folder", [await shell.textContent(`${rowOf("Case Alpha")} .ci-place`), await readPlace("Case Alpha")], ["1st", 1]);
+    check("Prioritize: 1st in line, its place written into the folder", [await shell.textContent(`${rowOf("Case Alpha")} .ci-place`), (await readPlace("Case Alpha")).rank], ["1st", 1]);
     check("…and the click opened no reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), readers);
     await shell.click(`${rowOf("Case Gamma")} .ci-line-add`);
     await shell.waitForSelector(`${rowOf("Case Gamma")} .ci-place`, { timeout: 10000 });
-    check("a second: 2nd, listed after the first", await order(), [["Case Alpha", "1st"], ["Case Gamma", "2nd"]]);
+    check("a second: 2nd, listed after the first", (await order()).slice(0, 2), [["Case Alpha", "1st"], ["Case Gamma", "2nd"]]);
     check("…the first can only go down, the last only up",
       await shell.evaluate(() => [...document.querySelectorAll("#case-list .ci-line-btn")].map((b) => b.disabled)), [true, false, false, false, true, false]);
     await shell.click(`${rowOf("Case Gamma")} .ci-line-btn[aria-label^='Move Case Gamma up']`);
     await shell.waitForFunction(() => document.querySelector("#case-list .case-row .ri-name").textContent === "Case Gamma", null, { timeout: 10000 });
-    check("▲ swaps them, on Home and in the folders", [await order(), await readPlace("Case Gamma"), await readPlace("Case Alpha")], [[["Case Gamma", "1st"], ["Case Alpha", "2nd"]], 1, 2]);
+    check("▲ swaps them, on Home and in the folders", [(await order()).slice(0, 2), (await readPlace("Case Gamma")).rank, (await readPlace("Case Alpha")).rank], [[["Case Gamma", "1st"], ["Case Alpha", "2nd"]], 1, 2]);
     await shell.click(`${rowOf("Case Gamma")} .ci-line-btn[aria-label^='Take Case Gamma out']`);
-    await shell.waitForSelector(`${rowOf("Case Gamma")} .ci-line-add`, { timeout: 10000 });
+    const placeOf = (name) => { const r = [...document.querySelectorAll("#case-list .case-row")].find((x) => x.querySelector(".ri-name").textContent === name); const p = r && r.querySelector(".ci-place"); return p ? p.textContent : ""; };
+    await shell.waitForFunction(`(${placeOf})("Case Gamma") === "" && (${placeOf})("Case Alpha") === "1st"`, null, { timeout: 10000 });
     check("✕ takes it out, its file removed, the one behind moved up to 1st",
-      [await readPlace("Case Gamma"), await readPlace("Case Alpha"), await shell.textContent(`${rowOf("Case Alpha")} .ci-place`)], [0, 1, "1st"]);
-    // PDF-Linker finishes Case Alpha: a DONE stamp newer than its place.
+      [await readPlace("Case Gamma"), (await readPlace("Case Alpha")).rank, await shell.textContent(`${rowOf("Case Alpha")} .ci-place`)], [null, 1, "1st"]);
+    // PDF-Linker finishes Case Alpha: a DONE stamp newer than its place, and
+    // the run removes the place's file, as PDF-Linker does.
     await shell.evaluate(async () => {
       await new Promise((r) => setTimeout(r, 20));
       const alpha = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Alpha");
+      await alpha.removeEntry("ETA ~6.04PM (1 of 4).txt");
+      await alpha.removeEntry("PDF-Linker Priority.json");
       await alpha.removeEntry("DONE 3.12PM.txt");
       const w = await (await alpha.getFileHandle("DONE 3.31PM.txt", { create: true })).createWritable(); await w.close();
       window.dispatchEvent(new Event("focus"));
     });
-    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
-    check("a run that finishes after its place was given takes the case out of the line", await shell.$$eval("#case-list .ci-place", (e) => e.length), 0);
+    // The owner: "remember that priority for 24 hours so I don't have to keep pressing it".
+    const placeFile = async (want) => { for (let k = 0; k < 80; k++) { const p = await readPlace("Case Alpha"); if (!!p === want) return p; await shell.waitForTimeout(250); } return readPlace("Case Alpha"); };
+    const kept = await placeFile(true);
+    const doneAt = await shell.evaluate(async () => (await (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Alpha")).getFileHandle("DONE 3.31PM.txt")).getFile()).lastModified);
+    check("a run that finishes leaves it in line: its file written again, newer than the finish, so a re-run is in line from its start",
+      [kept.rank, kept.set > doneAt, await shell.textContent(`${rowOf("Case Alpha")} .ci-place`)], [1, true, "1st"]);
+    check("…and the finished case keeps ▲ ▼ ✕ to change it by hand", await shell.$$eval(`${rowOf("Case Alpha")} .ci-line-btn`, (b) => b.length), 3);
+    // A day and an hour on, the place is gone.
+    await shell.evaluate(() => { Date.now = () => new Date().getTime() + 25 * 3600000; window.dispatchEvent(new Event("focus")); });
+    check("24 hours on, the place is let go and its file removed", await placeFile(false), null);
+    await shell.evaluate(() => { Date.now = () => new Date().getTime(); window.dispatchEvent(new Event("focus")); });
+    await shell.waitForSelector(`${rowOf("Case Alpha")}`, { timeout: 10000 });
+    check("…and back today, Case Alpha is in no line", await shell.$$eval(`${rowOf("Case Alpha")} .ci-place`, (e) => e.length), 0);
     console.log("16. the log to share: offered where PDF-Linker wrote it, opened over Home as plain text");
     check("…no row offers it before the file is there", await shell.$$eval("#case-list .ci-share-log", (b) => b.length), 0);
     const SHARED = "2026-11-05 13:33:58,374 [INFO] Processing: Declaration of […].pdf\n2026-11-05 13:34:01,002 [INFO]   Pseudonymize: leak scans done in 6s\n";

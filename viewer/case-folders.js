@@ -433,7 +433,7 @@ export function ordinal(n) {
 
 /** The hover on a row's place in line. */
 export function lineTitle(place, name) {
-  return `${name} is ${ordinal(place)} in PDF-Linker's line. While it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority so it is served first wherever the computer is short. The others keep working, just slower. It leaves the line when a run of it finishes.`;
+  return `${name} is ${ordinal(place)} in PDF-Linker's line. While it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority so it is served first wherever the computer is short. The others keep working, just slower. It keeps its place for 24 hours from when it was given, through any re-run, unless you move it or take it out.`;
 }
 
 /**

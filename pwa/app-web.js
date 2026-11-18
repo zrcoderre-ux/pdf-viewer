@@ -1362,7 +1362,6 @@ async function renderCaseFoldersNow() {
   const hv = await hearingItems(rows, sheet, dl, dlState, now);
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
-    r.rank = r.listing && !r.locked ? caseLib.liveRank(r.listing) : 0;
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
     const start = runsStarted.length && !r.locked ? await runStartFor(r) : null;
     if (start) {
@@ -1375,6 +1374,7 @@ async function renderCaseFoldersNow() {
   // matched to (the owner: "ideally this will never happen"); each still says
   // its hearing where the sheet has one, a past one.
   for (const r of rows) r.hearing = sheet.hearings.length ? hearingLib.hearingForPlace(sheet.hearings, placeOfRow(r), now) : null;
+  await syncLine(rows, now);
   const line = caseLib.sortRows(rows).filter((r) => r.rank > 0);
   // …nor one whose hearing is marked done or off calendar (the owner: "cases
   // that are done and off don't need to be shown in the Case Folders rows"),
@@ -1383,7 +1383,6 @@ async function renderCaseFoldersNow() {
   const shown = caseLib.sortRows(rows.filter((r) => !hv.matched.has(r) && !settledMark(r))).slice(0, CASE_ROWS_MAX);
   lineShown = line;
   rowsShown = [...shown, ...hv.matched];
-  compactLine(line);
   showDownloadsLink(dl, dlState);
   renderTree(dl, dlState);
   try { await renderHearings(sheet, hv, dlState, now, line); } catch (e) { console.warn(e); }
@@ -1404,7 +1403,7 @@ async function renderCaseFoldersNow() {
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : "", r.hearing ? r.hearing.url : ""].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank || 0, prioTotal, r.status ? r.status.state : "", caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : "", r.hearing ? r.hearing.url : ""].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1493,14 +1492,14 @@ function folderControls(r, line) {
   if (r.locked) return out;
   if (canOpenWord() && caseLib.wordDocs(r.listing).length) out.push(wordButton(r));
   if (caseLib.hasShareLog(r.listing)) out.push(shareLogButton(r));
-  if (r.listing) out.push(lineControls(r, line));
+  if (r.listing) out.push(lineControls(r));
   if (r.status && r.status.state === "stalled") out.push(takeOverButton(r));
   return out;
 }
 /** What a folder's buttons say, for the redraw signatures. */
 function folderControlsSig(r, line) {
   if (!r || r.locked) return r ? "locked" : "";
-  return [r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0,
+  return [r.rank || 0, prioTotal, caseLib.hasShareLog(r.listing) ? 1 : 0,
     canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : "", r.status ? r.status.state : ""].join("/");
 }
 /** The Downloads link, in the Hearings heading: it serves both lists. */
@@ -1780,8 +1779,24 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
   const list = shownAll.slice(0, HEARING_ROWS_MAX);
   const items = [];
   const owner = new Map();
+  const links = await hearingLinks();
   for (const hg of list) {
-    const place = hearingLib.findPlace(hg, places);
+    // A folder the operator pointed this hearing at (locateCase) is its own,
+    // whatever its name; one gone or unreadable is no place.
+    let place = null;
+    const link = links.find((l) => l.key === linkKey(hg));
+    if (link) {
+      for (const p of places) {
+        const h = p.handle || (p.row && p.row.handle);
+        if (!h || p.name !== link.handle.name) continue;
+        try { if (await h.isSameEntry(link.handle)) { place = p; break; } } catch { /* gone */ }
+      }
+      if (!place && (await permitted(link.handle, "read", false)) && (await cachedListing(link.handle, now))) {
+        place = { name: link.handle.name, kind: "folder", handle: link.handle, parent: null, root: null, chain: [link.handle.name], linked: true };
+        places.push(place);
+      }
+    }
+    if (!place) place = hearingLib.findPlace(hg, places);
     let r = place ? place.row || null : null;
     if (!r && place && place.kind === "folder" && place.handle) {
       const listing = await cachedListing(place.handle, now);
@@ -1795,7 +1810,11 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
     if (r && !owner.has(r)) { owner.set(r, item); item.controls = true; }
     items.push(item);
   }
-  const downloaded = open.filter((h) => { const p = hearingLib.findPlace(h, places); return p && (p.kind === "folder" || p.kind === "opened"); }).length;
+  const downloaded = open.filter((h) => {
+    const it = items.find((x) => x.hg === h);
+    const p = it ? it.place : hearingLib.findPlace(h, places);
+    return p && (p.kind === "folder" || p.kind === "opened");
+  }).length;
   return { items, all, open, shownAll, downloaded, matched: new Set(owner.keys()) };
 }
 
@@ -1936,7 +1955,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (hg.waiting) pill.classList.add("waiting");
     if (st && said === st && !r.locked) compactStatus(pill, "f:" + r.name);
     const placeSaid = hearingLib.placeText(place);
-    b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : hearingLib.isWebLink(hg.url) ? "Not downloaded: open the case in eCourt." : "Not downloaded.")
+    b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : "Find this case's folder (moved somewhere Home does not look?): pick it, and Home keeps it as this hearing's. eCourt is the button on the right.")
       + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`
       + (hg.waiting ? `\nMarked ${hg.mark === "off" ? "off" : "on"} calendar here; not yet written into ${sheet.name} (open in Excel?).` : "");
     b.addEventListener("click", async () => {
@@ -1944,8 +1963,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
         if (!(await permitted(folder, "readwrite", true))) return;
         try { await openCaseFolder(folder, { inWindow: true }); }
         catch { shellToast(`“${place.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
-      } else if (hearingLib.isWebLink(hg.url)) openEcourt(hg);
-      else shellToast(place ? placeSaid.title : "No case folder for this case, and no eCourt link on its row in the sheet.", 5000);
+      } else locateCase(hg);
     });
     row.appendChild(b);
     if (r && !r.locked) caseDraggable(row, r);
@@ -1992,6 +2010,63 @@ document.getElementById("hearings-all")?.addEventListener("click", () => {
   hearingsShown = "";
   renderCaseFolders();
 });
+
+// ---- Home: find a case's folder ---------------------------------------------
+//
+// The owner (2026-11-18): "Instead of clicking the case name for a not
+// downloaded case sending me to e-court (I can use the ecourt button for
+// that) it should let me try to locate the file (because I might have just
+// moved it to another folder)." A click on a hearing with no folder found
+// asks for the folder (the dialog starts where the last one was found), and
+// the folder picked is that hearing's from then on: a LINK, by its case
+// number (else its case name's words), kept in the folders database (`places`
+// → "hearingLinks") and looked at before any matching (hearingItems). A
+// folder carrying another case's number, or no sign of a case at all, is
+// refused. Then it opens, as a click on a found case does. Links older than
+// HEARING_LINK_KEEP_MS are let go, and a link's folder moved from the
+// Folders list moves with it (moveCase).
+const HEARING_LINK_KEEP_MS = 120 * 86400000;
+let hearingLinksSeen = null; // [{ key, handle, at, caseName }]
+const linkKey = (hg) => hg.caseNumber || "name:" + hearingLib.nameWords(hg.caseName).join(" ");
+async function hearingLinks() {
+  if (!hearingLinksSeen) {
+    try { hearingLinksSeen = ((await foldersTx("places", "readonly", (st) => st.get("hearingLinks"))) || []).filter((l) => l && l.handle && l.handle.kind === "directory"); }
+    catch { hearingLinksSeen = []; }
+    const now = Date.now();
+    const kept = hearingLinksSeen.filter((l) => now - (l.at || 0) <= HEARING_LINK_KEEP_MS);
+    if (kept.length !== hearingLinksSeen.length) { hearingLinksSeen = kept; await saveHearingLinks(); }
+  }
+  return hearingLinksSeen;
+}
+async function saveHearingLinks() {
+  try { await foldersTx("places", "readwrite", (st) => st.put(hearingLinksSeen, "hearingLinks")); }
+  catch { shellToast("The folder could not be kept: this browser is not storing anything for the app.", 6000); }
+}
+async function locateCase(hg) {
+  let dir;
+  try { dir = await showPicker("showDirectoryPicker", { id: "locate", mode: "readwrite" }); }
+  catch (e) { if (e && e.name !== "AbortError") shellToast(String(e.message || e), 5000); return; }
+  let listing = null;
+  try { listing = await readListing(dir); } catch { listing = null; }
+  const nums = [...new Set([...hearingLib.caseNumbersIn(dir.name), ...listingNumbers(listing)])];
+  if (hg.caseNumber && nums.length && !nums.includes(hg.caseNumber)) {
+    shellToast(`${dir.name} is not ${hg.caseName}'s folder: it carries ${nums.join(", ")}, not ${hg.caseNumber}.`, 8000);
+    return;
+  }
+  if (!listing || !caseLib.isCaseListing(listing)) {
+    shellToast(`${dir.name} holds no case papers (no PDF, Word document or PDF-Linker files): pick the case's own folder.`, 8000);
+    return;
+  }
+  const links = await hearingLinks();
+  const key = linkKey(hg);
+  for (let i = links.length - 1; i >= 0; i--) if (links[i].key === key) links.splice(i, 1);
+  links.push({ key, handle: dir, at: Date.now(), caseName: hg.caseName });
+  await saveHearingLinks();
+  hearingsShown = ""; caseShown = "";
+  shellToast(`${dir.name} is now ${hg.caseName}'s case folder.`, 5000);
+  renderCaseFolders();
+  try { await openCaseFolder(dir, { inWindow: true }); } catch { /* listed; a click opens it */ }
+}
 
 // ---- Home: folders -----------------------------------------------------------
 //
@@ -2258,7 +2333,11 @@ async function moveCase(r, n) {
   if (runsStarted.some((x) => x.name === r.name)) state = "starting";
   const why = moveLib.moveBlocker({ state, inReader: await inReader(src) });
   if (why) return done(`“${r.name}” was not moved: ${why}`);
-  // The opened-here records of this folder, to point at its new place.
+  // The opened-here records of this folder, its hearing links and its place
+  // in line, to point at its new place (the old handle dies with the move).
+  const moved = new Set(), movedLine = new Set();
+  for (const l of await hearingLinks()) { try { if (l.handle.name === r.name && (await l.handle.isSameEntry(src))) moved.add(l); } catch { /* gone */ } }
+  for (const e of await prioAll()) { try { if (e.name === r.name && (await e.handle.isSameEntry(src))) movedLine.add(e); } catch { /* gone */ } }
   const records = [];
   for (const rec of await foldersAll()) {
     if (rec.name !== r.name) continue;
@@ -2276,6 +2355,13 @@ async function moveCase(r, n) {
   for (const rec of records) {
     try { await foldersTx("folders", "readwrite", (st) => st.put({ ...rec, handle: res.dir })); } catch { /* listed again once opened */ }
   }
+  // A hearing's link and a place in line follow the folder to its new place.
+  let relinked = false;
+  for (const l of await hearingLinks()) if (moved.has(l)) { l.handle = res.dir; relinked = true; }
+  if (relinked) await saveHearingLinks();
+  let reline = false;
+  for (const e of await prioAll()) if (movedLine.has(e)) { e.handle = res.dir; reline = true; }
+  if (reline) await prioSave();
   const launcher = await retargetLauncher(res.dir, n, r.name);
   const notes = [];
   if (res.left) notes.push(`the empty folder is left where it was`);
@@ -2571,25 +2657,102 @@ async function showShareLog(r) {
 // as it goes (PDF-Linker's `_start_run_priority`), so a reorder reaches a run
 // already going within its next look (15 s). A case leaves the line when a
 // run of it finishes.
+// THE LINE IS KEPT HERE, FOR A DAY (the owner, 2026-11-18: "Let's reserve the
+// prioritize button for when that run is already going. Once selected have it
+// remember that priority for 24 hours so I don't have to keep pressing it (but
+// I can update it manually later)"). PDF-Linker spends a place when a run of
+// the folder finishes: it removes the file, and reads one older than the
+// folder's newest DONE stamp as none (`_run_priority_read`). So the line is
+// Home's own, in the folders database (`places` → "priorityLine": the folders
+// in order, each with the time it was put in line), and each look writes every
+// folder's file to say its place where it does not (`syncLine`), stamped now,
+// so a re-run within the day is in line again from its start. A place lasts
+// PRIORITY_KEEP_MS from when it was given; then it is dropped and its file
+// removed. ▲ ▼ ✕ change it at any time; Prioritize is offered only on a run
+// going, where it does something now. A file a Home before this wrote (or
+// another window) is taken into the line as it stands.
+const PRIORITY_KEEP_MS = 24 * 3600000;
+let prioLine = null;  // [{ name, handle, at }], first first
+let prioTotal = 0;    // places in line, as last looked at
 let lineShown = [];   // the rows in line, first first, as last looked at
 let rowsShown = [];   // every row listed, as last looked at
 let lineBusy = false;
-/**
- * The row of the last look for the folder a button was drawn for: a look
- * that changes no row's text does not redraw (so a hover stays put), and its
- * rows are new objects all the same.
- */
-async function currentRow(r) {
-  for (const x of rowsShown) {
-    if (x === r) return x;
-    if (x.name !== r.name) continue;
-    try { if (await x.handle.isSameEntry(r.handle)) return x; } catch { /* gone */ }
+async function prioAll() {
+  if (!prioLine) {
+    try { prioLine = ((await foldersTx("places", "readonly", (st) => st.get("priorityLine"))) || []).filter((e) => e && e.handle && e.handle.kind === "directory"); }
+    catch { prioLine = []; }
   }
-  return null;
+  return prioLine;
 }
-function lineControls(r, line) {
+async function prioSave() {
+  try { await foldersTx("places", "readwrite", (st) => st.put(prioLine, "priorityLine")); } catch { /* kept for this session */ }
+}
+async function prioIndex(list, handle, name) {
+  for (const [i, e] of list.entries()) {
+    if (name && e.name !== name) continue;
+    try { if (await e.handle.isSameEntry(handle)) return i; } catch { /* gone */ }
+  }
+  return -1;
+}
+async function dropPlaceFile(handle) {
+  try { await handle.removeEntry(caseLib.PRIORITY_FILE); } catch { /* none, or not ours to remove */ }
+}
+/** The line this look: expired places dropped, files a run spent written again, each row's rank set. */
+async function syncLine(rows, now) {
+  const list = await prioAll();
+  let changed = false;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (now - list[i].at <= PRIORITY_KEEP_MS) continue;
+    if (await permitted(list[i].handle, "readwrite", false)) await dropPlaceFile(list[i].handle);
+    list.splice(i, 1);
+    changed = true;
+  }
+  // Places on disk Home does not hold yet, in their own order.
+  const adopt = [];
+  for (const r of rows) {
+    if (!r.listing || r.locked || caseLib.liveRank(r.listing) <= 0) continue;
+    if ((await prioIndex(list, r.handle, r.name)) >= 0) continue;
+    const set = r.listing.priority ? r.listing.priority.set : now;
+    if (now - set > PRIORITY_KEEP_MS) continue;
+    adopt.push({ name: r.name, handle: r.handle, at: set, rank: caseLib.liveRank(r.listing) });
+  }
+  for (const a of adopt.sort((x, y) => x.rank - y.rank)) { list.push({ name: a.name, handle: a.handle, at: a.at }); changed = true; }
+  for (const r of rows) {
+    const i = r.locked ? -1 : await prioIndex(list, r.handle, r.name);
+    r.rank = i >= 0 ? i + 1 : 0;
+  }
+  // Each folder's file says its place: written where it does not (a run
+  // spent it, or the line moved). A look asks nothing: only where Home may
+  // already write.
+  if (!lineBusy) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i];
+      if (!(await permitted(e.handle, "readwrite", false))) continue;
+      let row = null;
+      for (const r of rows) { if (r.name === e.name) { try { if (await r.handle.isSameEntry(e.handle)) { row = r; break; } } catch { /* gone */ } } }
+      let listing = row && row.listing;
+      if (!listing) {
+        try { listing = await readListing(e.handle); }
+        catch (x) { if (x && x.name === "NotFoundError") { list.splice(i, 1); changed = true; } continue; }
+      }
+      if (caseLib.liveRank(listing) === i + 1) continue;
+      try {
+        const w = await (await e.handle.getFileHandle(caseLib.PRIORITY_FILE, { create: true })).createWritable();
+        await w.write(caseLib.priorityText(i + 1, now));
+        await w.close();
+        downloadsSeen.delete(e.name);
+      } catch { /* written on a later look */ }
+    }
+    // A removal above moves the places behind it up: the next look writes them.
+  }
+  prioTotal = list.length;
+  if (changed) await prioSave();
+  return list;
+}
+function lineControls(r) {
   const box = document.createElement("span");
-  const place = line.indexOf(r) + 1;
+  const place = r.rank || 0;
+  const total = prioTotal;
   const btn = (cls, text, label, op, disabled = false) => {
     const x = document.createElement("button");
     x.className = cls;
@@ -2602,8 +2765,10 @@ function lineControls(r, line) {
   };
   if (!place) {
     box.className = "ci-line";
-    const behind = line.length ? `, behind the ${line.length} case${line.length === 1 ? "" : "s"} already in it` : "";
-    box.appendChild(iconise(btn("ci-line-add", "", `Prioritize: put ${r.name} in PDF-Linker's line${behind}: while it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority. It leaves the line when a run of it finishes.`, "add", line.length >= caseLib.RANK_MAX), "chevrons-up", "Prioritize"));
+    // Only on a run going: it is the run that the place serves now.
+    if (!(r.status && /^(running|starting|stalled)$/.test(r.status.state))) return box;
+    const behind = total ? `, behind the ${total} case${total === 1 ? "" : "s"} already in it` : "";
+    box.appendChild(iconise(btn("ci-line-add", "", `Prioritize: put ${r.name} in PDF-Linker's line${behind}: while it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority. It keeps its place for 24 hours, through any re-run, unless you move it or take it out.`, "add", total >= caseLib.RANK_MAX), "chevrons-up", "Prioritize"));
     return box;
   }
   box.className = "ci-line in-line";
@@ -2613,62 +2778,29 @@ function lineControls(r, line) {
   tag.title = caseLib.lineTitle(place, r.name);
   box.appendChild(tag);
   box.appendChild(btn("ci-line-btn", "▲", `Move ${r.name} up in PDF-Linker's line`, "up", place === 1));
-  box.appendChild(btn("ci-line-btn", "▼", `Move ${r.name} down in PDF-Linker's line`, "down", place === line.length));
+  box.appendChild(btn("ci-line-btn", "▼", `Move ${r.name} down in PDF-Linker's line`, "down", place === total));
   box.appendChild(btn("ci-line-btn", "✕", `Take ${r.name} out of PDF-Linker's line`, "remove"));
   return box;
 }
-/** Write `line` (rows, first first) into the folders whose place changed, and take `out` out. */
-async function writeLine(line, out = []) {
-  const set = Date.now();
-  const writes = line.map((r, i) => ({ r, rank: i + 1 })).filter(({ r, rank }) => r.rank !== rank);
-  // Asked first, while the click still counts as one (PDF+ grants it).
-  for (const r of [...writes.map((w) => w.r), ...out]) {
-    if (!(await permitted(r.handle, "readwrite", true))) { shellToast(`The line was not changed: PDF+ may not write into ${r.name}.`, 6000); return false; }
-  }
-  try {
-    for (const { r, rank } of writes) {
-      const w = await (await r.handle.getFileHandle(caseLib.PRIORITY_FILE, { create: true })).createWritable();
-      await w.write(caseLib.priorityText(rank, set));
-      await w.close();
-      r.rank = rank;
-      downloadsSeen.delete(r.name);
-    }
-    for (const r of out) {
-      try { await r.handle.removeEntry(caseLib.PRIORITY_FILE); } catch (e) { if (!e || e.name !== "NotFoundError") throw e; }
-      r.rank = 0;
-      downloadsSeen.delete(r.name);
-    }
-  } catch (e) {
-    shellToast(`The line was only partly changed: ${e.message || e}`, 8000);
-    return false;
-  }
-  return true;
-}
 async function changeLineFor(r, op) {
   if (lineBusy) return;
+  // Asked first, while the click still counts as one (PDF+ grants it).
+  if (!(await permitted(r.handle, "readwrite", true))) { shellToast(`The line was not changed: PDF+ may not write into ${r.name}.`, 6000); return; }
   lineBusy = true;
   try {
-    const cur = await currentRow(r);
-    if (!cur) return;
-    const next = caseLib.changeLine(lineShown, cur, op);
-    if (next.length === lineShown.length && next.every((x, i) => x === lineShown[i])) return;
-    if (await writeLine(next, op === "remove" ? [cur] : [])) caseShown = "";
+    const list = await prioAll();
+    const i = await prioIndex(list, r.handle, r.name);
+    if (op === "add") { if (i < 0 && list.length < caseLib.RANK_MAX) list.push({ name: r.name, handle: r.handle, at: Date.now() }); }
+    else if (i < 0) return;
+    else if (op === "remove") { list.splice(i, 1); await dropPlaceFile(r.handle); downloadsSeen.delete(r.name); }
+    else if (op === "up" && i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]];
+    else if (op === "down" && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]];
+    await prioSave();
+    caseShown = ""; hearingsShown = "";
   } finally {
     lineBusy = false;
     renderCaseFolders();
   }
-}
-/**
- * Close the gaps a finished run leaves (PDF-Linker removes its folder's place
- * when the run finishes), so each folder's file says the place Home shows.
- * Only where Home may already write into those folders: a look is no click,
- * and nothing is asked.
- */
-async function compactLine(line) {
-  if (lineBusy || line.every((r, i) => r.rank === i + 1)) return;
-  for (const [i, r] of line.entries()) if (r.rank !== i + 1 && !(await permitted(r.handle, "readwrite", false))) return;
-  lineBusy = true;
-  try { await writeLine(line); } finally { lineBusy = false; }
 }
 
 // ---- Home: take over a run that stopped part-way -----------------------------
@@ -2798,10 +2930,9 @@ document.getElementById("case-clear")?.addEventListener("click", async () => {
   // taken out of the line from here once it was forgotten.
   if (!caseLib) caseLib = await import("./viewer/case-folders.js");
   const forget = [];
+  const line = await prioAll();
   for (const r of await foldersAll()) {
-    let inLine = false;
-    if (await permitted(r.handle, "read", false)) { try { inLine = caseLib.liveRank(await readListing(r.handle)) > 0; } catch { /* unreadable: forgotten */ } }
-    if (!inLine) forget.push(r.key);
+    if ((await prioIndex(line, r.handle, r.name)) < 0) forget.push(r.key);
   }
   try { await foldersTx("folders", "readwrite", (s) => { for (const k of forget) s.delete(k); }); } catch { /* ok */ }
   renderCaseFolders();

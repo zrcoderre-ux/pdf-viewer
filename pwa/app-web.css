@@ -233,8 +233,11 @@ body.home-open .tab-view.active { display: none; }
 }
 .home-inner { max-width: 760px; margin: 0 auto; }
 /* Home's Folders list beside the rest (app-web.js, "Home: folders"). */
-.home-layout { display: flex; align-items: flex-start; gap: 28px; max-width: 1340px; margin: 0 auto; }
-.home-layout > .home-inner { flex: 1; min-width: 0; max-width: none; margin: 0; }
+/* The Folders list at the window's left edge, the rest centred in the room
+   beside it (the owner: "move the folders menu to the left a bit more,
+   everything is clumped up right now"). */
+.home-layout { display: flex; align-items: flex-start; gap: 40px; }
+.home-layout > .home-inner { flex: 1; min-width: 0; max-width: 1120px; margin: 0 auto; }
 /* The row's buttons as icons (app-web.js, iconise). */
 .case-row button.ci-ico, .case-row .ci-ico { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 30px; height: 28px; padding: 0 6px; margin-right: 6px; border-radius: 8px; font-size: 11px; line-height: 1; }
 .case-row .ci-word { margin-right: 0; }

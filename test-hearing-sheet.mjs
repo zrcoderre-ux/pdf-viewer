@@ -408,11 +408,41 @@ async function browserPart() {
 
     console.log("10. eCourt, and a case folder's buttons on its hearing's row");
     await shell.click("#hearing-list .hearing-row:nth-of-type(3) .ci-ecourt");
-    await shell.click("#hearing-list .hearing-row:nth-of-type(3) .hearing-item");
-    check("eCourt opens the sheet's link, twice", await shell.evaluate(() => window.__opened), ["https://civil.lacourt.org/ecourt/ecms/case?id=222", "https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
+    check("eCourt opens the sheet's link", await shell.evaluate(() => window.__opened), ["https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
+    // The owner: a click on a case not downloaded "should let me try to locate the file".
+    await shell.evaluate(async () => {
+      const top = await navigator.storage.getDirectory();
+      const papers = await (await top.getDirectoryHandle("Elsewhere", { create: true })).getDirectoryHandle("Globex papers", { create: true });
+      const w = await (await papers.getFileHandle("MSJ.pdf", { create: true })).createWritable(); await w.write("%PDF msj"); await w.close();
+      const acme = await (await top.getDirectoryHandle("Downloads")).getDirectoryHandle("25STCV12345 ACME");
+      window.__picks = [acme, papers];
+      window.showDirectoryPicker = async () => window.__picks.shift();
+    });
+    const doeLoc = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("24STCV00777 Doe v. Globex"))');
+    await doeLoc.locator(".hearing-item").click();
+    await shell.waitForFunction(() => /is not 24STCV00777 Doe v\. Globex's folder/.test(document.getElementById("shell-toast").textContent), null, { timeout: 10000 });
+    check("a click on it asks for its folder; one carrying another case's number is refused", await shell.textContent("#shell-toast"), "25STCV12345 ACME is not 24STCV00777 Doe v. Globex's folder: it carries 25STCV12345, not 24STCV00777.");
+    check("…and eCourt is not opened by the click", await shell.evaluate(() => window.__opened.length), 1);
+    await doeLoc.locator(".hearing-item").click();
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.textContent.includes("Globex papers")), null, { timeout: 10000 });
+    check("the folder picked is that hearing's, whatever its name", [await doeLoc.locator(".ci-where").textContent(), await doeLoc.locator(".ci-status").textContent()], ["MSJ · Globex papers", "Not run yet"]);
+    check("…its buttons on the row", await doeLoc.locator(".ci-done").count(), 1);
+    // Prioritize is offered on a run going: one starts in ACME.
+    const etaIn = (on) => shell.evaluate(async (on) => {
+      const acme = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("25STCV12345 ACME");
+      if (on) { const w = await (await acme.getFileHandle("ETA ~6.04PM (1 of 2).txt", { create: true })).createWritable(); await w.close(); }
+      else await acme.removeEntry("ETA ~6.04PM (1 of 2).txt");
+      window.dispatchEvent(new Event("focus"));
+    }, on);
+    check("no Prioritize on a case whose run is not going", await shell.$$eval("#hearing-list .hearing-row:nth-of-type(2) .ci-line-add", (b) => b.length), 0);
+    await etaIn(true);
+    await shell.waitForSelector("#hearing-list .hearing-row:nth-of-type(2) .ci-line-add", { timeout: 10000 });
     await shell.click("#hearing-list .hearing-row:nth-of-type(2) .ci-line-add");
     await shell.waitForFunction(() => document.querySelector("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), null, { timeout: 10000 });
     check("Prioritize on the hearing puts its folder first in line", await shell.textContent("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), "1st");
+    await etaIn(false);
+    await shell.waitForFunction(() => /^Finished /.test(document.querySelector("#hearing-list .hearing-row:nth-of-type(2) .ci-status").textContent), null, { timeout: 10000 });
+    check("…and it keeps its place once the run is no longer going", await shell.textContent("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), "1st");
     check("…written into the folder", await shell.evaluate(async () => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
       const f = await (await (await dl.getDirectoryHandle("25STCV12345 ACME")).getFileHandle("PDF-Linker Priority.json")).getFile();
@@ -510,7 +540,7 @@ async function browserPart() {
     check("a click opens a folder, as File Explorer's do", await shell.$$eval("#tree-list .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads", "Filed", "November"]);
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-row.draggable").length >= 2, null, { timeout: 10000 });
     const acmeRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE"))');
-    check("a hearing that carries its folder can be dragged; one that has none cannot", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.filter((r) => r.textContent.includes("24STCV00777")).map((r) => r.draggable)), [false]);
+    check("a hearing that carries its folder can be dragged; one that has none cannot", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.filter((r) => /24STCV00777|22STCV05555/.test(r.textContent)).map((r) => r.draggable)), [true, false]);
     await acmeRow.dragTo(shell.locator('#tree-list .tree-node:has(.tree-name:text-is("November"))'));
     await shell.waitForSelector("#move-bar:not([hidden])", { timeout: 5000 });
     check("the move bar asks first", await shell.textContent("#move-bar .mb-text"), "Move “25STCV12345 ACME” into Filed › November?");

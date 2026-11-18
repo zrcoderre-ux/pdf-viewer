@@ -64,7 +64,9 @@ folders opened in the app, the hearing row *is* that folder:
   window closes when you close its last tab.
 
 Otherwise the pill says **Zip in Downloads** (not extracted yet) or **Not
-downloaded**; click the row, or **eCourt**, to open the case in eCourt.
+downloaded**. If you know the folder is somewhere (you moved it, say), click
+the row and pick it: Home keeps that folder as the hearing's from then on. Use
+**eCourt** to open the case in eCourt.
 
 An **Order Template Input** sheet in Downloads more than two days old does not
 count toward Files in Downloads: it is most likely from an earlier motion in
@@ -79,6 +81,10 @@ number for the surest match.
 The buttons on a row are icons; hover one for its name. From left to right:
 Word (open the folder's Word documents), Log to share, Prioritize (PDF-Linker's
 line), Done, Off calendar or On calendar, and eCourt.
+
+**Prioritize** appears only while PDF-Linker is running on the case. Once you
+use it, the case keeps its place in line for 24 hours, through any re-run, so
+you don't have to press it again; ▲ ▼ ✕ change it at any time.
 
 PDF-Linker's status is a small dot: green finished, amber something to answer
 or a run that looks stopped, blue (pulsing) running, grey not run yet. Click

@@ -297,5 +297,24 @@ room".
   Folders list (`addTreeRoots`): each added once, files and refused ones left
   out and said, and the shell's own file drop stands aside there.
 
+## Find a case's folder from its hearing; the Folders list at the edge (2026-11-18)
+
+- The owner: "Instead of clicking the case name for a not downloaded case
+  sending me to e-court (I can use the ecourt button for that) it should let
+  me try to locate the file (because I might have just moved it to another
+  folder)." A click on a hearing with no folder found (Not downloaded, Zip in
+  Downloads, Files in Downloads) asks for its folder (`locateCase`; the
+  dialog's id "locate", so it starts where the last was found). The folder
+  picked becomes that hearing's LINK, by its case number or else its case
+  name's words (`linkKey`), kept in `places` → `"hearingLinks"` for
+  HEARING_LINK_KEEP_MS (120 days) and looked at before any matching in
+  `hearingItems`, whatever the folder's name. Refused: a folder carrying
+  another case's number, and one with no case papers (`isCaseListing`). Then
+  it opens as a found case does. A linked folder moved from the Folders list
+  keeps its link. eCourt is only the eCourt button now.
+- The owner: "move the folders menu to the left a bit more, everything is
+  clumped up right now." The Folders list stands at the window's left edge,
+  and the rest is centred in the room beside it (up to 1120px).
+
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

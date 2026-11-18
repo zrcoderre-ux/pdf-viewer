@@ -46,6 +46,29 @@ from a newer checkout), every folder is read as in a browser.
 
 A folder in both is one row ("In Downloads today · Opened 3:14 PM").
 
+## PDF-Linker's line: Prioritize on a run going, a place kept 24 hours (2026-11-18)
+
+The owner: "Let's reserve the prioritize button for when that run is already
+going. Once selected have it remember that priority for 24 hours so I don't
+have to keep pressing it (but I can update it manually later)." **Prioritize**
+now stands only on a folder whose run is going (running, starting, or stopped
+part-way); a folder in line keeps its place and ▲ ▼ ✕ whatever its state.
+
+PDF-Linker spends a place when a run finishes (it removes PRIORITY_FILE, and
+reads one older than the folder's newest DONE stamp as none), and that is
+PDF-Linker's own rule. So the line is now Home's: the folders in order with
+the time each was put in line, in the folders database (`places` →
+`"priorityLine"`). Each look (`syncLine`) writes every folder's file to say
+its place where it does not, stamped now, so a re-run within the day is in
+line from its start; drops a place PRIORITY_KEEP_MS (24 h) after it was given,
+removing its file; drops one whose folder is gone; and takes into the line a
+live place on disk it does not hold yet (an older Home's, in its own order).
+A look asks nothing: files are written only where Home may already write. The
+place shown is the folder's in Home's line (`r.rank`), and Clear keeps a
+folder in it. A folder moved from the Folders list keeps its place. Tests:
+`test-case-folders.mjs` part 15 (none on a finished case, Prioritize on a run,
+▲ ✕, the file written again after a finish newer than it, let go 25 hours on).
+
 ## A case opens in a window of its own (2026-11-18)
 
 The owner: "Now that it is acting as a hub, it should open in a new tab when I
