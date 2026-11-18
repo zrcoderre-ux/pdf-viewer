@@ -172,8 +172,9 @@ async function findFoldersNamed(name, { depth = 4, ms = 5000 } = {}) {
 }
 
 // Links that open in the browser without asking: the citation links' own
-// targets (viewer/code-tables.js). Any other link is shown first.
-const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.)lexisnexis\.com$/i];
+// targets (viewer/code-tables.js), and eCourt, which Home's Hearings list
+// opens a case in (the hearings sheet's own links). Any other link is shown first.
+const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.)lexisnexis\.com$/i, /^civil\.lacourt\.org$/i];
 // PDF-Linker's own link (the text reader's Re-run PDF-Linker button,
 // textdoc.rerunUrl), handed to the program Windows has registered for it.
 // It carries a folder token and a nonce, and PDF-Linker runs only on the

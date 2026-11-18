@@ -1173,6 +1173,27 @@ async function readRunStart(key, entry) {
 // it), the day did, or a run is going in it. A zip's time never changes, so it is read once.
 const downloadsSeen = new Map(); // folder name → { sig, day, listing }
 const zipTimes = new Map();      // zip name → lastModified
+/**
+ * A Downloads folder's listing, read again only where its names changed since
+ * the last look, the day did, or a run is going in it; null where it cannot
+ * be read.
+ */
+async function cachedListing(dir, now) {
+  const day = caseLib.startOfDay(now);
+  let names;
+  try { names = []; for await (const [n] of dir.entries()) names.push(n); } catch { return null; }
+  const sig = names.sort().join("\n");
+  const seen = downloadsSeen.get(dir.name);
+  let listing = seen && seen.sig === sig && seen.day === day ? seen.listing : null;
+  // A run going is read again each look: the names hold still through a
+  // long PDF, and pdf_linker.log's time is what says the run is alive.
+  if (listing && /^(running|stalled)$/.test(caseLib.folderStatus(listing, now).state)) listing = null;
+  if (!listing) {
+    try { listing = await readListing(dir); } catch { return null; }
+    downloadsSeen.set(dir.name, { sig, day, listing });
+  }
+  return listing;
+}
 async function todayInDownloads(dl, now) {
   const day = caseLib.startOfDay(now);
   // PDF+ knows each folder's own time (main.js, "pdfplus:downloads-today"),
@@ -1203,19 +1224,8 @@ async function todayInDownloads(dl, now) {
   }
   const rows = [];
   const look = async (dir) => {
-    let names;
-    try { names = []; for await (const [n] of dir.entries()) names.push(n); } catch { return; }
-    const sig = names.sort().join("\n");
-    const seen = downloadsSeen.get(dir.name);
-    let listing = seen && seen.sig === sig && seen.day === day ? seen.listing : null;
-    // A run going is read again each look: the names hold still through a
-    // long PDF, and pdf_linker.log's time is what says the run is alive.
-    if (listing && /^(running|stalled)$/.test(caseLib.folderStatus(listing, now).state)) listing = null;
-    if (!listing) {
-      try { listing = await readListing(dir); } catch { return; }
-      downloadsSeen.set(dir.name, { sig, day, listing });
-    }
-    if (!caseLib.isCaseListing(listing) || !caseLib.isToday(dir.name, listing, now, zipsToday)) return;
+    const listing = await cachedListing(dir, now);
+    if (!listing || !caseLib.isCaseListing(listing) || !caseLib.isToday(dir.name, listing, now, zipsToday)) return;
     rows.push({ name: dir.name, handle: dir, listing, today: true, opened: 0 });
   };
   // A few at a time: a synced Downloads answers slowly, one folder after another.
@@ -1306,6 +1316,11 @@ async function renderCaseFoldersNow() {
       if (!keep) runsStarted.splice(runsStarted.indexOf(start), 1);
     }
   }
+  // The hearings sheet, read once a look: each case folder's hearing off it,
+  // and the Hearings list drawn over the same folders (renderHearings).
+  const sheet = await loadSheet();
+  for (const r of rows) r.hearing = sheet.hearings.length ? hearingLib.hearingForPlace(sheet.hearings, placeOfRow(r), now) : null;
+  try { await renderHearings(rows, sheet, dl, dlState, now); } catch (e) { console.warn(e); }
   const shown = caseLib.sortRows(rows).slice(0, CASE_ROWS_MAX);
   const line = shown.filter((r) => r.rank > 0);
   lineShown = line;
@@ -1319,10 +1334,12 @@ async function renderCaseFoldersNow() {
     if (r.opened) where.push("Opened " + caseLib.whenText(r.opened, now));
     // A run going: when it started and how long it has gone (runningSub).
     if (st.sub) where.unshift(st.sub);
+    // The case's hearing, off the hearings sheet.
+    if (r.hearing) where.unshift(hearingWhen(r.hearing, now));
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : ""].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : "", r.hearing ? r.hearing.url : ""].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1361,6 +1378,7 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
+    if (r.hearing && hearingLib.isWebLink(r.hearing.url)) row.appendChild(ecourtButton(r.hearing));
     if (!r.locked && canOpenWord() && caseLib.wordDocs(r.listing).length) row.appendChild(wordButton(r));
     if (!r.locked && caseLib.hasShareLog(r.listing)) row.appendChild(shareLogButton(r));
     if (!r.locked && r.listing) row.appendChild(lineControls(r, line));
@@ -1368,6 +1386,269 @@ async function renderCaseFoldersNow() {
     listEl.appendChild(row);
   }
 }
+
+// ---- Home: hearings ---------------------------------------------------------
+//
+// The owner (2026-11-18): "I want to change the pdf+ homepage into a central
+// hub ... integrate my excel sheet where I list the upcoming hearings under
+// these columns Date, Motion Type, Case Name, Date Submitted. I mark them
+// green when done and red if they are taken off calendar ... it should
+// attempt to match cases by the case number with their row in Excel, and
+// should indicate the download status ... That way I can tell at a glance
+// what I have downloaded and what I still need." The case names are
+// hyperlinked to eCourt, so a hearing's eCourt button opens the sheet's own
+// link (desktop/main.js trusts civil.lacourt.org, so PDF+ asks nothing).
+//
+// THE SHEET IS LINKED ONCE, as Downloads is: one pick, the handle kept in the
+// folders database (`places`, "hearings"), read leave only — nothing here
+// writes to it. Each look reads its File afresh and parses it again only
+// where its size or time moved, so a save in Excel shows on the next look.
+// Excel holds a workbook open for writing, but other programs may read it; a
+// read that fails keeps the last one and says so.
+//
+// The rules (columns, marks, dates, the matching) are in
+// viewer/hearing-sheet.js, tested by test-hearing-sheet.mjs.
+const HEARING_ROWS_MAX = 40;
+const DOWNLOADS_INDEX_MS = 60000; // Downloads' own names are read again this often
+let hearingLib = null;
+let sheetSeen = null;   // { key, hearings, sheets, readAt }
+let hearingsAll = false; // "Show done and off"
+let hearingsShown = "";
+let downloadsIndexSeen = null; // { at, name, places }
+
+async function sheetHandle() {
+  try { const h = await foldersTx("places", "readonly", (s) => s.get("hearings")); return h && h.kind === "file" ? h : null; }
+  catch { return null; }
+}
+
+/**
+ * The hearings sheet as this look reads it: { state, name, hearings, sheets,
+ * readAt, error } — state "none" (not linked), "locked" (the leave to read it
+ * wants a click), "ok", or "error" (unread, `hearings` the last read's).
+ */
+async function loadSheet() {
+  if (!hearingLib) hearingLib = await import("./viewer/hearing-sheet.js");
+  const h = await sheetHandle();
+  if (!h) return { state: "none", name: "", hearings: [], sheets: [] };
+  if (!(await permitted(h, "read", false))) return { state: "locked", name: h.name, hearings: [], sheets: [] };
+  try {
+    const file = await h.getFile();
+    const key = `${h.name}|${file.size}|${file.lastModified}`;
+    if (!sheetSeen || sheetSeen.key !== key) {
+      const { hearings, sheets } = await hearingLib.readHearings(file);
+      sheetSeen = { key, hearings, sheets, readAt: file.lastModified };
+    }
+    return { state: "ok", name: h.name, ...sheetSeen };
+  } catch (e) {
+    const last = sheetSeen || { hearings: [], sheets: [] };
+    return { state: "error", name: h.name, ...last, error: (e && e.message) || String(e) };
+  }
+}
+
+/** The case numbers the files in a listing carry ("Register of Actions 25STCV12345.pdf"). */
+function listingNumbers(listing) {
+  const out = new Set();
+  for (const f of (listing && listing.files) || []) for (const n of hearingLib.caseNumbersIn(f.name)) out.add(n);
+  return [...out];
+}
+/** A case folder's row as the matching takes it (hearing-sheet.js, placeMatches). */
+function placeOfRow(r) {
+  return { name: r.name, kind: r.today ? "folder" : "opened", numbers: listingNumbers(r.listing), row: r };
+}
+
+/**
+ * Downloads' own entries as places a hearing's case may stand: its folders,
+ * its zips and the loose files whose names carry a case number. Names only
+ * (no file is opened), read again every DOWNLOADS_INDEX_MS.
+ */
+async function downloadsIndex(dl) {
+  const now = Date.now();
+  if (downloadsIndexSeen && downloadsIndexSeen.name === dl.name && now - downloadsIndexSeen.at < DOWNLOADS_INDEX_MS) return downloadsIndexSeen.places;
+  const places = [];
+  for await (const [name, entry] of dl.entries()) {
+    if (entry.kind === "directory") places.push({ name, kind: "folder", handle: entry });
+    else if (/\.zip$/i.test(name)) places.push({ name, kind: "zip" });
+    else if (hearingLib.caseNumbersIn(name).length) places.push({ name, kind: "file" });
+  }
+  downloadsIndexSeen = { at: now, name: dl.name, places };
+  return places;
+}
+
+/** "Hearing Fri, Nov 20 · Demurrer", as a case folder's row says it. */
+function hearingWhen(hg, now) {
+  const when = hg.date ? hearingLib.dayText(hg.date, now) : hg.dateText;
+  const mark = hg.mark === "done" ? " (done)" : hg.mark === "off" ? " (off calendar)" : "";
+  return `Hearing ${when}${hg.motion ? " · " + hg.motion : ""}${mark}`;
+}
+
+function ecourtButton(hg) {
+  const b = document.createElement("button");
+  b.className = "ci-ecourt";
+  b.textContent = "eCourt";
+  b.title = `Open ${hg.caseNumber || hg.caseName} in eCourt (the hearings sheet's link)`;
+  b.addEventListener("click", (e) => { e.stopPropagation(); openEcourt(hg); });
+  return b;
+}
+function openEcourt(hg) {
+  if (!hearingLib.isWebLink(hg.url)) return;
+  window.open(hg.url, "_blank", "noopener");
+}
+
+async function renderHearings(rows, sheet, dl, dlState, now) {
+  const section = document.getElementById("hearings");
+  const listEl = document.getElementById("hearing-list");
+  const sumEl = document.getElementById("hearings-summary");
+  if (!section || !listEl) return;
+  section.hidden = false;
+  // Where each case stands: the folders listed below (opened here, today's in
+  // Downloads), then everything else in Downloads, by name.
+  const places = rows.map(placeOfRow);
+  if (dlState === "ok" && sheet.hearings.length) {
+    let idx = [];
+    try { idx = await downloadsIndex(dl); } catch { idx = []; }
+    for (const p of idx) if (!(p.kind === "folder" && rows.some((r) => r.today && r.name === p.name))) places.push(p);
+  }
+  const all = hearingLib.upcoming(sheet.hearings, now, { all: true });
+  const open = all.filter((h) => !h.mark);
+  const list = (hearingsAll ? all : open).slice(0, HEARING_ROWS_MAX);
+  const items = [];
+  for (const hg of list) {
+    const place = hearingLib.findPlace(hg, places);
+    let status = null;
+    // A Downloads folder not listed below: its PDF-Linker status read here.
+    if (place && place.row) status = place.row.status;
+    else if (place && place.kind === "folder" && place.handle) {
+      const listing = await cachedListing(place.handle, now);
+      status = listing ? caseLib.folderStatus(listing, now) : null;
+    }
+    items.push({ hg, place, status });
+  }
+  const downloaded = open.filter((h) => { const p = hearingLib.findPlace(h, places); return p && p.kind !== "zip" && p.kind !== "file"; }).length;
+  const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
+    ...items.map(({ hg, place, status }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.url, hg.submitted, hg.submittedText,
+      place ? place.kind + ":" + place.name : "", status ? caseLib.statusText(status, now).text : ""].join("|"))].join("\n");
+  if (sig === hearingsShown) return;
+  hearingsShown = sig;
+
+  const linkBtn = document.getElementById("hearings-link");
+  linkBtn.textContent = sheet.state === "none" ? "Link hearings sheet…" : sheet.state === "locked" ? "Allow hearings sheet" : "Change sheet…";
+  linkBtn.title = sheet.state === "none"
+    ? "Point Home at your Excel sheet of upcoming hearings once (Date, Motion Type, Case Name, Date Submitted)"
+    : sheet.state === "locked" ? `The browser wants your leave to read ${sheet.name} again`
+      : `Read from ${sheet.name}${sheet.sheets && sheet.sheets.length ? " (" + sheet.sheets.join(", ") + ")" : ""}. Saved in Excel, it is read again on the next look.`;
+  const allBtn = document.getElementById("hearings-all");
+  const marked = all.length - open.length;
+  allBtn.hidden = !marked;
+  allBtn.textContent = hearingsAll ? "Hide done and off" : `Show done and off (${marked})`;
+
+  const notDl = open.length - downloaded;
+  sumEl.hidden = !open.length;
+  sumEl.textContent = "";
+  if (open.length) {
+    const add = (text, cls) => { const s = document.createElement("span"); s.textContent = text; if (cls) s.className = cls; sumEl.appendChild(s); };
+    add(`${open.length} to work up`);
+    add(`${downloaded} downloaded`, "hs-ok");
+    if (notDl) add(`${notDl} not downloaded`, "hs-warn");
+    if (dlState !== "ok") add(dlState === "none" ? "Downloads not linked: only folders opened here are matched" : "Allow Downloads to match the folders in it", "hs-note");
+  }
+
+  listEl.textContent = "";
+  const empty = (text) => { const p = document.createElement("p"); p.className = "case-empty"; p.textContent = text; listEl.appendChild(p); };
+  if (sheet.state === "none") return empty("Link your Excel sheet of upcoming hearings, and each one is listed here with whether its case is downloaded.");
+  if (sheet.state === "locked") return empty(`The browser wants your leave to read ${sheet.name} again: click Allow hearings sheet.`);
+  if (sheet.state === "error") {
+    const p = document.createElement("p");
+    p.className = "case-empty hearings-error";
+    p.textContent = `${sheet.name} could not be read just now (${sheet.error}).${sheet.hearings.length ? " These are from the last read." : ""}`;
+    listEl.appendChild(p);
+  }
+  if (sheet.state === "ok" && !sheet.sheets.length) return empty(`No sheet in ${sheet.name} has a header row with Date and Case Name columns.`);
+  if (!items.length) { if (sheet.state === "ok") empty(marked ? "Every upcoming hearing is marked done or off calendar." : "No hearings from today on in the sheet."); return; }
+
+  let lastDay = null;
+  for (const { hg, place, status } of items) {
+    const dayKey = hg.date || hg.dateText;
+    if (dayKey !== lastDay) {
+      lastDay = dayKey;
+      const head = document.createElement("div");
+      head.className = "hearing-day";
+      head.textContent = hg.date ? hearingLib.dayText(hg.date, now) : hg.dateText;
+      if (hg.date) head.title = new Date(hg.date).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      listEl.appendChild(head);
+    }
+    const row = document.createElement("div");
+    row.className = "case-row hearing-row" + (hg.mark ? " mark-" + hg.mark : "");
+    const b = document.createElement("button");
+    b.className = "recent-item case-item hearing-item";
+    b.innerHTML = `<span class="ri-icon">${icon("calendar", { size: 18 })}</span><span class="ci-main"><span class="ri-name"></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    b.querySelector(".ri-name").textContent = hg.caseName;
+    const where = [];
+    if (hg.motion) where.push(hg.motion);
+    if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
+    if (hg.submitted || hg.submittedText) where.push("Submitted " + (hg.submitted ? hearingLib.shortDate(hg.submitted, now) : hg.submittedText));
+    if (place && (place.kind === "folder" || place.kind === "opened")) {
+      where.push(place.name + (status ? " — " + caseLib.statusText(status, now).text : ""));
+    }
+    b.querySelector(".ci-where").textContent = where.join(" · ");
+    const pill = b.querySelector(".ci-status");
+    const said = hg.mark === "done" ? { text: "Done", tone: "ok", title: "Marked green in the sheet: done." }
+      : hg.mark === "off" ? { text: "Off calendar", tone: "off", title: "Marked red in the sheet: off calendar, or nothing to work up." }
+        : hearingLib.placeText(place);
+    pill.textContent = said.text;
+    pill.classList.add("tone-" + said.tone);
+    const folder = place && (place.kind === "folder" || place.kind === "opened") ? (place.row ? place.row.handle : place.handle) : null;
+    const rowWhere = `${hg.sheet}, row ${hg.row}`;
+    b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : hearingLib.isWebLink(hg.url) ? "Not downloaded: open the case in eCourt." : "Not downloaded.")
+      + `\n${said.title}` + (status ? "\n" + caseLib.statusText(status, now).title : "") + `\nFrom the hearings sheet: ${rowWhere}.`;
+    b.addEventListener("click", async () => {
+      if (folder) {
+        if (!(await permitted(folder, "readwrite", true))) return;
+        try { await openCaseFolder(folder); }
+        catch { shellToast(`“${place.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
+      } else if (hearingLib.isWebLink(hg.url)) openEcourt(hg);
+      else shellToast(place ? said.title : "No case folder for this case, and no eCourt link on its row in the sheet.", 5000);
+    });
+    row.appendChild(b);
+    if (hearingLib.isWebLink(hg.url)) row.appendChild(ecourtButton(hg));
+    else {
+      // Its place kept, so the pills stand in one column.
+      const gap = document.createElement("span");
+      gap.className = "ci-ecourt ci-ecourt-gap";
+      gap.textContent = "eCourt";
+      gap.setAttribute("aria-hidden", "true");
+      row.appendChild(gap);
+    }
+    listEl.appendChild(row);
+  }
+  if ((hearingsAll ? all : open).length > HEARING_ROWS_MAX) empty(`And ${(hearingsAll ? all : open).length - HEARING_ROWS_MAX} more in the sheet.`);
+}
+
+document.getElementById("hearings-link")?.addEventListener("click", async () => {
+  const h = await sheetHandle();
+  // Linked but not readable this session: the leave is asked again. Refused,
+  // the dialog follows, to link it afresh.
+  if (h && !(await permitted(h, "read", false)) && (await permitted(h, "read", true))) { renderCaseFolders(); return; }
+  let picked;
+  try {
+    [picked] = await showPicker("showOpenFilePicker", {
+      id: "hearings",
+      types: [{ description: "Excel workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx", ".xlsm"] } }],
+      multiple: false,
+    });
+  } catch (e) { if (e && e.name !== "AbortError") shellToast(String(e.message || e), 5000); return; }
+  if (!picked) return;
+  if (!/\.(xlsx|xlsm)$/i.test(picked.name)) { shellToast("The hearings sheet must be an Excel workbook (.xlsx or .xlsm). An older .xls can be saved as .xlsx from Excel.", 7000); return; }
+  try { await foldersTx("places", "readwrite", (s) => s.put(picked, "hearings")); }
+  catch { shellToast("The hearings sheet could not be kept: this browser is not storing anything for the app.", 6000); return; }
+  sheetSeen = null;
+  hearingsShown = "";
+  renderCaseFolders();
+});
+document.getElementById("hearings-all")?.addEventListener("click", () => {
+  hearingsAll = !hearingsAll;
+  hearingsShown = "";
+  renderCaseFolders();
+});
 
 // ---- Home: open the case folder's Word documents ------------------------------
 //
