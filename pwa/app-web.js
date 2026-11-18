@@ -1930,6 +1930,9 @@ async function renderHearings(sheet, hv, dlState, now, line) {
         : st || hearingLib.placeText(place);
     pill.textContent = said.text;
     pill.classList.add("tone-" + said.tone);
+    // A hearing done says nothing of where its case stands (the owner: "If a
+    // case folder is done, remove the not downloaded button").
+    if (hg.mark === "done" && !st) pill.hidden = true;
     if (hg.waiting) pill.classList.add("waiting");
     if (st && said === st && !r.locked) compactStatus(pill, "f:" + r.name);
     const placeSaid = hearingLib.placeText(place);

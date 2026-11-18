@@ -276,6 +276,10 @@ room".
   calendar is set aside, behind **Show off calendar** (was Show done and off).
   The summary counts the done. Its folder is on its row, so Case folders never
   lists it.
+  A done hearing with no folder found shows no pill at all (the owner: "If a
+  case folder is done, remove the not downloaded button"): Not downloaded, Zip
+  in Downloads and Files in Downloads say what is still to fetch, and a done
+  case needs nothing fetched. One with a folder keeps its PDF-Linker dot.
 - **The status as a dot.** The owner: "The finished time takes up too much
   space. It should be much smaller and expand to give that detail when
   pressed." PDF-Linker's status, on a hearing row and in Case folders, is a dot

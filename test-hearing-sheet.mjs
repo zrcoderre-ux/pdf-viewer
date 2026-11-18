@@ -485,9 +485,11 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("22STCV05555") && r.querySelector(".ci-done-mark")), null, { timeout: 10000 });
     check("…a ✓ before its name, and it stays listed", [await vanceRow.locator(".ci-done-mark").count(), await vanceRow.locator(".ci-done").getAttribute("aria-pressed")], [1, "true"]);
     check("…the sheet's row reads as done", (await vanceNow()).mark, "done");
+    check("…its Zip in Downloads pill gone: a done case says nothing of being downloaded", await vanceRow.locator(".ci-status").isVisible(), false);
     await vanceRow.locator(".ci-done").click();
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("22STCV05555") && !r.querySelector(".ci-done-mark")), null, { timeout: 10000 });
     check("pressed again: not done, here and in the sheet", [await vanceRow.locator(".ci-done-mark").count(), (await vanceNow()).mark], [0, ""]);
+    check("…and the pill back", await vanceRow.locator(".ci-status").textContent(), "Zip in Downloads");
 
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);

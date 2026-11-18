@@ -28,6 +28,8 @@ out of the list. **Show done and off** brings them back, struck through.
 Each hearing has a **✓ Done** button. It fills the hearing's **Motion Type**
 and **Case Name** cells green in your sheet, and a green ✓ appears before the
 case name on Home. A done hearing stays on the list until its date has passed.
+It no longer says Not downloaded (or Zip in Downloads): there is nothing left to
+fetch for it.
 Press ✓ again (Not done) to take the green off.
 
 **Off calendar** fills the same two cells red, and the hearing leaves the list.
