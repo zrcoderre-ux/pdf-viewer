@@ -65,13 +65,20 @@ A folder is recognised by the case number in its name, or by the Register of
 Actions the E-Court Export saves into it. Name case folders with their case
 number for the surest match.
 
+## The row's buttons
+
+The buttons on a row are icons; hover one for its name. From left to right:
+Word (open the folder's Word documents), Log to share, Prioritize (PDF-Linker's
+line), Off calendar or On calendar, and eCourt.
+
 ## Case folders not on the hearings list
 
 Above the hearings, Home lists only the case folders that match no hearing on
 the list: a case whose hearing is past or marked done or off, one not on the
 sheet, or one the matching missed. Each says its hearing where the sheet has
-one, with the same buttons. When every folder is on a hearing, the list is not
-shown. **Link Downloads…** is in the Hearings heading.
+one, with the same buttons. A folder whose hearing is marked done or off
+calendar is not listed, unless PDF-Linker is running on it. When every folder
+is on a hearing, the list is not shown. **Link Downloads…** is in the Hearings heading.
 
 ## Folders: moving a case into a folder
 

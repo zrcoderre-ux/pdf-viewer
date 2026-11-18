@@ -233,8 +233,15 @@ body.home-open .tab-view.active { display: none; }
 }
 .home-inner { max-width: 760px; margin: 0 auto; }
 /* Home's Folders list beside the rest (app-web.js, "Home: folders"). */
-.home-layout { display: flex; align-items: flex-start; gap: 28px; max-width: 1060px; margin: 0 auto; }
-.home-layout > .home-inner { flex: 1; min-width: 0; margin: 0; }
+.home-layout { display: flex; align-items: flex-start; gap: 28px; max-width: 1340px; margin: 0 auto; }
+.home-layout > .home-inner { flex: 1; min-width: 0; max-width: none; margin: 0; }
+/* The row's buttons as icons (app-web.js, iconise). */
+.case-row button.ci-ico, .case-row .ci-ico { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 30px; height: 28px; padding: 0 6px; margin-right: 6px; border-radius: 8px; font-size: 11px; line-height: 1; }
+.case-row .ci-word { margin-right: 0; }
+.case-row .ci-line { margin-right: 4px; }
+.case-row .ci-line.in-line { margin-right: 8px; }
+.case-row .ci-ico svg { flex: none; }
+.ci-ico-n { font-weight: 650; }
 .home-tree { flex: none; width: 240px; position: sticky; top: 0; max-height: calc(100vh - var(--tabstrip-h) - 7vh - 20px); overflow: auto; padding-top: 4px; }
 .home-tree .recent-head h2 { font-size: 12px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--c-text-3); margin: 0 0 8px; }
 .tree-list { border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card); padding: 4px 0; }

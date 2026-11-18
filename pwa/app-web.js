@@ -1328,10 +1328,14 @@ async function renderCaseFoldersNow() {
   }
   // The Case folders list holds only the folders no hearing on the list is
   // matched to (the owner: "ideally this will never happen"); each still says
-  // its hearing where the sheet has one, a past one or one marked done or off.
+  // its hearing where the sheet has one, a past one.
   for (const r of rows) r.hearing = sheet.hearings.length ? hearingLib.hearingForPlace(sheet.hearings, placeOfRow(r), now) : null;
   const line = caseLib.sortRows(rows).filter((r) => r.rank > 0);
-  const shown = caseLib.sortRows(rows.filter((r) => !hv.matched.has(r))).slice(0, CASE_ROWS_MAX);
+  // …nor one whose hearing is marked done or off calendar (the owner: "cases
+  // that are done and off don't need to be shown in the Case Folders rows"),
+  // unless a run is going in it.
+  const settledMark = (r) => r.hearing && r.hearing.mark && !(r.status && /^(running|starting|stalled)$/.test(r.status.state));
+  const shown = caseLib.sortRows(rows.filter((r) => !hv.matched.has(r) && !settledMark(r))).slice(0, CASE_ROWS_MAX);
   lineShown = line;
   rowsShown = [...shown, ...hv.matched];
   compactLine(line);
@@ -1395,6 +1399,20 @@ async function renderCaseFoldersNow() {
     for (const x of folderControls(r, line)) row.appendChild(x);
     listEl.appendChild(row);
   }
+}
+
+/**
+ * A row's buttons are icons, to leave the case name its room (the owner,
+ * 2026-11-18: "the new Hearings section is too narrow, it basically only shows
+ * the case number. Let's switch some of the buttons to icons"); each keeps its
+ * name as its label and hover.
+ */
+function iconise(b, name, label, extra = "") {
+  b.classList.add("ci-ico");
+  b.innerHTML = icon(name, { size: 16 }) + extra;
+  b.setAttribute("aria-label", label);
+  if (!b.title) b.title = label;
+  return b;
 }
 
 /**
@@ -1578,8 +1596,8 @@ function calendarButton(hg) {
   const b = document.createElement("button");
   b.className = "ci-cal";
   const off = hg.mark !== "off";
-  b.textContent = off ? "Off calendar" : "On calendar";
-  b.title = off ? `Mark ${hg.caseName} off calendar: its row in the sheet is filled red` : `Put ${hg.caseName} back on calendar: the red comes off its row in the sheet`;
+  b.title = off ? `Off calendar: fill ${hg.caseName}'s row red in the sheet` : `On calendar: take the red off ${hg.caseName}'s row in the sheet`;
+  iconise(b, off ? "calendar-x" : "calendar-check", off ? "Off calendar" : "On calendar");
   b.addEventListener("click", (e) => { e.stopPropagation(); setHearingMark(hg, off ? "off" : ""); });
   return b;
 }
@@ -1637,8 +1655,8 @@ function hearingWhen(hg, now) {
 function ecourtButton(hg) {
   const b = document.createElement("button");
   b.className = "ci-ecourt";
-  b.textContent = "eCourt";
-  b.title = `Open ${hg.caseNumber || hg.caseName} in eCourt (the hearings sheet's link)`;
+  b.title = `eCourt: open ${hg.caseNumber || hg.caseName} (the hearings sheet's link)`;
+  iconise(b, "external", "eCourt");
   b.addEventListener("click", (e) => { e.stopPropagation(); openEcourt(hg); });
   return b;
 }
@@ -1840,8 +1858,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     else {
       // Its place kept, so the eCourt buttons stand in one column.
       const gap = document.createElement("span");
-      gap.className = "ci-ecourt ci-ecourt-gap";
-      gap.textContent = "eCourt";
+      gap.className = "ci-ecourt ci-ico ci-ecourt-gap";
       gap.setAttribute("aria-hidden", "true");
       row.appendChild(gap);
     }
@@ -2235,8 +2252,8 @@ function wordButton(r) {
   box.className = "ci-word";
   const b = document.createElement("button");
   b.className = "ci-word-btn";
-  b.textContent = docs.length === 1 ? "Word" : `Word (${docs.length})`;
-  b.title = docs.length === 1 ? `Open ${docs[0]} in Word` : `Open one or all of the ${docs.length} Word documents in ${r.name}`;
+  b.title = docs.length === 1 ? `Word: open ${docs[0]}` : `Word: open one or all of the ${docs.length} Word documents in ${r.name}`;
+  iconise(b, "file-word", docs.length === 1 ? "Word" : `Word (${docs.length})`, docs.length > 1 ? `<span class="ci-ico-n">${docs.length}</span>` : "");
   b.setAttribute("aria-haspopup", docs.length > 1 ? "menu" : "false");
   b.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -2331,8 +2348,8 @@ async function openWordDocs(r, names) {
 function shareLogButton(r) {
   const b = document.createElement("button");
   b.className = "ci-share-log";
-  b.textContent = "Log to share";
-  b.title = `Open ${caseLib.SHARE_LOG_FILE} for ${r.name}: PDF-Linker's log with every name, file, folder, number and address it was handed taken out, so it can be sent for diagnosis. The real log, pdf_linker.log, stays in the folder.`;
+  iconise(b, "file-text", "Log to share");
+  b.title = `Log to share: open ${caseLib.SHARE_LOG_FILE} for ${r.name}: PDF-Linker's log with every name, file, folder, number and address it was handed taken out, so it can be sent for diagnosis. The real log, pdf_linker.log, stays in the folder.`;
   b.addEventListener("click", (e) => { e.stopPropagation(); showShareLog(r); });
   return b;
 }
@@ -2430,7 +2447,7 @@ function lineControls(r, line) {
   if (!place) {
     box.className = "ci-line";
     const behind = line.length ? `, behind the ${line.length} case${line.length === 1 ? "" : "s"} already in it` : "";
-    box.appendChild(btn("ci-line-add", "Prioritize", `Put ${r.name} in PDF-Linker's line${behind}: while it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority. It leaves the line when a run of it finishes.`, "add", line.length >= caseLib.RANK_MAX));
+    box.appendChild(iconise(btn("ci-line-add", "", `Prioritize: put ${r.name} in PDF-Linker's line${behind}: while it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority. It leaves the line when a run of it finishes.`, "add", line.length >= caseLib.RANK_MAX), "chevrons-up", "Prioritize"));
     return box;
   }
   box.className = "ci-line in-line";

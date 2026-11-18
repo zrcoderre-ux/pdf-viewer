@@ -472,7 +472,7 @@ async function browserPart() {
     }, name);
     const order = () => shell.$$eval("#case-list .case-row", (rs) => rs.map((r) => [r.querySelector(".ri-name").textContent, (r.querySelector(".ci-place") || {}).textContent || ""]));
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
-    check("a row not in line offers Prioritize", await shell.textContent(`${rowOf("Case Alpha")} .ci-line-add`), "Prioritize");
+    check("a row not in line offers Prioritize", await shell.getAttribute(`${rowOf("Case Alpha")} .ci-line-add`, "aria-label"), "Prioritize");
     await shell.click(`${rowOf("Case Alpha")} .ci-line-add`);
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-place`, { timeout: 10000 });
     check("Prioritize: 1st in line, its place written into the folder", [await shell.textContent(`${rowOf("Case Alpha")} .ci-place`), await readPlace("Case Alpha")], ["1st", 1]);
@@ -508,7 +508,7 @@ async function browserPart() {
       window.dispatchEvent(new Event("focus"));
     }, SHARED);
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-share-log`, { timeout: 10000 });
-    check("Case Alpha's row offers it, and only that row", [await shell.textContent(`${rowOf("Case Alpha")} .ci-share-log`), await shell.$$eval("#case-list .ci-share-log", (b) => b.length)], ["Log to share", 1]);
+    check("Case Alpha's row offers it, and only that row", [await shell.getAttribute(`${rowOf("Case Alpha")} .ci-share-log`, "aria-label"), await shell.$$eval("#case-list .ci-share-log", (b) => b.length)], ["Log to share", 1]);
     const tabsBefore = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
     await shell.click(`${rowOf("Case Alpha")} .ci-share-log`);
     await shell.waitForSelector("dialog.share-log-dialog[open]", { timeout: 5000 });
@@ -538,7 +538,7 @@ async function browserPart() {
     });
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-word-btn`, { timeout: 10000 });
     check("in PDF+ each row with Word documents offers them, counted, the lock file left out",
-      [await shell.textContent(`${rowOf("Case Alpha")} .ci-word-btn`), await shell.textContent(`${rowOf("Case Gamma")} .ci-word-btn`)], ["Word (2)", "Word"]);
+      [await shell.getAttribute(`${rowOf("Case Alpha")} .ci-word-btn`, "aria-label"), await shell.getAttribute(`${rowOf("Case Gamma")} .ci-word-btn`, "aria-label")], ["Word (2)", "Word"]);
     const tabsWord = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
     await shell.click(`${rowOf("Case Gamma")} .ci-word-btn`);
     await shell.waitForFunction(() => window.__openedDocs.length === 1, null, { timeout: 5000 });

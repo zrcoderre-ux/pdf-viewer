@@ -239,5 +239,25 @@ move finished, never into itself) and `test-hearing-sheet.mjs` parts 15–16
 (the list, a drag onto a folder, the hearing keeping its folder, a move refused
 while a run goes).
 
+## Done and off folders, and the room for the name (2026-11-18)
+
+The owner: "cases that are done and off don't need to be shown in the Case
+Folders rows", and "the new Hearings section is too narrow, it basically only
+shows the case number. Let's switch some of the buttons to icons to add more
+room".
+
+- **Case folders** leaves out a folder whose hearing (`hearingForPlace`: the
+  next for its case, else the latest) is marked done or off calendar, in the
+  sheet or by a toggle still waiting to be written, unless a run is going in
+  it (`settledMark`): a run still wants watching.
+- **Icons.** Word (`file-word`, with the count where there are several), Log
+  to share (`file-text`), Prioritize (`chevrons-up`), Off and On calendar
+  (`calendar-x`, `calendar-check`) and eCourt (`external`) are icon buttons
+  (`iconise`), each keeping its name as its `aria-label` and the start of its
+  hover. Take over keeps its words: it is rare and it ends a run. The tests
+  read the labels.
+- **Width.** Home's column beside the Folders list is no longer held to 760px
+  (`.home-layout` up to 1340px), so the case name has the row.
+
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

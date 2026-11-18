@@ -366,9 +366,9 @@ async function browserPart() {
 
     console.log("9. Case folders: only the folders no hearing on the list claims, above the hearings");
     const caseNames = () => shell.$$eval("#case-list .case-item .ri-name", (x) => x.map((e) => e.textContent).sort());
-    await shell.waitForFunction(() => !document.getElementById("case-folders").hidden && document.querySelectorAll("#case-list .case-item").length === 2, null, { timeout: 10000 });
-    check("Case Zeta, and the folder whose hearing is marked done", await caseNames(), ["23STCV04444 Umbrella", "Case Zeta"]);
-    check("…which says its hearing", (await shell.$$eval("#case-list .case-item", (bs) => bs.map((b) => b.querySelector(".ci-where").textContent))).some((w) => w.startsWith("Hearing ") && w.includes("(done)")), true);
+    await shell.waitForFunction(() => !document.getElementById("case-folders").hidden && document.querySelectorAll("#case-list .case-item").length === 1, null, { timeout: 10000 });
+    // The owner: "cases that are done and off don't need to be shown in the Case Folders rows".
+    check("Case Zeta only: the folder whose hearing is marked done is not listed", await caseNames(), ["Case Zeta"]);
     check("the list stands above the hearings", await shell.evaluate(() => !!(document.getElementById("case-folders").compareDocumentPosition(document.getElementById("hearings")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
     check("the Downloads link is in the Hearings heading", await shell.evaluate(() => !!document.querySelector("#hearings #case-downloads")), true);
 
@@ -421,9 +421,9 @@ async function browserPart() {
       const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
       return (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName.startsWith("24STCV00777"));
     };
-    check("the row offers Off calendar", await doe.locator(".ci-cal").textContent(), "Off calendar");
+    check("the row offers Off calendar", await doe.locator(".ci-cal").getAttribute("aria-label"), "Off calendar");
     await doe.locator(".ci-cal").click();
-    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.querySelector(".ci-cal").textContent === "On calendar"), null, { timeout: 10000 });
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.querySelector(".ci-cal").getAttribute("aria-label") === "On calendar"), null, { timeout: 10000 });
     check("the sheet's row is filled red", (await sheetNow()).mark, "off");
     check("…its note and link kept", [(await sheetNow()).note, (await sheetNow()).url], ["Check POS", "https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
     check("the row says Off calendar", await doe.locator(".ci-status").textContent(), "Off calendar");
@@ -434,7 +434,7 @@ async function browserPart() {
     });
     await doe.locator(".ci-cal").click();
     await shell.waitForFunction(() => /waiting to be written/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 10000 });
-    check("while Excel holds it: shown on calendar here, and said to be waiting", [await doe.locator(".ci-cal").textContent(), await doe.locator(".ci-status.waiting").count() === 1], ["Off calendar", true]);
+    check("while Excel holds it: shown on calendar here, and said to be waiting", [await doe.locator(".ci-cal").getAttribute("aria-label"), await doe.locator(".ci-status.waiting").count() === 1], ["Off calendar", true]);
     check("…the sheet not yet changed", (await sheetNow()).mark, "off");
     await shell.evaluate(() => { FileSystemFileHandle.prototype.createWritable = window.__realWritable; window.dispatchEvent(new Event("focus")); });
     await shell.waitForFunction(() => !/waiting to be written/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 10000 });
