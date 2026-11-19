@@ -21,7 +21,7 @@ import { makeZip } from "./viewer/zip.js";
 import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
-  hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -254,6 +254,13 @@ check("timely only if served personally", briefingChips({ kind: "motion", motion
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
 check("the file's name", BRIEFING_FILE, "E-Court Briefing Status.json");
+const rAt = new Date(2026, 10, 18, 9, 5).getTime();
+check("the last check, off the file", parseBriefingFile(JSON.stringify({ entries: [], refresh: { at: rAt, state: "done", cases: 12, how: "hourly" } })).refresh.cases, 12);
+check("…none in an older file", parseBriefingFile(JSON.stringify({ entries: [] })).refresh, null);
+check("said: checked, when", refreshText({ at: rAt, state: "done", cases: 12 }, NOW).text, "Briefing checked " + new Date(rAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
+check("said: a sign-in wanted, as a warning", [refreshText({ at: rAt, state: "failed", reason: "signin" }, NOW).text, refreshText({ at: rAt, state: "failed", reason: "signin" }, NOW).tone], ["Briefing not checked: eCourt sign-in needed", "warn"]);
+check("said: no eCourt tab open", refreshText({ at: rAt, state: "skipped", reason: "notab" }, NOW).text, "Briefing not checked: no eCourt tab open");
+check("said: checking", refreshText({ at: rAt, state: "running" }, NOW).tone, "run");
 
 console.log("6. the list");
 check("upcoming, unmarked, by date", upcoming(hearings, NOW).map((x) => x.row), [3, 5, 10]);
@@ -433,6 +440,10 @@ async function browserPart() {
     await shell.keyboard.press("Escape");
     check("…and closes on Escape", await shell.isVisible("#home-settings-menu"), false);
 
+    console.log("9a. the bar: no open buttons; PDF from images in the strip");
+    check("the bar holds the title and the settings only", await shell.evaluate(() => [!!document.querySelector(".home-top #open-file, .home-top #open-case, .home-top #combine-files, .home-top #images-to-pdf"), !!document.querySelector(".home-top #home-settings")]), [false, true]);
+    check("PDF from images stands beside Case folder in the strip", await shell.evaluate(() => { const b = document.querySelector("#tabstrip #images-to-pdf"); return !!b && b.previousElementSibling.id === "open-case-tab"; }), true);
+
     console.log("9b. Home as a workspace, on a large monitor");
     await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(400);
     const lay = await shell.evaluate(() => {
@@ -575,12 +586,12 @@ async function browserPart() {
     console.log("14c. the briefing E-Court Suite reports, on each hearing's row");
     const iso = (at) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
     const st = (state, note = "") => ({ due: inDays(-2), filed: state === "filed" || state === "late" ? inDays(-3) : null, state, note, manual: false });
-    const putBriefing = (entries) => shell.evaluate(async ({ entries }) => {
+    const putBriefing = (entries, refresh = null) => shell.evaluate(async ({ entries, refresh }) => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
       const w = await (await dl.getFileHandle("E-Court Briefing Status.json", { create: true })).createWritable();
-      await w.write(JSON.stringify({ version: 1, written: Date.now(), entries })); await w.close();
+      await w.write(JSON.stringify({ version: 1, written: Date.now(), refresh, entries })); await w.close();
       window.dispatchEvent(new Event("focus"));
-    }, { entries });
+    }, { entries, refresh });
     const acmeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
     const doeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe"))');
     const janeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("26STCV09999 Jane Doe"))');
@@ -604,6 +615,19 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .ci-chip")].some((c) => c.textContent === "Rep ✓"), null, { timeout: 15000 });
     check("updated: the file written again, the row says so on the next look", await chipsOf(acmeRowB), [["Mot ✓", "filed"], ["Opp ✓", "filed"], ["Rep ✓", "filed"]]);
     check("…and the count goes", /briefing not filed/.test(await shell.textContent("#hearings-summary")), false);
+
+    console.log("14d. the background refresh, and Refresh briefing");
+    await putBriefing([
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("filed"), at: Date.now() },
+    ], { at: Date.now(), state: "done", cases: 9, how: "hourly" });
+    await shell.waitForFunction(() => /Briefing checked/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 15000 });
+    check("the summary says when E-Court Suite last checked", await shell.$eval("#hearings-summary .hs-refresh", (e) => [e.textContent.startsWith("Briefing checked "), /9 hearings on the next five court days/.test(e.title)]), [true, true]);
+    await putBriefing([], { at: Date.now(), state: "failed", reason: "signin", how: "hourly" });
+    await shell.waitForFunction(() => /sign-in needed/.test(document.getElementById("hearings-summary").textContent), null, { timeout: 15000 });
+    check("…and when it could not: eCourt sign-in needed, as a warning", await shell.$eval("#hearings-summary .hs-refresh", (e) => [e.textContent, e.classList.contains("tone-warn")]), ["Briefing not checked: eCourt sign-in needed", true]);
+    const before = await shell.evaluate(() => window.__opened.length);
+    await shell.click("#briefing-refresh");
+    check("Refresh briefing opens the eCourt page E-Court Suite answers", (await shell.evaluate(() => window.__opened)).slice(before), ["https://civil.lacourt.org/#lac-refresh-briefing"]);
 
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);

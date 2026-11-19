@@ -383,7 +383,30 @@ row fades past BRIEFING_STALE_MS (12 h). A hearing the extension has not
 reported yet shows a dash whose hover says how to fetch it (the eCourt button,
 or the day's agenda). The summary counts the hearings with a paper not filed.
 The status now sits in a fixed column too (`.ci-status-col`), so the chips line
-up whatever the pill beside them. Tests: `test-hearing-sheet.mjs` parts 5b (the
+up whatever the pill beside them. ## The background refresh, and the bar's buttons (2026-11-19)
+
+- The owner: "Is there a way to add a background refresh?" … "E-court
+  typically stays open all day after I log in in the morning. Next 5. hourly
+  works". E-Court Suite 3.49.30 checks the next five court days' agendas once
+  an hour on weekdays, 8 AM to 6 PM, inside the open eCourt tab (its
+  `refresh/run.js`), and writes how it went into the file's `refresh`. Home
+  reads it (`parseBriefingFile`) and the summary says it (`refreshText`):
+  "Briefing checked 3:05 PM", or a warning: "eCourt sign-in needed", "no eCourt
+  tab open", "open the eCourt agenda once" (the extension learns the agenda's
+  address from it). **Refresh briefing** in the Hearings heading opens
+  `https://civil.lacourt.org/#lac-refresh-briefing` in Chrome (REFRESH_URL):
+  the extension runs the check in that tab and closes it when done, or leaves
+  it open where eCourt wants a sign-in. The page is eCourt's front page, never
+  the agenda, whose own script would copy the day to the clipboard.
+- The owner: "the open a file open a case folder combine files can go ... I
+  already have a file opener and a case folder buttons in the tool bar. Also
+  Idk if I even need pdf from images, but if I do, we should move it up next to
+  the case folder button". The bar holds the title and the settings menu;
+  PDF from images (`#images-to-pdf`) is in the tab strip after Case folder. The
+  strip's Case folder opens the case in a window of its own while Home is
+  showing (Home's own button did), and in the window it is in from a document.
+
+Tests: `test-hearing-sheet.mjs` parts 5b (the
 file, the matching, the chips) and 14c (the chips on Home, a dash, the count,
 and the file written again updating the row).
 

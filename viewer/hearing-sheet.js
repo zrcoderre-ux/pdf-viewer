@@ -804,6 +804,37 @@ export function hearingForPlace(hearings, place, now) {
 
 export const BRIEFING_FILE = "E-Court Briefing Status.json";
 
+/**
+ * The whole file: { entries, refresh } — refresh is how E-Court Suite's last
+ * background or asked-for check went ({ at, state: "running" | "done" |
+ * "failed" | "skipped", reason: "signin" | "notab" | "agenda" | …, cases,
+ * how: "hourly" | "now" }), or null.
+ */
+export function parseBriefingFile(text) {
+  let data = null;
+  try { data = JSON.parse(String(text || "")); } catch { data = null; }
+  const refresh = data && data.refresh && typeof data.refresh === "object" && typeof data.refresh.at === "number" ? data.refresh : null;
+  return { entries: parseBriefing(text), refresh };
+}
+
+/** How the last check went, as Home's summary says it: { text, tone ("ok" | "warn" | "run"), title }, or null. */
+export function refreshText(refresh, now) {
+  if (!refresh) return null;
+  const t = new Date(refresh.at);
+  const when = t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    + (new Date(now).toDateString() === t.toDateString() ? "" : " " + t.toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+  if (refresh.state === "running") return { text: "Checking briefing…", tone: "run", title: `E-Court Suite started checking the next five court days at ${when}.` };
+  if (refresh.state === "done") return { text: `Briefing checked ${when}`, tone: "ok", title: `E-Court Suite checked ${refresh.cases || 0} hearing${refresh.cases === 1 ? "" : "s"} on the next five court days at ${when}${refresh.how === "now" ? ", asked from Home" : ""}. It checks again every hour on weekdays, 8 AM to 6 PM, while an eCourt tab is open.` };
+  const why = {
+    signin: "eCourt sign-in needed",
+    notab: "no eCourt tab open",
+    agenda: "open the eCourt agenda once",
+    tab: "the eCourt tab could not be used",
+    closed: "the eCourt tab was closed",
+  }[refresh.reason] || "it did not finish";
+  return { text: `Briefing not checked: ${why}`, tone: "warn", title: `E-Court Suite's check at ${when} did not run through: ${why}. Refresh briefing tries again.` };
+}
+
 /** The entries of the file's text, or [] where it is not that file. */
 export function parseBriefing(text) {
   let data;

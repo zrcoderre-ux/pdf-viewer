@@ -135,6 +135,16 @@ open that day's agenda, and Home picks it up within seconds. A dash means the
 extension has not looked at that hearing yet. The summary line counts hearings
 with a paper not filed.
 
+With E-Court Suite 3.49.30 or later the extension also checks by itself: once
+an hour on weekdays, 8 AM to 6 PM, it reads the next five court days' agendas in
+your open eCourt tab and works out every hearing on them. The summary line says
+when it last checked ("Briefing checked 3:05 PM") or why it could not ("eCourt
+sign-in needed", "no eCourt tab open"). **Refresh briefing** in the Hearings
+heading asks for a check at once: Chrome opens an eCourt tab, the extension
+checks, and the tab closes. Open the eCourt agenda once after updating, so the
+extension learns your agenda's address. The extension's options page turns the
+hourly check off.
+
 After pulling E-Court Suite, reload the extension. Its native host writes the
 status to **E-Court Briefing Status.json** in Downloads, which Home reads (so
 Downloads must be linked).

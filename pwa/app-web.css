@@ -649,3 +649,8 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .ci-status-col { flex: none; width: 168px; display: inline-flex; justify-content: center; }
 .home-app .ci-status-col .ci-status { max-width: 100%; }
 @media (max-width: 1300px) { .home-app .ci-status-col { width: auto; } }
+.home-app .hearings-summary .hs-refresh { color: var(--c-text-3); }
+.home-app .hearings-summary .hs-refresh.tone-warn { color: #d97706; }
+.home-app .hearings-summary .hs-refresh.tone-run { color: var(--c-accent); }
+/* The bar holds the title and the settings, the opening buttons now in the strip. */
+.home-app .home-top h1 { flex: 1; }

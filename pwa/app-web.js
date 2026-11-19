@@ -611,7 +611,8 @@ document.getElementById("images-to-pdf")?.addEventListener("click", imagesToPdf)
 const caseBtn = document.getElementById("open-case");
 if (caseBtn) caseBtn.addEventListener("click", (e) => { e.stopPropagation(); pickCaseFolder({ inWindow: true }); });
 const caseBtn2 = document.getElementById("open-case-tab");
-if (caseBtn2) caseBtn2.addEventListener("click", () => pickCaseFolder());
+// From Home, the hub, the case opens in a window of its own; from a document, in this one.
+if (caseBtn2) caseBtn2.addEventListener("click", () => pickCaseFolder({ inWindow: !dropzone.hidden }));
 fileInput.addEventListener("change", () => {
   for (const f of fileInput.files) openLocalFile(f);
   fileInput.value = "";
@@ -1533,7 +1534,10 @@ async function readBriefing(dl) {
   try {
     const f = await fh.getFile();
     const key = `${f.size}|${f.lastModified}`;
-    if (!briefingSeen || briefingSeen.key !== key) briefingSeen = { key, entries: hearingLib.parseBriefing(await f.text()), at: f.lastModified };
+    if (!briefingSeen || briefingSeen.key !== key) {
+      const parsed = hearingLib.parseBriefingFile(await f.text());
+      briefingSeen = { key, entries: parsed.entries, refresh: parsed.refresh, at: f.lastModified };
+    }
     return briefingSeen;
   } catch { return briefingSeen || { entries: [], at: 0, none: true }; }
 }
@@ -1567,6 +1571,17 @@ const briefingMissing = (hg, briefing) => {
   const e = briefing && !briefing.none ? hearingLib.briefingFor(hg, briefing.entries) : null;
   return !!e && ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed");
 };
+
+// Refresh briefing: E-Court Suite checks the next five court days at once
+// (its service worker, "The background refresh"). Home cannot reach eCourt,
+// so it opens an eCourt page the extension knows (REFRESH_URL) in Chrome; the
+// extension runs the check in that tab and closes it when done, or leaves it
+// open where eCourt wants a sign-in. The file says how it went.
+const REFRESH_URL = "https://civil.lacourt.org/#lac-refresh-briefing";
+document.getElementById("briefing-refresh")?.addEventListener("click", () => {
+  window.open(REFRESH_URL, "_blank", "noopener");
+  shellToast("E-Court Suite is checking the next five court days in Chrome. Home shows it as soon as it is done.", 6000);
+});
 
 // ---- Home: the settings menu -------------------------------------------------
 //
@@ -1927,6 +1942,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     : sheet.state === "locked" ? `The browser wants your leave to read ${sheet.name} again`
       : `Read from ${sheet.name}${sheet.sheets && sheet.sheets.length ? " (" + sheet.sheets.join(", ") + ")" : ""}. Saved in Excel, it is read again on the next look.`;
   setupNeeded("sheet", sheet.state === "none" || sheet.state === "locked");
+  const refreshBtn = document.getElementById("briefing-refresh");
+  if (refreshBtn) refreshBtn.hidden = !sheet.hearings.length;
   setupNeeded("downloads", dlState !== "ok");
   const allBtn = document.getElementById("hearings-all");
   const offCount = all.filter((h) => h.mark === "off").length;
@@ -1946,6 +1963,15 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (doneCount) add(`${doneCount} done`, "hs-ok");
     const unbriefed = open.filter((h) => briefingMissing(h, hv.briefing)).length;
     if (unbriefed) add(`${unbriefed} with briefing not filed`, "hs-warn");
+    // How E-Court Suite's last check of the briefing went.
+    const rt = hv.briefing && !hv.briefing.none ? hearingLib.refreshText(hv.briefing.refresh, now) : null;
+    if (rt) {
+      const sp = document.createElement("span");
+      sp.className = "hs-refresh tone-" + rt.tone;
+      sp.textContent = rt.text;
+      sp.title = rt.title;
+      sumEl.appendChild(sp);
+    }
     if (dlState !== "ok") {
       const note = document.createElement("button");
       note.className = "hs-note link-btn";
