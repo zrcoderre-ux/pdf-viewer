@@ -1360,6 +1360,7 @@ async function renderCaseFoldersNow() {
   // did not hold joins `rows`, so its status and place in line are read too.
   const sheet = await loadSheet();
   const hv = await hearingItems(rows, sheet, dl, dlState, now);
+  hv.briefing = dlState === "ok" && sheet.hearings.length ? await readBriefing(dl) : { entries: [], at: 0, none: true };
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
@@ -1512,6 +1513,60 @@ function showDownloadsLink(dl, dlState) {
     ? "Point the app at your Downloads folder once: each hearing's case is looked for in it, and the case folders that come into it each day are listed"
     : dlState === "locked" ? "The browser wants your leave to read Downloads again" : `Case folders are read from ${dl.name}`;
 }
+
+// ---- Home: the briefing E-Court Suite reports --------------------------------
+//
+// The owner (2026-11-19): integrate Home "with e-court suite so that it can do
+// updates on the status of oppositions and replies". The extension works each
+// hearing's briefing out on its case page and on its day's agenda, and its
+// native host writes it to BRIEFING_FILE in Downloads (hearing-sheet.js,
+// "the briefing E-Court Suite reports"); Home reads it there each look, again
+// only where its size or time moved, and shows each hearing's Motion,
+// Opposition and Reply as the case page colours them. Opening a case in
+// eCourt (the eCourt button), or its day's agenda, brings it up to date.
+const BRIEFING_STALE_MS = 12 * 3600000;
+let briefingSeen = null; // { key, entries, at }
+async function readBriefing(dl) {
+  let fh;
+  try { fh = await dl.getFileHandle(hearingLib.BRIEFING_FILE); }
+  catch { return { entries: [], at: 0, none: true }; }
+  try {
+    const f = await fh.getFile();
+    const key = `${f.size}|${f.lastModified}`;
+    if (!briefingSeen || briefingSeen.key !== key) briefingSeen = { key, entries: hearingLib.parseBriefing(await f.text()), at: f.lastModified };
+    return briefingSeen;
+  } catch { return briefingSeen || { entries: [], at: 0, none: true }; }
+}
+/** The row's briefing column: chips, or a faint dash where the extension has said nothing of the hearing yet. */
+function briefingCell(hg, briefing, now) {
+  const cell = document.createElement("span");
+  cell.className = "ci-brief";
+  if (!briefing || briefing.none || hg.mark === "off") return cell;
+  const entry = hearingLib.briefingFor(hg, briefing.entries);
+  if (!entry) {
+    if (hg.caseNumber && hg.mark !== "done") {
+      cell.classList.add("none");
+      cell.textContent = "—";
+      cell.title = "E-Court Suite has not reported this hearing's briefing yet: open the case in eCourt (the eCourt button) or its day's agenda, and it comes in here.";
+    }
+    return cell;
+  }
+  const asOf = `As of ${caseLib.whenText(entry.at, now)}, from E-Court Suite. Open the case in eCourt to bring it up to date.`;
+  if (now - entry.at > BRIEFING_STALE_MS) cell.classList.add("stale");
+  for (const ch of hearingLib.briefingChips(entry)) {
+    const chip = document.createElement("span");
+    chip.className = "ci-chip st-" + ch.state;
+    chip.textContent = ch.label + (ch.mark ? " " + ch.mark : "");
+    chip.title = ch.title + "\n" + asOf;
+    cell.appendChild(chip);
+  }
+  cell.title = (entry.text || "") + "\n" + asOf;
+  return cell;
+}
+const briefingMissing = (hg, briefing) => {
+  const e = briefing && !briefing.none ? hearingLib.briefingFor(hg, briefing.entries) : null;
+  return !!e && ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed");
+};
 
 // ---- Home: the settings menu -------------------------------------------------
 //
@@ -1857,7 +1912,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const { items, all, open, shownAll, downloaded } = hv;
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
-    (hearingEdits || []).length, editsError ? 1 : 0,
+    (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
+    Math.floor(now / 600000),
     ...items.map(({ hg, place, r, controls }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.url, hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
@@ -1888,6 +1944,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     add(`${downloaded} downloaded`, "hs-ok");
     if (notDl) add(`${notDl} not downloaded`, "hs-warn");
     if (doneCount) add(`${doneCount} done`, "hs-ok");
+    const unbriefed = open.filter((h) => briefingMissing(h, hv.briefing)).length;
+    if (unbriefed) add(`${unbriefed} with briefing not filed`, "hs-warn");
     if (dlState !== "ok") {
       const note = document.createElement("button");
       note.className = "hs-note link-btn";
@@ -1952,6 +2010,11 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const b = document.createElement("button");
     b.className = "recent-item case-item hearing-item" + (folder ? " has-folder" : "");
     b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 17 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"><span class="ci-num"></span> <span class="ci-case"></span></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    // The briefing, then the status, each in a column of fixed width.
+    const statusCol = document.createElement("span");
+    statusCol.className = "ci-status-col";
+    b.querySelector(".ci-status").replaceWith(statusCol);
+    statusCol.before(briefingCell(hg, hv.briefing, now));
     // The case number in a column of its own, the name beside it (the
     // owner's review, 2026-11-18: number and name each line up to be read
     // down). The name is the sheet's, as written.
@@ -2000,7 +2063,9 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (folder) where.push(place.name + (r && r.inTree ? ` (in ${r.chain.length > 1 ? r.chain[r.chain.length - 2] : r.root.name})` : ""));
     if (st && st.sub) where.push(st.sub);
     b.querySelector(".ci-where").textContent = where.join(" · ");
-    const pill = b.querySelector(".ci-status");
+    const pill = document.createElement("span");
+    pill.className = "ci-status";
+    statusCol.appendChild(pill);
     const said = hg.mark === "off" ? { text: "Off calendar", tone: "off", title: "Marked red in the sheet: off calendar, or nothing to work up." }
         : st || hearingLib.placeText(place);
     pill.textContent = said.text;

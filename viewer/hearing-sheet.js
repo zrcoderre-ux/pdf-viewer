@@ -785,3 +785,97 @@ export function hearingForPlace(hearings, place, now) {
   if (next.length) return next[0];
   return mine.sort((a, b) => b.date - a.date)[0] || null;
 }
+
+// ---- the briefing E-Court Suite reports ----------------------------------------
+//
+// The owner (2026-11-19): integrate Home "with e-court suite so that it can do
+// updates on the status of oppositions and replies". PDF+ cannot reach eCourt;
+// the E-Court Suite extension can, and works each hearing's briefing out on
+// its case page and its day's agenda. Its native host writes what it found to
+// BRIEFING_FILE in Downloads (the extension's lib/case-status.js,
+// briefingSummary; its service worker; its native host's writeBriefingStatus),
+// one entry per hearing:
+//   { caseNumber, day: "YYYY-MM-DD", motionType, key, kind: "motion" |
+//     "motionOnly" | "osc", motion, opp, reply: { due, filed (ms | null),
+//     state: "filed" | "late" | "missing" | "personal" | "pending", note:
+//     "Not Filed" | "Not Posted Yet" | "", manual } | null,
+//     osc: { text, state: "ok" | "warn" }, text, at }
+// The states are the case page's own colours, so Home says what it says.
+
+export const BRIEFING_FILE = "E-Court Briefing Status.json";
+
+/** The entries of the file's text, or [] where it is not that file. */
+export function parseBriefing(text) {
+  let data;
+  try { data = JSON.parse(String(text || "")); } catch { return []; }
+  if (!data || !Array.isArray(data.entries)) return [];
+  return data.entries.filter((e) => e && typeof e.caseNumber === "string" && /^\d{4}-\d\d-\d\d$/.test(e.day || ""));
+}
+
+const isoDay = (at) => {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/**
+ * The entry for a hearing: its case number and day; where the day has more
+ * than one (two motions set together), the one whose motion shares the most
+ * words with the sheet's Motion Type, else the newest. null for none.
+ */
+export function briefingFor(hg, entries) {
+  if (!hg || !hg.caseNumber || !hg.date || !entries) return null;
+  const day = isoDay(hg.date);
+  const mine = entries.filter((e) => e.caseNumber === hg.caseNumber && e.day === day);
+  if (mine.length <= 1) return mine[0] || null;
+  const words = (s) => new Set(String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["hearing", "motion", "the", "and", "for", "notice"].includes(w)));
+  const want = words(hg.motion);
+  const score = (e) => { let n = 0; for (const w of words(e.motionType)) if (want.has(w)) n++; return n; };
+  return mine.slice().sort((a, b) => score(b) - score(a) || (b.at || 0) - (a.at || 0))[0];
+}
+
+const SLOT_NAMES = { motion: "Motion", opp: "Opposition", reply: "Reply" };
+const STATE_WORDS = {
+  filed: "filed on time",
+  late: "filed late",
+  missing: "not filed",
+  personal: "late for electronic service, timely if personally served: check the proof of service",
+  pending: "not due yet",
+};
+const shortDay = (ms) => {
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+};
+
+/**
+ * The chips a hearing row shows for its briefing: [{ label, state, mark,
+ * title }], `state` the colour ("filed" green, "late" and "missing" red,
+ * "personal" amber, "pending" plain, "unposted" plain and marked as unsure),
+ * `mark` the sign after the label (✓, ✗, !, ?, or none). An OSC is one chip.
+ */
+export function briefingChips(entry) {
+  if (!entry) return [];
+  if (entry.kind === "osc") {
+    const warn = entry.osc && entry.osc.state === "warn";
+    return [{ label: "Defaults", state: warn ? "missing" : "filed", mark: warn ? "!" : "✓", title: (entry.osc && entry.osc.text) || entry.text || "" }];
+  }
+  const out = [];
+  for (const [k, label] of [["motion", "Mot"], ["opp", "Opp"], ["reply", "Rep"]]) {
+    const s = entry[k];
+    if (!s) continue;
+    let state = s.state, mark = "";
+    if (s.note === "Not Posted Yet") { state = "unposted"; mark = "?"; }
+    else if (state === "filed") mark = "✓";
+    else if (state === "missing") mark = "✗";
+    else if (state === "late") mark = "!";
+    else if (state === "personal") mark = "!";
+    const parts = [];
+    if (s.due) parts.push(`due ${shortDay(s.due)}`);
+    if (s.filed) parts.push(`filed ${shortDay(s.filed)}`);
+    const said = s.note === "Not Posted Yet"
+      ? "nothing on file yet, but eCourt posts filings up to 2 court days late"
+      : s.note === "Not Filed" ? "not filed" : STATE_WORDS[s.state] || "";
+    const title = `${SLOT_NAMES[k]}: ${[said, ...parts].filter(Boolean).join(", ")}${s.manual ? " (picked by hand in E-Court Suite)" : ""}`;
+    out.push({ label, state, mark, title });
+  }
+  return out;
+}

@@ -21,7 +21,7 @@ import { makeZip } from "./viewer/zip.js";
 import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
-  hyperlinkOfFormula, dateNote, namesMatch, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -231,6 +231,29 @@ check("…as is one whose time could not be read", looseFileCounts("Order_Templa
 check("any other loose file counts, however old", looseFileCounts("Register of Actions 25STCV12345.pdf", NOW - 30 * DAY, NOW), true);
 check("said: not downloaded", placeText(null).text, "Not downloaded");
 check("said: downloaded", [placeText({ name: "x", kind: "folder" }).text, placeText({ name: "x", kind: "folder" }).tone], ["Downloaded", "ok"]);
+
+console.log("5b. the briefing E-Court Suite reports");
+const bday = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+const slot = (state, note = "", extra = {}) => ({ due: day(2026, 11, 1), filed: state === "filed" || state === "late" ? day(2026, 11, 2) : null, state, note, manual: false, ...extra });
+const entries = parseBriefing(JSON.stringify({ version: 1, entries: [
+  { caseNumber: "25STCV12345", day: bday(2026, 11, 20), motionType: "Demurrer", kind: "motion", motion: slot("filed"), opp: slot("late"), reply: slot("missing", "Not Filed"), at: 1 },
+  { caseNumber: "25STCV12345", day: bday(2026, 11, 20), motionType: "Motion to Strike", kind: "motion", motion: slot("filed"), opp: slot("pending"), reply: slot("pending"), at: 2 },
+  { caseNumber: "23STCV04444", day: bday(2026, 11, 22), motionType: "OSC Re: Default Judgment", kind: "osc", osc: { text: "⚠ Default Not Entered", state: "warn" }, at: 3 },
+  { caseNumber: "bad" }, { day: "2026-11-20" },
+] }));
+check("the file's entries, the malformed left out", entries.length, 3);
+check("not that file: none", [parseBriefing("not json"), parseBriefing("{}")], [[], []]);
+check("a hearing's entry by case and day", briefingFor({ caseNumber: "23STCV04444", date: day(2026, 11, 22) }, entries).kind, "osc");
+check("two motions that day: the one its Motion Type names", [briefingFor({ caseNumber: "25STCV12345", date: day(2026, 11, 20), motion: "Demurrer" }, entries).motionType, briefingFor({ caseNumber: "25STCV12345", date: day(2026, 11, 20), motion: "Motion to Strike Portions" }, entries).motionType], ["Demurrer", "Motion to Strike"]);
+check("…another day, or no case number: none", [briefingFor({ caseNumber: "25STCV12345", date: day(2026, 11, 21) }, entries), briefingFor({ caseNumber: "", date: day(2026, 11, 20) }, entries)], [null, null]);
+const chips = briefingChips(entries[0]);
+check("chips as the case page colours them", chips.map((c) => [c.label, c.state, c.mark]), [["Mot", "filed", "✓"], ["Opp", "late", "!"], ["Rep", "missing", "✗"]]);
+check("…each one's hover says what and when", [chips[1].title, chips[2].title], ["Opposition: filed late, due 11/1, filed 11/2", "Reply: not filed, due 11/1"]);
+check("not posted yet is unsure, not missing", briefingChips({ kind: "motion", reply: slot("pending", "Not Posted Yet") }).map((c) => [c.state, c.mark]), [["unposted", "?"]]);
+check("timely only if served personally", briefingChips({ kind: "motion", motion: slot("personal") })[0].state, "personal");
+check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
+check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
+check("the file's name", BRIEFING_FILE, "E-Court Briefing Status.json");
 
 console.log("6. the list");
 check("upcoming, unmarked, by date", upcoming(hearings, NOW).map((x) => x.row), [3, 5, 10]);
@@ -548,6 +571,39 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("22STCV05555") && !r.querySelector(".ci-done-mark")), null, { timeout: 10000 });
     check("pressed again: not done, here and in the sheet", [await vanceRow.locator(".ci-done-mark").count(), (await vanceNow()).mark], [0, ""]);
     check("…and the pill back", await vanceRow.locator(".ci-status").textContent(), "Zip in Downloads");
+
+    console.log("14c. the briefing E-Court Suite reports, on each hearing's row");
+    const iso = (at) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+    const st = (state, note = "") => ({ due: inDays(-2), filed: state === "filed" || state === "late" ? inDays(-3) : null, state, note, manual: false });
+    const putBriefing = (entries) => shell.evaluate(async ({ entries }) => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const w = await (await dl.getFileHandle("E-Court Briefing Status.json", { create: true })).createWritable();
+      await w.write(JSON.stringify({ version: 1, written: Date.now(), entries })); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    }, { entries });
+    const acmeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
+    const doeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe"))');
+    const janeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("26STCV09999 Jane Doe"))');
+    const chipsOf = (row) => row.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => [c.textContent, c.className.replace("ci-chip st-", "")]));
+    await putBriefing([
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("missing", "Not Filed"), at: Date.now() },
+      { caseNumber: "24STCV00777", day: iso(inDays(2)), motionType: "MSJ", key: "b", kind: "motion", motion: st("filed"), opp: st("pending", "Not Posted Yet"), reply: null, at: Date.now() },
+    ]);
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-chip").length >= 5, null, { timeout: 15000 });
+    check("each hearing's Motion, Opposition and Reply, as the case page colours them", await chipsOf(acmeRowB), [["Mot ✓", "filed"], ["Opp ✓", "filed"], ["Rep ✗", "missing"]]);
+    check("…an opposition not posted yet is unsure, not missing", await chipsOf(doeRowB), [["Mot ✓", "filed"], ["Opp ?", "unposted"]]);
+    check("…a hearing the extension has not reported: a dash that says how to get it", [await janeRowB.locator(".ci-brief").textContent(), /open the case in eCourt/.test(await janeRowB.locator(".ci-brief").getAttribute("title"))], ["—", true]);
+    await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(300);
+    check("…the briefing in one column down the list, whatever the status beside it", await shell.$$eval("#hearing-list .ci-brief", (bs) => new Set(bs.map((b) => Math.round(b.getBoundingClientRect().left))).size), 1);
+    await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
+    check("…and the summary counts the briefing not filed", /1 with briefing not filed/.test(await shell.textContent("#hearings-summary")), true);
+    // The case page works the reply out again: it is in.
+    await putBriefing([
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("filed"), at: Date.now() },
+    ]);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .ci-chip")].some((c) => c.textContent === "Rep ✓"), null, { timeout: 15000 });
+    check("updated: the file written again, the row says so on the next look", await chipsOf(acmeRowB), [["Mot ✓", "filed"], ["Opp ✓", "filed"], ["Rep ✓", "filed"]]);
+    check("…and the count goes", /briefing not filed/.test(await shell.textContent("#hearings-summary")), false);
 
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);

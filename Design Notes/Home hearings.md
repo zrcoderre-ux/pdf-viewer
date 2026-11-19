@@ -358,7 +358,36 @@ the work; the case number glued to the name; a decorative glow. What changed
   with no band. Icons are neutral; colour is for state only (Not downloaded,
   running, done, off calendar, the place in line). In the summary only "not
   downloaded" is coloured.
-- Tests: `test-hearing-sheet.mjs` part 9b (at 2560: names at 15px or more,
+- ## Opposition and reply status from E-Court Suite (2026-11-19)
+
+The owner: "integrate it with e-court suite so that it can do updates on the
+status of oppositions and replies." PDF+ has no network, and eCourt wants the
+browser's sign-in, so the E-Court Suite extension is the one that looks. It
+already works each hearing's briefing out on its case page and beside each case
+on its day's agenda. Since its 3.49.29 it also states each paper as the case
+page colours it (its `lib/case-status.js`, `briefingSummary`: filed, late,
+missing, personal, pending; "Not Filed" or "Not Posted Yet"; picked by hand),
+its service worker keeps the latest per hearing for a week, and its native host
+writes them all to `E-Court Briefing Status.json` in Downloads
+(`writeBriefingStatus`).
+
+Home reads that file through the linked Downloads each look, again only where
+its size or time moved (`readBriefing`), finds each hearing's entry by case
+number and day, and, where two motions are set that day, by the words of the
+Motion Type (`briefingFor`). It shows Mot, Opp and Rep chips in a column of
+their own (`briefingCell`, `briefingChips`): green ✓ filed on time, red ! filed
+late, red ✗ not filed, amber ! timely only if personally served, plain not due,
+dashed ? not posted yet. An OSC re default judgment is one Defaults chip. Each
+chip's hover says due and filed dates and when the extension last looked; the
+row fades past BRIEFING_STALE_MS (12 h). A hearing the extension has not
+reported yet shows a dash whose hover says how to fetch it (the eCourt button,
+or the day's agenda). The summary counts the hearings with a paper not filed.
+The status now sits in a fixed column too (`.ci-status-col`), so the chips line
+up whatever the pill beside them. Tests: `test-hearing-sheet.mjs` parts 5b (the
+file, the matching, the chips) and 14c (the chips on Home, a dash, the count,
+and the file written again updating the row).
+
+Tests: `test-hearing-sheet.mjs` part 9b (at 2560: names at 15px or more,
   numbers, names, Done and eCourt each in one column, the sidebar the window's
   height from its edge, Case folders beside Hearings) and the settings menu
   in part 9. Hearing-row locators match the name with `:has-text`, since the

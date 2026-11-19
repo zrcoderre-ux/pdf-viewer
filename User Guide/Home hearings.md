@@ -116,3 +116,25 @@ until the hearing date has passed.
 Home won't move a folder while PDF-Linker is running on it, while it is open in
 a reader tab, or where a file of the same name is already there. In PDF+, the
 folder's Re-run PDF-Linker launcher is updated to its new place.
+
+## Opposition and reply status
+
+With E-Court Suite 3.49.29 or later, each hearing shows small **Mot**, **Opp**
+and **Rep** chips, coloured as the eCourt case page colours them:
+
+- green ✓ filed on time;
+- red ! filed late, red ✗ not filed;
+- amber ! late for electronic service but timely if personally served (check
+  the proof of service);
+- plain: not due yet; dashed ?: nothing on file yet, but eCourt may not have
+  posted it.
+
+Hover a chip for its due and filed dates and when it was last checked. The
+extension checks whenever you open the case in eCourt (the eCourt button) or
+open that day's agenda, and Home picks it up within seconds. A dash means the
+extension has not looked at that hearing yet. The summary line counts hearings
+with a paper not filed.
+
+After pulling E-Court Suite, reload the extension. Its native host writes the
+status to **E-Court Briefing Status.json** in Downloads, which Home reads (so
+Downloads must be linked).
