@@ -556,3 +556,35 @@ those on no hearing included. A run "running" in a file older than `QUIET_MS`
 
 Tests: `test-claude-runs.mjs`; `test-hearing-sheet.mjs` part 14g.
 
+## The Claude button finds the folder's place (2026-11-19)
+
+The owner: "PDF+ could not tell where [case folder] is on this computer ...
+it didn't work even when I opened the folder. Second, if it already has the
+ability to open the case folder, doesn't it already have the folder location,
+or at least have the ability to get that information?"
+
+A page holds a folder by handle and is never told its path. The button had
+asked the main process for the case folder by its own name, which it knew
+only where the session's permission handler had once named that very folder
+(`rememberFolder`), and a case folder in Downloads read through Downloads'
+own leave never passes through it. What Home does know is enough to find it,
+so `askClaude` now asks with all of it, in order, each believed by the main
+process only where one place holds a file of the folder at its size
+(`desktop/folder-place.js`, `placeFolder`):
+
+1. the path the folder's PDF-Linker launcher records (`folderLauncher`,
+   `folderPathOfToken`), whose last part must be the folder's name;
+2. where it sits under Downloads or each folder of the Folders list, asked of
+   those folders' handles (`FileSystemDirectoryHandle.resolve`), against
+   Downloads' own path or the remembered folders of that name;
+3. the hearing's place (`r.root`, `r.chain`);
+4. its name, searched for (`findFoldersNamed`: Downloads, Desktop,
+   Documents, now also `%OneDrive%` / `%OneDriveCommercial%` and the home
+   folder, AppData skipped, four levels, five seconds).
+
+Two places that both pass are no answer. The place found is remembered, as
+before. `folder-place.js` is in desktop/package.json's `files`.
+
+Tests: `test-folder-place.mjs` (node, over a temporary tree);
+`test-hearing-sheet.mjs` part 14e.
+

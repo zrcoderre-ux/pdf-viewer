@@ -230,6 +230,13 @@ with the hearing date as its run date and the case folder's papers added, exactl
 as if you had picked the folder with Choose folder… (only its Text Files go up,
 the key is attached, a folder marked LEAKS never uploads, a PDF asks first).
 
+PDF+ works out where the folder is on your computer by itself: from the path
+its PDF-Linker launcher records, from where it sits in Downloads or a folder on
+the Folders list, or by looking for its name under Downloads, Desktop,
+Documents, OneDrive and your home folder. It only uses a place where a file of
+the folder is there at the same size. If it still can't tell (say, two copies
+of the folder), add the folder holding it to the Folders list.
+
 Once, to set it up: pull and reload the Claude extension, then run the E-Court
 Suite's `native-host\install.ps1 -ExtensionId <e-court-id> -ExtraExtensionIds
 <claude-extension-id>` and restart Chrome.

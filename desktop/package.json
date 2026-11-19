@@ -26,6 +26,7 @@
     },
     "files": [
       "main.js",
+      "folder-place.js",
       "preload.js",
       "shim.js",
       "package.json",

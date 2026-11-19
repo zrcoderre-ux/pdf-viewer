@@ -39,6 +39,8 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+// Where a case folder is (Home's Claude button, a moved folder's launcher).
+const { placeFolder } = require("./folder-place.js");
 
 const SCHEME = "pdfplus";
 const HOST = "app";
@@ -141,11 +143,15 @@ function knownFoldersNamed(name) {
   const want = process.platform === "win32" ? name.toLowerCase() : name;
   return loadKnownFolders().filter((p) => (process.platform === "win32" ? path.basename(p).toLowerCase() : path.basename(p)) === want);
 }
-/** Folders named `name` under Downloads, Desktop and Documents, four levels down at most, in about five seconds at most. */
+/** Folders named `name` under Downloads, Desktop, Documents, OneDrive and home, four levels down at most, in about five seconds at most. */
 async function findFoldersNamed(name, { depth = 4, ms = 5000 } = {}) {
   const want = process.platform === "win32" ? name.toLowerCase() : name;
   const roots = [];
   for (const k of ["downloads", "desktop", "documents"]) { try { roots.push(app.getPath(k)); } catch { /* none */ } }
+  // OneDrive, where the owner files cases (its folders are not under
+  // Documents unless Windows moved Documents there), and the home folder.
+  for (const v of ["OneDriveCommercial", "OneDrive", "OneDriveConsumer"]) { const p = process.env[v]; if (p && path.isAbsolute(p)) roots.push(p); }
+  try { roots.push(app.getPath("home")); } catch { /* none */ }
   const out = [];
   const seen = new Set();
   const until = Date.now() + ms;
@@ -160,7 +166,7 @@ async function findFoldersNamed(name, { depth = 4, ms = 5000 } = {}) {
       let ents;
       try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
       for (const e of ents) {
-        if (!e.isDirectory() || e.name.startsWith(".") || e.name.startsWith("$") || e.name === "node_modules") continue;
+        if (!e.isDirectory() || e.name.startsWith(".") || e.name.startsWith("$") || /^(node_modules|AppData|Library)$/i.test(e.name)) continue;
         const p = path.join(dir, e.name);
         if ((process.platform === "win32" ? e.name.toLowerCase() : e.name) === want) out.push(p);
         if (d + 1 < depth) next.push([p, d + 1]);
@@ -775,32 +781,19 @@ function registerUpdateIpc() {
   // app, Downloads) has that chain under it and the launcher of that size in
   // it, and remembers it for the Word button; else "".
   ipcMain.handle("pdfplus:folder-path", async (event, req) => {
-    if (!fromApp(event) || !req || typeof req !== "object") return "";
-    const part = (x) => typeof x === "string" && x && x !== "." && x !== ".." && !/[\\/\0]/.test(x);
-    const root = req.root, chain = Array.isArray(req.chain) ? req.chain : [];
-    const launcher = req.launcher && typeof req.launcher === "object" ? req.launcher : null;
-    // An empty chain asks where the folder named `root` itself is (a case
-    // folder opened from anywhere, for Home's Claude button); `launcher` is
-    // then any file of the folder the page read, its name and size the check.
-    if (!part(root) || chain.length > 8 || !chain.every(part) || !launcher || !part(launcher.name) || !Number.isFinite(Number(launcher.size))) return "";
-    const roots = knownFoldersNamed(root);
-    try {
-      const dl = app.getPath("downloads");
-      const same = process.platform === "win32" ? path.basename(dl).toLowerCase() === root.toLowerCase() : path.basename(dl) === root;
-      if (same && !roots.some((x) => pathKey(x) === pathKey(dl))) roots.push(dl);
-    } catch { /* no Downloads */ }
-    const hits = [];
-    for (const r of roots) {
-      const p = path.join(r, ...chain);
-      try {
-        if (!(await fsp.stat(p)).isDirectory()) continue;
-        if ((await fsp.stat(path.join(p, launcher.name))).size !== Number(launcher.size)) continue;
-        if (!hits.some((x) => pathKey(x) === pathKey(p))) hits.push(p);
-      } catch { /* not there */ }
-    }
-    if (hits.length !== 1) return "";
-    rememberFolder(hits[0]);
-    return hits[0];
+    if (!fromApp(event)) return "";
+    // folder-place.js: the launcher's own record, then the chain under a
+    // folder known by `root` (remembered, or Downloads), then under every
+    // folder of that name found on the computer; each believed only where
+    // the file the page read is there at its size, and only one place.
+    let downloads = "";
+    try { downloads = app.getPath("downloads"); } catch { /* none */ }
+    let got;
+    try { got = await placeFolder(req, { known: knownFoldersNamed, downloads, search: (name) => findFoldersNamed(name) }); }
+    catch { return ""; }
+    if (!got.path) return "";
+    rememberFolder(got.path);
+    return got.path;
   });
 
   ipcMain.handle("pdfplus:version", (event) => (fromApp(event) ? app.getVersion() : ""));

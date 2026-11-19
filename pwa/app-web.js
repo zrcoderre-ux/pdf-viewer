@@ -1652,15 +1652,39 @@ async function askClaude(hg, r) {
   const dl = await downloadsDir();
   if (!dl) { shellToast("Link Downloads first (the settings menu): the request for the Claude extension is left there.", 6000); return; }
   if (!(await permitted(dl, "readwrite", true))) { shellToast("PDF+ may not write into Downloads, so the Claude run was not set up.", 6000); return; }
-  // Where the folder is: asked of PDF+'s main process, which answers only
-  // where one place it knows holds this folder with this file in it.
+  // Where the folder is. A page holds the folder by handle and is never told
+  // its path, so Home says everything it knows of it and PDF+'s main process
+  // (desktop/folder-place.js) answers only where one place holds the folder
+  // with this file of it at its size (the owner, 2026-11-19: "if it already
+  // has the ability to open the case folder, doesn't it already have the
+  // folder location, or at least have the ability to get that information?"):
+  // the path its PDF-Linker launcher records; where it sits under Downloads
+  // or a folder of the Folders list (asked of those folders' own handles);
+  // where the hearing's place says; and, last, its name searched for.
   const probe = ((r.listing && r.listing.files) || []).find((f) => typeof f.size === "number" && f.size > 0);
   if (!probe) { shellToast(`${r.name} has nothing in it PDF+ can check its place by.`, 6000); return; }
-  const where = r.root && r.chain && r.chain.length ? { root: r.root.name, chain: r.chain } : { root: r.name, chain: [] };
+  let hint = "";
+  try {
+    const run = await import("./viewer/run-request.js");
+    const l = await run.folderLauncher(r.handle);
+    if (l && l.token) hint = run.folderPathOfToken(l.token);
+  } catch { hint = ""; }
+  const asks = [];
+  for (const h of [dl, ...(await treeRoots())]) {
+    try {
+      const chain = await h.resolve(r.handle);
+      if (Array.isArray(chain) && chain.length) asks.push({ root: h.name, chain });
+    } catch { /* not under it */ }
+  }
+  if (r.root && r.chain && r.chain.length) asks.push({ root: r.root.name, chain: r.chain });
+  asks.push({ root: r.name, chain: [] });
   let folderPath = "";
-  try { folderPath = await native.folderPath({ ...where, launcher: { name: probe.name, size: probe.size } }); } catch { folderPath = ""; }
+  for (const where of asks) {
+    try { folderPath = await native.folderPath({ ...where, launcher: { name: probe.name, size: probe.size }, hint }); } catch { folderPath = ""; }
+    if (folderPath) break;
+  }
   if (!folderPath) {
-    shellToast(`PDF+ could not tell where ${r.name} is on this computer. Open it once with Case folder (or add the folder holding it to the Folders list) so PDF+ learns its place, then press Claude again.`, 9000);
+    shellToast(`PDF+ could not find where ${r.name} is on this computer: not where its PDF-Linker launcher says, not under Downloads or a folder of the Folders list, and not (just once) by its name. Add the folder holding it to the Folders list, then press Claude again.`, 10000);
     return;
   }
   const iso = (at) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };

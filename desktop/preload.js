@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
       root: String(r.root || ""),
       chain: Array.isArray(r.chain) ? r.chain.map(String) : [],
       launcher: { name: String(l.name || ""), size: Number(l.size) },
+      hint: typeof r.hint === "string" ? r.hint : "",
     });
   },
   source: () => ipcRenderer.invoke("pdfplus:source"),
