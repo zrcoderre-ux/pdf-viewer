@@ -551,17 +551,37 @@ async function browserPart() {
     await shell.waitForFunction(() => document.getElementById("case-folders").hidden, null, { timeout: 10000 });
     check("the list is hidden", await shell.evaluate(() => document.getElementById("case-folders").hidden), true);
 
-    console.log("13. a note in the Date cell: a * that opens it");
+    console.log("13. a sticky note on every row: filled where the Date cell has a note");
     const doeRow = '#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe v. Globex"))';
     const doe = shell.locator(doeRow);
-    check("the note's * stands after the case name, only there", await shell.$$eval("#hearing-list .ci-note-mark", (x) => x.length), 1);
-    check("…on Doe v. Globex", await doe.locator(".ci-note-mark").count(), 1);
+    check("every row has one", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.every((r) => r.querySelectorAll(".ci-note").length === 1)), true);
+    check("filled only on Doe v. Globex", await shell.$$eval("#hearing-list .ci-note.has", (x) => x.map((n) => n.closest(".hearing-row").querySelector(".ri-name").textContent.includes("Doe v. Globex"))), [true]);
     const opened = (await shell.evaluate(() => window.__opened.length));
-    await doe.locator(".ci-note-mark").click();
-    check("a click opens the note under the row", await shell.evaluate(() => { const n = document.querySelector(".hearing-note"); return n && !n.hidden ? n.textContent : null; }), "Check POS");
+    await doe.locator(".ci-note").click();
+    check("a click opens the note under the row, to read and change", await shell.evaluate(() => { const n = [...document.querySelectorAll(".hearing-note")].find((x) => !x.hidden); return n ? n.querySelector("textarea").value : null; }), "Check POS");
     check("…and opens nothing else", await shell.evaluate(() => window.__opened.length), opened);
-    await doe.locator(".ci-note-mark").click();
-    check("a second click closes it", await shell.evaluate(() => document.querySelector(".hearing-note").hidden), true);
+    await doe.locator(".ci-note").click();
+    check("a second click closes it", await shell.evaluate(() => [...document.querySelectorAll(".hearing-note")].every((x) => x.hidden)), true);
+    // A note written on a row that has none, then taken off again.
+    const bare = shell.locator('#hearing-list .hearing-row:not(.mark-off):has(.ci-note:not(.has))').first();
+    const bareName = (await bare.locator(".ri-name").getAttribute("title"));
+    const noteOf = async (name) => {
+      const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
+      const h = (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName === name);
+      return h ? [h.note, new Date(h.date).getDate()] : null;
+    };
+    const dayBefore = (await noteOf(bareName))[1];
+    await bare.locator(".ci-note").click();
+    await shell.locator(".hearing-note:not([hidden]) textarea").fill("Tentative posted");
+    await shell.locator(".hearing-note:not([hidden]) .note-save").click();
+    for (let k = 0; k < 100 && (await noteOf(bareName))[0] !== "Tentative posted"; k++) await new Promise((r) => setTimeout(r, 100));
+    check("Save writes it into the sheet's Date cell, the date kept", await noteOf(bareName), ["Tentative posted", dayBefore]);
+    await shell.waitForFunction((n) => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.querySelector(".ri-name").title === n && r.querySelector(".ci-note.has")), bareName, { timeout: 10000 });
+    check("…and the note fills in", true, true);
+    await shell.locator(`#hearing-list .hearing-row:has(.ci-note.has) .ri-name[title="${bareName}"]`).first().locator("xpath=ancestor::*[contains(@class,'hearing-row')]").locator(".ci-note").click();
+    await shell.locator(".hearing-note:not([hidden]) .note-remove").click();
+    for (let k = 0; k < 100 && (await noteOf(bareName))[0] !== ""; k++) await new Promise((r) => setTimeout(r, 100));
+    check("Remove note takes it out, the date as it was", await noteOf(bareName), ["", dayBefore]);
 
     console.log("14. Off calendar and On calendar, written into the sheet");
     const sheetNow = async () => {
@@ -668,6 +688,54 @@ async function browserPart() {
     check("…the place asked of PDF+ by the folder's own file", await shell.evaluate(() => [window.__asked.root, window.__asked.chain, typeof window.__asked.launcher.size]), ["Downloads", ["25STCV12345 ACME"], "number"]);
     check("claude.ai opened with the marker only, never the case", (await shell.evaluate(() => window.__opened)).slice(opened0), ["https://claude.ai/#cum-pdfplus-run"]);
     await shell.evaluate(() => { delete window.pdfplusNative; });
+
+    console.log("14f. the calendar E-Court Suite read, written into the sheet, with Undo");
+    const putCalendar = (calendar) => shell.evaluate(async (calendar) => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const w = await (await dl.getFileHandle("E-Court Briefing Status.json", { create: true })).createWritable();
+      await w.write(JSON.stringify({ version: 1, written: Date.now(), refresh: null, entries: [], calendar })); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    }, calendar);
+    const sheetRows = async () => {
+      const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
+      return (await readHearings(new Uint8Array(bytes))).hearings;
+    };
+    const NEWURL = "https://civil.lacourt.org/ecourt/ecms/case?id=777";
+    await putCalendar({ at: Date.now(), windowDays: 10, days: [
+      { day: iso(inDays(2)), state: "ok", rows: [
+        { motion: "Demurrer", caseText: "25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE", caseId: "111", url: "https://civil.lacourt.org/ecourt/ecms/case?id=111" },
+        { motion: "MSJ", caseText: "24STCV00777 Doe v. Globex", caseId: "222", url: "https://civil.lacourt.org/ecourt/ecms/case?id=222" }] },
+      { day: iso(inDays(3)), state: "ok", rows: [
+        { motion: "Motion to Compel", caseText: "26STCV09999 Jane Doe v. Initech", caseId: "333", url: "https://civil.lacourt.org/ecourt/ecms/case?id=333" },
+        { motion: "Motion to Strike", caseText: "23STCV04444 Roe v. Umbrella", caseNumber: "23STCV04444" },
+        { motion: "Motion to Quash Service of Summons", caseText: "26STCV07070 NEW v. ARRIVAL", caseId: "777", url: NEWURL }] },
+      { day: iso(inDays(4)), state: "failed" },
+      { day: iso(inDays(5)), state: "ok", rows: [] }],
+      gone: [{ day: iso(inDays(5)), caseText: "22STCV05555 Vance v. Stark", caseNumber: "22STCV05555", reason: "off", status: "Not Held - Vacated by Court" }] });
+    for (let k = 0; k < 150 && !(await sheetRows()).some((h) => h.caseName === "26STCV07070 NEW v. ARRIVAL"); k++) await new Promise((r) => setTimeout(r, 100));
+    let rowsNow = await sheetRows();
+    const added = rowsNow.find((h) => h.caseName === "26STCV07070 NEW v. ARRIVAL");
+    check("the new hearing written into the sheet, on its day, linked to eCourt", added ? [iso(added.date), added.motion, added.url, added.mark] : null, [iso(inDays(3)), "Motion to Quash Service of Summons", NEWURL, ""]);
+    check("the vacated one marked off calendar (red)", rowsNow.find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark, "off");
+    check("the rows already there left as they were", rowsNow.filter((h) => h.caseName !== "26STCV07070 NEW v. ARRIVAL").length, 7);
+    await shell.waitForFunction(() => !document.getElementById("calendar-changes").hidden && document.querySelectorAll("#calendar-changes .cal-item").length >= 2, null, { timeout: 15000 });
+    check("each change listed at the top of Hearings", await shell.$$eval("#calendar-changes .cal-item .cal-text", (x) => x.map((t) => t.textContent.replace(/,.*$/, "").replace(/ \(.*$/, "").replace(/:.*$/, ""))).then((l) => l.sort()), ["Added 26STCV07070 NEW v. ARRIVAL", "Off calendar " + new Date(inDays(5)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).split(",")[0]].sort());
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("NEW v. ARRIVAL")), null, { timeout: 15000 });
+    check("…and the new hearing is on the list", true, true);
+    check("a case folder still in Downloads is marked so", await acmeRowB.evaluate((r) => [r.classList.contains("in-downloads"), !!r.querySelector(".ci-dl-chip")]), [true, true]);
+    check("…one not in Downloads is not", await janeRowB.evaluate((r) => r.classList.contains("in-downloads")), false);
+    // Undo: the row taken back out, and not added again on the next look.
+    await shell.locator("#calendar-changes .cal-item.k-added button", { hasText: "Undo" }).click();
+    for (let k = 0; k < 100 && (await sheetRows()).some((h) => h.caseName === "26STCV07070 NEW v. ARRIVAL"); k++) await new Promise((r) => setTimeout(r, 100));
+    check("Undo takes the added row out of the sheet", (await sheetRows()).some((h) => h.caseName === "26STCV07070 NEW v. ARRIVAL"), false);
+    await shell.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await shell.waitForTimeout(1500);
+    check("…and the next look does not add it again", (await sheetRows()).some((h) => h.caseName === "26STCV07070 NEW v. ARRIVAL"), false);
+    check("…the list says it was undone", await shell.$$eval("#calendar-changes .cal-item.k-added.undone", (x) => x.length), 1);
+    await shell.locator("#calendar-changes .cal-item.k-off button", { hasText: "Undo" }).click();
+    for (let k = 0; k < 100 && (await sheetRows()).find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark; k++) await new Promise((r) => setTimeout(r, 100));
+    check("Undo of an off calendar takes the red off", (await sheetRows()).find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark, "");
+    await putCalendar(null);
 
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);

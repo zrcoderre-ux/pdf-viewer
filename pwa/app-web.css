@@ -406,9 +406,45 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .ci-name-line { display: flex; align-items: baseline; gap: 2px; min-width: 0; overflow: hidden; }
 .case-item .ci-main .ci-name-line .ri-name { flex: 0 1 auto; min-width: 0; }
 .case-item .ci-main { margin-right: 4px; }
-.ci-note-mark { flex: none; padding: 0 5px; border-radius: 4px; color: var(--c-accent); font-weight: 700; cursor: pointer; }
-.ci-note-mark:hover, .ci-note-mark.open { background: var(--c-accent-soft); }
-.hearing-note { padding: 2px 14px 10px 44px; border-bottom: 1px solid var(--c-border); color: var(--c-text-2, var(--c-text)); font-size: 12.5px; white-space: pre-wrap; }
+/* The sticky note on every hearing row: outlined with no note, filled in with one. */
+.ci-note { flex: none; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-right: 4px; border-radius: 5px; color: var(--c-muted, #8a8f98); cursor: pointer; opacity: 0.55; }
+.ci-note svg .sn-paper { fill: none; }
+.ci-note:hover, .ci-note.open { opacity: 1; background: var(--c-accent-soft); color: var(--c-text); }
+.ci-note.has { opacity: 1; color: #a16207; }
+.ci-note.has svg .sn-paper { fill: #fde047; }
+.ci-note.waiting { outline: 1px dashed currentColor; outline-offset: 1px; }
+.hearing-note { padding: 4px 14px 10px 44px; border-bottom: 1px solid var(--c-border); color: var(--c-text-2, var(--c-text)); font-size: 12.5px; }
+.hearing-note .note-text { display: block; width: 100%; max-width: 720px; box-sizing: border-box; min-height: 44px; padding: 6px 8px; border: 1px solid var(--c-border); border-left: 4px solid #facc15; border-radius: 6px; background: #fffbea; color: #3f3a1e; font: inherit; font-size: 13px; resize: vertical; }
+.hearing-note .note-text:focus { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.hearing-note .note-btns { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.hearing-note .note-save { padding: 3px 12px; border-radius: 6px; border: 1px solid var(--c-accent); background: var(--c-accent); color: #fff; font: inherit; font-size: 12.5px; cursor: pointer; }
+.hearing-note .note-hint { color: var(--c-muted, #8a8f98); font-size: 11.5px; }
+/* A case folder still in Downloads: a stripe down the row and a chip by the name. */
+.hearing-row.in-downloads { box-shadow: inset 5px 0 0 #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.ci-dl-chip { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; padding: 2px 9px 2px 7px; border-radius: 999px; background: #f59e0b; color: #2a1800; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
+.hearing-row.draggable .ri-icon { cursor: grab; }
+/* Calendar changes, at the top of Hearings. */
+.calendar-changes { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--c-border); border-left: 4px solid var(--c-accent); border-radius: 8px; background: var(--c-accent-soft); font-size: 12.5px; }
+.calendar-changes .cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.calendar-changes .cal-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; }
+.calendar-changes .cal-when { color: var(--c-muted, #8a8f98); }
+.calendar-changes .cal-clear { margin-left: auto; }
+.calendar-changes .cal-item { display: flex; align-items: baseline; gap: 10px; padding: 2px 0 2px 21px; }
+.calendar-changes .cal-item .cal-text { flex: 0 1 auto; min-width: 0; }
+.calendar-changes .cal-item.k-added .cal-text::before { content: "+ "; color: #16a34a; font-weight: 700; }
+.calendar-changes .cal-item.k-off .cal-text::before { content: "− "; color: #dc2626; font-weight: 700; }
+.calendar-changes .cal-item.k-held .cal-text::before { content: "? "; color: #d97706; font-weight: 700; }
+.calendar-changes .cal-item.undone .cal-text { text-decoration: line-through; opacity: 0.6; }
+.calendar-changes .cal-issue { color: #92400e; }
+.calendar-changes .cal-issue.warn { color: #b91c1c; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hearing-note .note-text { background: #2b2717; color: #f5ecc4; }
+  :root:not([data-theme="light"]) .ci-note.has { color: #facc15; }
+  :root:not([data-theme="light"]) .calendar-changes .cal-issue { color: #fcd34d; }
+}
+:root[data-theme="dark"] .hearing-note .note-text { background: #2b2717; color: #f5ecc4; }
+:root[data-theme="dark"] .ci-note.has { color: #facc15; }
+:root[data-theme="dark"] .calendar-changes .cal-issue { color: #fcd34d; }
 .hearing-note:last-child { border-bottom: none; }
 .case-row:has(+ .hearing-note:not([hidden])) { border-bottom: none; }
 .hearing-day { padding: 7px 14px 5px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c-text-3); background: var(--c-accent-soft); border-bottom: 1px solid var(--c-border); }

@@ -1362,6 +1362,9 @@ async function renderCaseFoldersNow() {
   const sheet = await loadSheet();
   const hv = await hearingItems(rows, sheet, dl, dlState, now);
   hv.briefing = dlState === "ok" && sheet.hearings.length ? await readBriefing(dl) : { entries: [], at: 0, none: true };
+  // The calendar E-Court Suite read, written into the sheet; a change made
+  // reads the sheet again (the next pass).
+  try { if (await syncCalendar(sheet, hv.briefing, now)) caseAgain = true; } catch (e) { console.warn("calendar", e); }
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
@@ -1441,7 +1444,7 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
-    if (!r.locked) caseDraggable(row, r);
+    caseDraggable(row, r);
     if (r.hearing && hearingLib.isWebLink(r.hearing.url)) row.appendChild(ecourtButton(r.hearing));
     for (const x of folderControls(r, line)) row.appendChild(x);
     listEl.appendChild(row);
@@ -1536,7 +1539,7 @@ async function readBriefing(dl) {
     const key = `${f.size}|${f.lastModified}`;
     if (!briefingSeen || briefingSeen.key !== key) {
       const parsed = hearingLib.parseBriefingFile(await f.text());
-      briefingSeen = { key, entries: parsed.entries, refresh: parsed.refresh, at: f.lastModified };
+      briefingSeen = { key, entries: parsed.entries, refresh: parsed.refresh, calendar: parsed.calendar, at: f.lastModified };
     }
     return briefingSeen;
   } catch { return briefingSeen || { entries: [], at: 0, none: true }; }
@@ -1572,7 +1575,7 @@ const briefingMissing = (hg, briefing) => {
   return !!e && ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed");
 };
 
-// Refresh briefing: E-Court Suite checks the next five court days at once
+// Refresh from eCourt: E-Court Suite reads the next ten court days at once
 // (its service worker, "The background refresh"). Home cannot reach eCourt,
 // so it opens an eCourt page the extension knows (REFRESH_URL) in Chrome; the
 // extension runs the check in that tab and closes it when done, or leaves it
@@ -1580,7 +1583,9 @@ const briefingMissing = (hg, briefing) => {
 const REFRESH_URL = "https://civil.lacourt.org/#lac-refresh-briefing";
 document.getElementById("briefing-refresh")?.addEventListener("click", () => {
   window.open(REFRESH_URL, "_blank", "noopener");
-  shellToast("E-Court Suite is checking the next five court days in Chrome. Home shows it as soon as it is done.", 6000);
+  // A notice of calendar changes needs the leave to show one; a click is when to ask.
+  try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {}); } catch { /* none */ }
+  shellToast("E-Court Suite is reading eCourt in Chrome: the next ten court days' calendar, and the briefing. Home shows it as soon as it is done.", 6000);
 });
 
 // ---- Home: the sidebar's foot ------------------------------------------------
@@ -1785,6 +1790,7 @@ let hearingEdits = null;   // [{ sheet, row, caseName, date, mark }]
 let editsError = "";       // why the last write failed, "" when none waits
 let editsBusy = false;
 const sameHearing = (a, b) => a.sheet === b.sheet && a.row === b.row && a.caseName === b.caseName;
+const isNoteEdit = (e) => typeof e.note === "string";
 async function editsAll() {
   if (!hearingEdits) {
     try { hearingEdits = (await foldersTx("places", "readonly", (st) => st.get("hearingEdits"))) || []; }
@@ -1800,8 +1806,12 @@ function withEdits(hearings) {
   const edits = hearingEdits || [];
   if (!edits.length) return hearings;
   return hearings.map((hg) => {
-    const e = edits.find((x) => sameHearing(x, hg));
-    return e ? { ...hg, mark: e.mark, waiting: true } : hg;
+    let out = hg;
+    for (const e of edits) {
+      if (!sameHearing(e, hg)) continue;
+      out = isNoteEdit(e) ? { ...out, note: e.note, noteWaiting: true } : { ...out, mark: e.mark, waiting: true };
+    }
+    return out;
   });
 }
 async function writeEdits(h) {
@@ -1812,12 +1822,12 @@ async function writeEdits(h) {
     while (edits.length) {
       const e = edits[0];
       let out;
-      try { out = await hearingLib.markHearing(await h.getFile(), e, e.mark); }
+      try { out = isNoteEdit(e) ? await hearingLib.setHearingNote(await h.getFile(), e, e.note) : await hearingLib.markHearing(await h.getFile(), e, e.mark); }
       catch (x) {
         if (x && x.name === "NotReadableError") { editsError = x.message || String(x); return; }
         edits.shift();
         await editsSave();
-        shellToast(`${e.caseName} was not marked in ${h.name}: ${(x && x.message) || x}.`, 8000);
+        shellToast(`${e.caseName}${isNoteEdit(e) ? "'s note was not written" : " was not marked"} in ${h.name}: ${(x && x.message) || x}.`, 8000);
         continue;
       }
       let w = null;
@@ -1843,7 +1853,7 @@ async function setHearingMark(hg, mark, what = mark === "off" ? "off calendar" :
   // Asked first, while the click still counts as one (PDF+ grants it).
   if (!(await permitted(h, "readwrite", true))) { shellToast(`PDF+ may not write into ${h.name}, so it was not changed.`, 6000); return; }
   const edits = await editsAll();
-  const i = edits.findIndex((e) => sameHearing(e, hg));
+  const i = edits.findIndex((e) => sameHearing(e, hg) && !isNoteEdit(e));
   if (i >= 0) edits.splice(i, 1);
   edits.push({ sheet: hg.sheet, row: hg.row, caseName: hg.caseName, date: hg.date, mark });
   await editsSave();
@@ -1854,6 +1864,224 @@ async function setHearingMark(hg, mark, what = mark === "off" ? "off calendar" :
   hearingsShown = "";
   renderCaseFolders();
 }
+/**
+ * A note on a hearing (the owner, 2026-11-19: a sticky note on every row,
+ * "by clicking it, I can add a note ... When there is a note, it is colored in
+ * and I can view and edit the note by clicking on it"): kept as an edit and
+ * written into the row's Date cell as Off calendar is (hearing-sheet.js,
+ * setHearingNote), waiting while Excel holds the workbook.
+ */
+async function setHearingNoteText(hg, note) {
+  const h = await sheetHandle();
+  if (!h) return;
+  if (!(await permitted(h, "readwrite", true))) { shellToast(`PDF+ may not write into ${h.name}, so the note was not saved.`, 6000); return; }
+  const edits = await editsAll();
+  const i = edits.findIndex((e) => sameHearing(e, hg) && isNoteEdit(e));
+  if (i >= 0) edits.splice(i, 1);
+  edits.push({ sheet: hg.sheet, row: hg.row, caseName: hg.caseName, date: hg.date, note });
+  await editsSave();
+  await writeEdits(h);
+  shellToast(edits.length
+    ? `The note on ${hg.caseName} is kept here. ${h.name} looks open in Excel, so it is written as soon as Excel closes it.`
+    : note ? `Note on ${hg.caseName} saved in ${h.name}.` : `Note on ${hg.caseName} taken out of ${h.name}.`, 5000);
+  hearingsShown = "";
+  renderCaseFolders();
+}
+
+// ---- Home: the calendar (the hearings sheet kept up to date) ----------------
+//
+// The owner (2026-11-19): automate copying eCourt's agenda into the hearings
+// sheet, "in a way that can update automatically if a new case is moved or
+// taken off calendar (but notifies me, it should never do that silently)",
+// ten court days forward. E-Court Suite's hourly refresh puts the calendar in
+// the briefing file (readBriefing); each look plans against the sheet as it
+// stands (calendar-sync.js, planCalendar) and, where PDF+ may write the
+// workbook without asking, writes it at once: new hearings added as Copy All
+// would paste them, the ones the Hearings tab says are vacated or continued
+// marked off calendar. Every change goes into calendarLog (the folders
+// database, `places`), which is the list at the top of Hearings with its Undo
+// and keeps a change from being made twice. A hearing gone from its day's
+// agenda with no word why changes nothing: it is listed for the owner. Excel
+// holding the workbook leaves the plan for the next look, as a mark waits.
+let calLib = null;
+let calLog = null;   // [{ id, key, kind: added|off|held|kept, at, day, caseText, motion, reason, status, newDay, sheet, row, caseName, date, undone, cleared }]
+const calState = { waiting: 0, why: "", refused: [], at: 0 };
+let calBusy = false;
+const CAL_LOG_DAYS = 21;
+const CAL_SHOWN_MS = 2 * 86400000;
+async function calLogAll() {
+  if (!calLog) {
+    try { calLog = (await foldersTx("places", "readonly", (st) => st.get("calendarLog"))) || []; } catch { calLog = []; }
+  }
+  return calLog;
+}
+async function calLogSave() {
+  const cut = Date.now() - CAL_LOG_DAYS * 86400000;
+  calLog = (calLog || []).filter((e) => e.at >= cut || (calLib && calLib.dayAt(e.day) >= cut));
+  try { await foldersTx("places", "readwrite", (st) => st.put(calLog, "calendarLog")); } catch { /* kept for this session only */ }
+}
+function calNotify(title, lines) {
+  if (!lines.length) return;
+  shellToast(`${title}: ${lines[0]}${lines.length > 1 ? ` and ${lines.length - 1} more (listed under Hearings)` : ""}.`, 9000);
+  try {
+    if (!("Notification" in window)) return;
+    const body = lines.slice(0, 5).join("\n") + (lines.length > 5 ? `\n…and ${lines.length - 5} more` : "");
+    if (Notification.permission === "granted") new Notification(title, { body, tag: "pdfplus-calendar-" + Date.now() });
+    else if (Notification.permission === "default") Notification.requestPermission().then((p) => { if (p === "granted") new Notification(title, { body }); }).catch(() => {});
+  } catch { /* the toast said it */ }
+}
+async function bytesOf(file) { return new Uint8Array(await file.arrayBuffer()); }
+async function writeSheetBytes(h, bytes) {
+  let w = null;
+  try {
+    w = await h.createWritable();
+    await w.write(bytes);
+    await w.close();
+    return "";
+  } catch (x) {
+    try { if (w) await w.abort(); } catch { /* already gone */ }
+    return (x && x.message) || String(x);
+  }
+}
+/** Bring the sheet up to the calendar: whether it changed the sheet. */
+async function syncCalendar(sheet, briefing, now) {
+  if (calBusy || !briefing || briefing.none || !briefing.calendar || sheet.state !== "ok" || !sheetSeen) return false;
+  if ((hearingEdits || []).length) return false; // the owner's own changes go first (Excel is likely open)
+  const h = await sheetHandle();
+  if (!h) return false;
+  if (!calLib) calLib = await import("./viewer/calendar-sync.js");
+  const log = await calLogAll();
+  const plan = calLib.planCalendar({ hearings: sheetSeen.hearings, calendar: briefing.calendar, log, now });
+  calState.at = briefing.calendar.at || 0;
+  // Gone with no word why: listed (once), never changed.
+  const held = plan.held.filter((x) => !x.seen);
+  for (const x of held) log.push({ id: `${x.key}|held|${now}`, key: x.key, kind: "held", at: now, day: x.day, caseText: x.hg.caseName, motion: x.hg.motion, reason: x.reason, status: x.status, newDay: x.newDay, sheet: x.hg.sheet, row: x.hg.row, caseName: x.hg.caseName, date: x.hg.date });
+  if (held.length) { await calLogSave(); calNotify("Check the hearings sheet", held.map((x) => calLib.changeText({ ...x, kind: "held" }).text)); }
+  const n = plan.adds.length + plan.offs.length;
+  if (!n) { calState.waiting = 0; calState.why = ""; calState.refused = []; return false; }
+  if (!(await permitted(h, "readwrite", false))) { calState.waiting = n; calState.why = "leave"; return false; }
+  calBusy = true;
+  try {
+    let bytes;
+    try { bytes = await bytesOf(await h.getFile()); }
+    catch (x) { calState.waiting = n; calState.why = (x && x.message) || String(x); return false; }
+    const res = await calLib.addCalendarRows(bytes, plan.adds, now);
+    bytes = res.bytes;
+    calState.refused = res.refused.map((r) => ({ ...r, add: plan.adds.find((a) => a.key === r.key) }));
+    const offs = [];
+    for (const o of plan.offs) {
+      try { bytes = await hearingLib.markHearing(bytes, o.hg, "off"); offs.push(o); } catch { /* the row is gone: nothing to mark */ }
+    }
+    if (!res.placed.length && !offs.length) { calState.waiting = 0; return false; }
+    const err = await writeSheetBytes(h, bytes);
+    if (err) { calState.waiting = n; calState.why = err; return false; }
+    calState.waiting = 0; calState.why = "";
+    const lines = [];
+    for (const p of res.placed) {
+      const a = plan.adds.find((x) => x.key === p.key);
+      const e = { id: `${p.key}|added|${now}`, key: p.key, kind: "added", at: now, day: a.day, caseText: a.caseText, motion: a.motion, sheet: p.sheet, row: p.row, caseName: p.caseName, date: p.date };
+      log.push(e);
+      lines.push(calLib.changeText(e).text);
+    }
+    for (const o of offs) {
+      const e = { id: `${o.key}|off|${now}`, key: o.key, kind: "off", at: now, day: o.day, caseText: o.hg.caseName, motion: o.hg.motion, reason: o.reason, status: o.status, newDay: o.newDay, sheet: o.hg.sheet, row: o.hg.row, caseName: o.hg.caseName, date: o.hg.date };
+      log.push(e);
+      lines.push(calLib.changeText(e).text);
+    }
+    await calLogSave();
+    sheetSeen = null;
+    hearingsShown = "";
+    calNotify(`Hearings sheet updated (${lines.length})`, lines);
+    return true;
+  } finally { calBusy = false; }
+}
+/** Undo one change: the added row taken out, the red taken off. */
+async function undoCalendar(e) {
+  const h = await sheetHandle();
+  if (!h || !calLib) return;
+  if (!(await permitted(h, "readwrite", true))) { shellToast(`PDF+ may not write into ${h.name}.`, 5000); return; }
+  let bytes;
+  try {
+    const now = await bytesOf(await h.getFile());
+    bytes = e.kind === "added"
+      ? await calLib.removeCalendarRow(now, { sheet: e.sheet, row: e.row, caseName: e.caseName, date: e.date })
+      : await hearingLib.markHearing(now, { sheet: e.sheet, row: e.row, caseName: e.caseName, date: e.date }, "");
+  } catch (x) { shellToast(`Not undone: ${(x && x.message) || x}.`, 7000); return; }
+  const err = await writeSheetBytes(h, bytes);
+  if (err) { shellToast(`Not undone: ${h.name} looks open in Excel. Close it and press Undo again.`, 7000); return; }
+  e.undone = true;
+  await calLogSave();
+  sheetSeen = null; hearingsShown = "";
+  shellToast(e.kind === "added" ? `${e.caseText} taken back out of ${h.name}; it will not be added again.` : `${e.caseText} is on calendar again in ${h.name}.`, 6000);
+  renderCaseFolders();
+}
+/** The list of changes at the top of Hearings. */
+function renderCalendarChanges(box, sheet, briefing, now) {
+  box.textContent = "";
+  const log = (calLog || []).filter((e) => !e.cleared && !e.resolved && (e.kind === "held" ? !e.undone : now - e.at < CAL_SHOWN_MS));
+  const cal = briefing && !briefing.none ? briefing.calendar : null;
+  const issues = [];
+  if (calState.waiting && calState.why === "leave") issues.push({ text: `${calState.waiting} calendar change${calState.waiting === 1 ? "" : "s"} for ${sheet.name} waiting for your leave to write it.`, action: "Allow" });
+  else if (calState.waiting) issues.push({ text: `${calState.waiting} calendar change${calState.waiting === 1 ? "" : "s"} waiting: ${sheet.name} looks open in Excel. They are written once it is closed.`, title: calState.why });
+  for (const r of calState.refused) issues.push({ text: `Not added: ${r.add ? r.add.caseText : r.key} — ${r.why}. Paste it by hand.`, warn: true });
+  box.hidden = !log.length && !issues.length;
+  if (box.hidden) return;
+  const head = document.createElement("div");
+  head.className = "cal-head";
+  const title = document.createElement("span");
+  title.className = "cal-title";
+  title.innerHTML = `${icon("calendar", { size: 15 })}<span>Calendar changes</span>`;
+  head.appendChild(title);
+  if (cal && cal.at) {
+    const when = document.createElement("span");
+    when.className = "cal-when";
+    when.textContent = `from eCourt, ${caseLib.whenText(cal.at, now)}`;
+    when.title = `E-Court Suite read the next ${cal.windowDays || 10} court days' agendas ${new Date(cal.at).toLocaleString()}; days it could not read change nothing.`;
+    head.appendChild(when);
+  }
+  if (log.length) {
+    const clear = document.createElement("button");
+    clear.className = "link-btn cal-clear";
+    clear.textContent = "Clear";
+    clear.title = "Take these off the list (the sheet is not changed; a hearing to check stays until you decide)";
+    clear.addEventListener("click", async () => { for (const e of log) if (e.kind !== "held") e.cleared = true; await calLogSave(); hearingsShown = ""; renderCaseFolders(); });
+    head.appendChild(clear);
+  }
+  box.appendChild(head);
+  for (const is of issues) {
+    const p = document.createElement("div");
+    p.className = "cal-item cal-issue" + (is.warn ? " warn" : "");
+    p.textContent = is.text;
+    if (is.title) p.title = is.title;
+    if (is.action) {
+      const b = document.createElement("button");
+      b.className = "link-btn";
+      b.textContent = is.action;
+      b.addEventListener("click", async () => { const h = await sheetHandle(); if (h && (await permitted(h, "readwrite", true))) { calState.why = ""; renderCaseFolders(); } });
+      p.appendChild(b);
+    }
+    box.appendChild(p);
+  }
+  for (const e of [...log].sort((a, b) => (a.kind === "held") - (b.kind === "held") || b.at - a.at).slice(0, 12)) {
+    const p = document.createElement("div");
+    p.className = `cal-item k-${e.kind}${e.undone ? " undone" : ""}`;
+    const said = calLib.changeText(e);
+    const txt = document.createElement("span");
+    txt.className = "cal-text";
+    txt.textContent = said.text + (e.undone ? " — undone" : "");
+    p.title = said.title;
+    p.appendChild(txt);
+    const btn = (label, title, fn) => { const b = document.createElement("button"); b.className = "link-btn"; b.textContent = label; b.title = title; b.addEventListener("click", fn); p.appendChild(b); };
+    if ((e.kind === "added" || e.kind === "off") && !e.undone) btn("Undo", e.kind === "added" ? "Take this row back out of the sheet; it will not be added again" : "Take the red off: on calendar again", () => undoCalendar(e));
+    if (e.kind === "held") {
+      const hg = sheet.hearings.find((x) => x.sheet === e.sheet && x.caseName === e.caseName && x.date === e.date);
+      if (hg && !hg.mark) btn("Off calendar", "Mark it red in the sheet", async () => { e.resolved = true; log.push({ id: `${e.key}|off|${Date.now()}`, key: e.key, kind: "off", at: Date.now(), day: e.day, caseText: e.caseText, manual: true, cleared: true }); await calLogSave(); setHearingMark(hg, "off"); });
+      btn("Keep", "It stays as it is; this is not asked again", async () => { e.resolved = true; calLog.push({ id: `${e.key}|kept|${Date.now()}`, key: e.key, kind: "kept", at: Date.now(), day: e.day, cleared: true }); await calLogSave(); hearingsShown = ""; renderCaseFolders(); });
+    }
+    box.appendChild(p);
+  }
+}
+
 /** Done (the owner: "a button for me to indicate that I am done"): its Motion Type and Case Name cells green in the sheet; pressed again, Not done. */
 function doneButton(hg) {
   const b = document.createElement("button");
@@ -1876,10 +2104,11 @@ function calendarButton(hg) {
   return b;
 }
 
-// Notes typed in a case's Date cell (hearing-sheet.js, dateNote): a * after
-// the case name, opened and closed with a click; which are open is kept
-// across redraws.
+// Notes typed in a case's Date cell (hearing-sheet.js, dateNote): a sticky
+// note before the case name, opened and closed with a click; which are open
+// is kept across redraws.
 const notesOpen = new Set();
+let noteEditing = ""; // the note being written: the list is not redrawn under it
 const noteKey = (hg) => `${hg.sheet}|${hg.row}|${hg.caseName}`;
 
 /** The case numbers the files in a listing carry ("Register of Actions 25STCV12345.pdf"). */
@@ -1947,6 +2176,11 @@ function openEcourt(hg) {
  * first hearing of each folder only, which carries its buttons. `matched` is
  * the set of rows on a hearing's row.
  */
+/** Whether a folder is inside Downloads (any depth). */
+async function isInDownloads(dl, h) {
+  if (!dl || !h || typeof dl.resolve !== "function") return false;
+  try { const p = await dl.resolve(h); return Array.isArray(p) && p.length > 0; } catch { return false; }
+}
 async function hearingItems(rows, sheet, dl, dlState, now) {
   const empty = { items: [], all: [], open: [], shownAll: [], downloaded: 0, matched: new Set() };
   if (!sheet.hearings.length) return empty;
@@ -2001,7 +2235,8 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
         place.row = r;
       }
     }
-    const item = { hg, place, r, controls: false };
+    const fh = r ? r.handle : place && (place.kind === "folder" || place.kind === "opened") ? place.handle || (place.row && place.row.handle) : null;
+    const item = { hg, place, r, controls: false, inDl: dlState === "ok" && fh ? await isInDownloads(dl, fh) : false };
     if (r && !owner.has(r)) { owner.set(r, item); item.controls = true; }
     items.push(item);
   }
@@ -2023,10 +2258,13 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   section.hidden = false;
   const { items, all, open, shownAll, downloaded } = hv;
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
+  // Not redrawn under a note being written; it is once the note is closed.
+  if (noteEditing && listEl.contains(document.activeElement)) return;
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
+    (calLog || []).map((e) => e.id + (e.undone ? "u" : "") + (e.cleared ? "c" : "") + (e.resolved ? "r" : "")).join(","), calState.waiting, calState.why, calState.refused.length,
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
     Math.floor(now / 600000), canAskClaude() ? "claude" : "",
-    ...items.map(({ hg, place, r, controls }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.url, hg.submitted, hg.submittedText,
+    ...items.map(({ hg, place, r, controls, inDl }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hg.url, hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
   if (sig === hearingsShown) return;
@@ -2082,12 +2320,15 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     sumEl.hidden = false;
     const w = document.createElement("span");
     w.className = "hs-warn";
-    w.textContent = `${waiting} calendar change${waiting === 1 ? "" : "s"} waiting to be written: close ${sheet.name} in Excel`;
+    w.textContent = `${waiting} change${waiting === 1 ? "" : "s"} (marks, notes) waiting to be written: close ${sheet.name} in Excel`;
     w.title = editsError ? `The last try said: ${editsError}` : "";
     sumEl.appendChild(w);
   }
 
+  const calBox = document.getElementById("calendar-changes");
+  if (calBox) renderCalendarChanges(calBox, sheet, hv.briefing, now);
   listEl.textContent = "";
+  noteEditing = "";
   const empty = (text) => { const p = document.createElement("p"); p.className = "case-empty"; p.textContent = text; listEl.appendChild(p); };
   // An empty list says what to do, with the button that does it (the same
   // as the settings menu's).
@@ -2120,7 +2361,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   listEl.classList.toggle("has-claude", canAskClaude());
   listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 58 + (chipMost - 1) * 4 : 24) + "px");
   let lastDay = null;
-  for (const { hg, place, r, controls } of items) {
+  for (const { hg, place, r, controls, inDl } of items) {
     const dayKey = hg.date || hg.dateText;
     if (dayKey !== lastDay) {
       lastDay = dayKey;
@@ -2160,30 +2401,70 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       tick.setAttribute("aria-label", "Done");
       b.querySelector(".ci-case").before(tick);
     }
+    // The sticky note (the owner, 2026-11-19): on every row, outlined where
+    // there is no note, filled in where there is; a click opens the note under
+    // the row to read, write or change (setHearingNoteText).
     let noteEl = null;
-    if (hg.note) {
-      // The note opens under the row; the * sits inside the row's button, so
-      // its click is its own and opens nothing else.
+    {
       const key = noteKey(hg);
-      const star = document.createElement("span");
-      star.className = "ci-note-mark";
-      star.textContent = "*";
-      star.title = "Note: " + hg.note;
-      star.setAttribute("role", "button");
-      star.setAttribute("aria-label", "Show the note on " + hg.caseName);
-      b.querySelector(".ci-name-line").appendChild(star);
+      const has = !!hg.note;
+      const pad = document.createElement("span");
+      pad.className = "ci-note" + (has ? " has" : "") + (hg.noteWaiting ? " waiting" : "");
+      pad.innerHTML = icon("sticky-note", { size: 16 });
+      pad.title = has ? `Note: ${hg.note}\n(click to read or change it)` : "Add a note (kept in the sheet's Date column)";
+      pad.setAttribute("role", "button");
+      pad.setAttribute("aria-label", (has ? "The note on " : "Add a note on ") + hg.caseName);
+      b.querySelector(".ci-name-line").prepend(pad);
       noteEl = document.createElement("div");
       noteEl.className = "hearing-note";
-      noteEl.textContent = hg.note;
       noteEl.hidden = !notesOpen.has(key);
-      star.classList.toggle("open", !noteEl.hidden);
-      star.addEventListener("click", (e) => {
+      pad.classList.toggle("open", !noteEl.hidden);
+      const ta = document.createElement("textarea");
+      ta.className = "note-text";
+      ta.rows = 2;
+      ta.value = hg.note || "";
+      ta.placeholder = "A note on this hearing…";
+      ta.setAttribute("aria-label", "Note on " + hg.caseName);
+      const btns = document.createElement("div");
+      btns.className = "note-btns";
+      const mk = (label, cls, fn) => { const x = document.createElement("button"); x.className = cls; x.textContent = label; x.addEventListener("click", (e) => { e.stopPropagation(); fn(); }); btns.appendChild(x); return x; };
+      const close = () => { noteEl.hidden = true; pad.classList.remove("open"); notesOpen.delete(key); noteEditing = ""; };
+      mk("Save", "note-save", () => { const v = ta.value.replace(/\s+/g, " ").trim(); close(); if (v !== (hg.note || "")) setHearingNoteText(hg, v); });
+      if (has) mk("Remove note", "link-btn note-remove", () => { close(); setHearingNoteText(hg, ""); });
+      mk("Cancel", "link-btn", () => { ta.value = hg.note || ""; close(); });
+      const hint = document.createElement("span");
+      hint.className = "note-hint";
+      hint.textContent = hg.noteWaiting ? `Waiting to be written into ${sheet.name} (open in Excel?)` : "Ctrl+Enter saves · kept in the sheet's Date column";
+      btns.appendChild(hint);
+      ta.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); btns.querySelector(".note-save").click(); }
+        else if (e.key === "Escape") { e.preventDefault(); ta.value = hg.note || ""; close(); }
+      });
+      ta.addEventListener("focus", () => { noteEditing = key; });
+      noteEl.append(ta, btns);
+      pad.addEventListener("click", (e) => {
         e.stopPropagation();
         e.preventDefault();
         noteEl.hidden = !noteEl.hidden;
-        star.classList.toggle("open", !noteEl.hidden);
-        if (noteEl.hidden) notesOpen.delete(key); else notesOpen.add(key);
+        pad.classList.toggle("open", !noteEl.hidden);
+        if (noteEl.hidden) { notesOpen.delete(key); noteEditing = ""; }
+        else {
+          if (!noteEl.isConnected) row.after(noteEl);
+          notesOpen.add(key); noteEditing = key;
+          setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+        }
       });
+    }
+    // A case folder still in Downloads, marked so it is plain which are left
+    // to file (the owner: "It should be visually obvious which case folders on
+    // the hearings table are in the downloads folder").
+    if (inDl) {
+      row.classList.add("in-downloads");
+      const chip = document.createElement("span");
+      chip.className = "ci-dl-chip";
+      chip.innerHTML = `${icon("download", { size: 12, stroke: 2.25 })}<span>Downloads</span>`;
+      chip.title = "This case folder is still in Downloads. Drag the row onto a folder on the left to file it there.";
+      b.querySelector(".ci-name-line").appendChild(chip);
     }
     const where = [];
     if (hg.motion) where.push(hg.motion);
@@ -2216,7 +2497,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       } else locateCase(hg);
     });
     row.appendChild(b);
-    if (r && !r.locked) caseDraggable(row, r);
+    if (r) caseDraggable(row, r);
     // The buttons in fixed slots, each in the same place on every row, an
     // empty slot keeping its room: the folder's own (on the first hearing of
     // its case only), then Done, Off calendar and eCourt.
@@ -2239,7 +2520,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     slot("ecourt", hearingLib.isWebLink(hg.url) ? ecourtButton(hg) : null);
     row.appendChild(acts);
     listEl.appendChild(row);
-    if (noteEl) listEl.appendChild(noteEl);
+    // The note's panel is in the list only while it is open.
+    if (noteEl && !noteEl.hidden) listEl.appendChild(noteEl);
   }
   if (shownAll.length > HEARING_ROWS_MAX) empty(`And ${shownAll.length - HEARING_ROWS_MAX} more in the sheet.`);
 }
@@ -2495,7 +2777,10 @@ async function renderTreeNow(dl, dlState, underDrag = false) {
       treeShown = "";
       renderTree(dl, dlState);
     });
-    if (!n.leaf && !n.locked) dropTarget(el, n, dl, dlState);
+    // A folder still waiting for leave takes a drop too: the leave is asked
+    // on the move bar's Move (the owner found today's and tomorrow's cases
+    // would not drop).
+    if (!n.leaf) dropTarget(el, n, dl, dlState);
     box.appendChild(el);
   }
 }
@@ -2524,7 +2809,7 @@ function dropTarget(el, n, dl, dlState) {
     e.dataTransfer.dropEffect = "move";
     el.classList.add("drop-here");
     // Held over a closed folder, it opens, as File Explorer's do.
-    if (!spring && !n.open) spring = setTimeout(() => { treeOpen.add(n.key); treeShown = ""; renderTree(dl, dlState, true); }, SPRING_OPEN_MS);
+    if (!spring && !n.open && !n.locked) spring = setTimeout(() => { treeOpen.add(n.key); treeShown = ""; renderTree(dl, dlState, true); }, SPRING_OPEN_MS);
   });
   el.addEventListener("dragleave", () => { el.classList.remove("drop-here"); clearTimeout(spring); spring = 0; });
   el.addEventListener("drop", (e) => {
@@ -2553,18 +2838,38 @@ function showMoveBar() {
   moveBar.hidden = false;
   return moveBar;
 }
-function askMove(r, n) {
+async function askMove(r, n) {
   const bar = showMoveBar();
   const where = [n.root.name, ...n.chain].join(" › ");
-  bar.querySelector(".mb-text").textContent = `Move “${r.name}” into ${where}?`;
   const go = bar.querySelector(".mb-go"), cancel = bar.querySelector(".mb-cancel");
   go.disabled = false; cancel.disabled = false;
   go.hidden = false; cancel.textContent = "Cancel";
-  go.onclick = () => moveCase(r, n);
   cancel.onclick = () => { bar.hidden = true; };
+  // A case open in its own window would lose its folder under it: offered
+  // closed first, in the same click.
+  const cw = r.handle ? await caseWindowHolding(r.handle) : null;
+  if (cw) {
+    bar.querySelector(".mb-text").textContent = `“${r.name}” is open in its own window. Close that window and move it into ${where}?`;
+    go.textContent = "Close window and move";
+    go.onclick = async () => { try { cw.win.close(); } catch { /* gone */ } await new Promise((res) => setTimeout(res, 400)); go.textContent = "Move"; moveCase(r, n); };
+  } else {
+    bar.querySelector(".mb-text").textContent = `Move “${r.name}” into ${where}?${n.locked ? " (PDF+ asks your leave for it first.)" : ""}`;
+    go.textContent = "Move";
+    go.onclick = () => moveCase(r, n);
+  }
   go.focus();
 }
 
+/** A window of the app that holds the folder (a case opened in its own window), or null. */
+async function caseWindowHolding(dir) {
+  for (const cw of caseWindows) {
+    if (!cw.win || cw.win.closed || cw.name !== dir.name) continue;
+    let held = [];
+    try { held = (cw.win.__shellCaseDirs && cw.win.__shellCaseDirs()) || []; } catch { held = []; }
+    for (const d of held) { try { if (d && (await d.isSameEntry(dir))) return cw; } catch { /* gone */ } }
+  }
+  return null;
+}
 /** Whether a reader tab holds the folder. */
 async function inReader(dir) {
   for (const t of tabs) {
@@ -2591,7 +2896,7 @@ async function moveCase(r, n) {
   let state = "";
   try { state = caseLib.folderStatus(await readListing(src), Date.now()).state; } catch { /* unreadable: the move finds out */ }
   if (runsStarted.some((x) => x.name === r.name)) state = "starting";
-  const why = moveLib.moveBlocker({ state, inReader: await inReader(src) });
+  const why = moveLib.moveBlocker({ state, inReader: (await inReader(src)) || !!(await caseWindowHolding(src)) });
   if (why) return done(`“${r.name}” was not moved: ${why}`);
   // The opened-here records of this folder, its hearing links and its place
   // in line, to point at its new place (the old handle dies with the move).

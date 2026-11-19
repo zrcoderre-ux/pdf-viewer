@@ -450,3 +450,46 @@ Tests: `test-hearing-sheet.mjs` part 9b (at 2560: names at 15px or more,
 
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).
+
+## Sticky notes, Downloads marked, the drag fixed (2026-11-19)
+
+- **Sticky notes.** The owner: "Change the * to a sticky note icon, and give
+  them all one. When it is transparent that means there is not currently a
+  note, but by clicking it, I can add a note. When there is a note, it is
+  colored in and I can view and edit the note by clicking on it." Every row
+  has `.ci-note` (icons.js `sticky-note`, its paper filled `#fde047` with
+  `.has`) before the case number; a click opens a panel under the row (in the
+  list only while open) with a textarea, Save (Ctrl+Enter), Remove note and
+  Cancel. Saving is an edit in the `hearingEdits` queue (an entry with `note`
+  rather than `mark`; `isNoteEdit`), written by `setHearingNote`
+  (hearing-sheet.js) into the row's Date cell: alone where the cell is blank,
+  after the date where it holds one (`"11/20/2026 · Check POS"`,
+  `splitNoteLead`, `NOTE_SEP`), so neither the row nor the rows below lose the
+  date; `readHearings` reads that form as date + note and passes the date
+  down. Removing gives the cell its date back as a serial where its style is
+  a date's (`dateToSerial`). The list is not redrawn while a note's textarea
+  has focus (`noteEditing`).
+- **In Downloads.** The owner: "It should be visually obvious which case
+  folders on the hearings table are in the downloads folder." `hearingItems`
+  asks Downloads whether it holds each row's folder (`isInDownloads`,
+  `FileSystemDirectoryHandle.resolve`); such a row gets `.in-downloads` (an
+  amber stripe) and a Downloads chip by the name.
+- **The drag.** The owner found today's and tomorrow's cases would not drag
+  onto a folder: those are the folders opened here, and after a restart their
+  handles want the leave again (`row.locked`), which left them undraggable;
+  folders on the Folders list in the same state took no drop. Both now do,
+  and the move bar's Move asks the leave (`moveCase` already did). A case open
+  in its own window (`caseWindows`) counted as nowhere; `caseWindowHolding`
+  finds it and the bar offers Close window and move.
+- **A reader bug the calendar's tests found.** `parseSheetCells` matched an
+  empty row with attributes (`<row r="4" ht="28" customHeight="1"/>`) as
+  opening a row that ran to the NEXT row's `</row>`, so that row's cells were
+  read one row up: Done, Off calendar and notes could land on the blank row
+  above the case. The row pattern is lazy now. (`xlsx-read.js` has the same
+  pattern; it reads only the pseudonym key, which openpyxl writes without
+  empty rows, and is kept in step with the Claude extension, so it is left.)
+
+Tests: `test-hearing-sheet.mjs` parts 13 (the sticky note, a note written and
+removed) and 14f (In Downloads); `test-calendar-sync.mjs` part 10 (notes).
+The sheet kept up to date from eCourt is its own note: Home calendar.md.
+

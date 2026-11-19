@@ -17,7 +17,7 @@
 // from its <hyperlinks> and rels, or a HYPERLINK() formula.
 
 import { zipEntries, readEntry, parseSharedStrings, colIndex, unescapeXml } from "./xlsx-read.js";
-import { replaceParts, colLetters } from "./xlsx-write.js";
+import { replaceParts, colLetters, escapeXmlText } from "./xlsx-write.js";
 
 // ---- case numbers -------------------------------------------------------------
 
@@ -129,7 +129,7 @@ export function parseTheme(xml) {
   return out;
 }
 
-const attrOf = (tag, name) => {
+export const attrOf = (tag, name) => {
   const m = new RegExp(`(?:^|\\s)${name}="([^"]*)"`).exec(tag);
   return m ? unescapeXml(m[1]) : null;
 };
@@ -258,11 +258,13 @@ export function textToDate(text, now = Date.now()) {
  * row-level style of each row that carries one (`rowStyle`) and the sheet's
  * hyperlinks (Map "row,col" → url).
  */
-function parseSheetCells(xml, shared, rels) {
+export function parseSheetCells(xml, shared, rels) {
   const cells = new Map();
   const rowStyle = new Map();
   let maxRow = -1;
-  const rowRe = /<row((?:\s[^>]*)?)(?:\/>|>([\s\S]*?)<\/row>)/g;
+  // Lazy, so an empty row with attributes (<row r="4" ht="28" customHeight="1"/>)
+  // ends at its own "/>" and does not take in the next row's cells.
+  const rowRe = /<row((?:\s[^>]*?)?)(?:\/>|>([\s\S]*?)<\/row>)/g;
   let rm, nextRow = 0;
   while ((rm = rowRe.exec(xml))) {
     const rn = parseInt(attrOf(rm[1], "r") || "", 10);
@@ -320,7 +322,7 @@ export function hyperlinkOfFormula(f) {
 }
 
 /** Map rId → target of a part's rels XML (external targets only matter here). */
-function parseRels(xml) {
+export function parseRels(xml) {
   const out = new Map();
   for (const m of String(xml || "").matchAll(/<Relationship\s[^>]*\/?>/g)) {
     const id = attrOf(m[0], "Id"), target = attrOf(m[0], "Target");
@@ -330,7 +332,7 @@ function parseRels(xml) {
 }
 
 /** The rels part that sits beside a part: xl/worksheets/sheet1.xml → xl/worksheets/_rels/sheet1.xml.rels. */
-function relsPartOf(part) {
+export function relsPartOf(part) {
   const i = part.lastIndexOf("/");
   return part.slice(0, i + 1) + "_rels/" + part.slice(i + 1) + ".rels";
 }
@@ -432,10 +434,21 @@ export async function readHearings(data, now = Date.now()) {
       // (dateNote): the row keeps a date the words name ("Continued to
       // 1/5/27"), else takes the one above it; only a plain date is the one
       // the rows below it take.
-      const note = dateNote(d.text);
-      if (note) { if (!d.at) d = lastDate.at ? lastDate : { at: 0, text: "No date" }; }
-      else if (!d.at && !d.text) d = lastDate;
-      else lastDate = d;
+      // A note PDF+ wrote beside the row's own date ("11/20/2026 · Check POS",
+      // setHearingNote) is that date and that note: the date is still the one
+      // the rows below take.
+      const lead = splitNoteLead(d.text);
+      let note;
+      if (lead) {
+        note = lead.note;
+        d = { at: textToDate(lead.date, now), text: "" };
+        lastDate = d;
+      } else {
+        note = dateNote(d.text);
+        if (note) { if (!d.at) d = lastDate.at ? lastDate : { at: 0, text: "No date" }; }
+        else if (!d.at && !d.text) d = lastDate;
+        else lastDate = d;
+      }
       const motionCell = cell(r, cols.motion);
       const sub = dateOf(cell(r, cols.submitted));
       // The case name's own link first, then any other cell's in the row.
@@ -473,6 +486,18 @@ export function dateNote(text) {
   const t = String(text || "").trim();
   if (!t) return "";
   return /[a-z]/i.test(t.replace(DATE_WORDS, "")) ? t : "";
+}
+
+/**
+ * A Date cell PDF+ gave a note beside its date: "11/20/2026 · Check POS" →
+ * { date: "11/20/2026", note: "Check POS" }; anything else null. Only the
+ * " · " PDF+ writes divides them, so a note the owner typed ("12/1 asked to
+ * continue") reads as it always has (dateNote).
+ */
+export const NOTE_SEP = " · ";
+export function splitNoteLead(text) {
+  const m = /^\s*(\d{1,2}\/\d{1,2}\/\d{2,4}) · ([\s\S]*\S)\s*$/.exec(String(text || ""));
+  return m && textToDate(m[1]) ? { date: m[1], note: m[2].trim() } : null;
 }
 
 // ---- marking a hearing in the sheet ---------------------------------------------
@@ -530,9 +555,7 @@ function setAttr(tag, name, value) {
 export async function markHearing(data, hg, mark) {
   if (data && typeof data.arrayBuffer === "function" && !(data instanceof Uint8Array)) data = new Uint8Array(await data.arrayBuffer());
   const { hearings } = await readHearings(data);
-  const same = (h) => h.sheet === hg.sheet && h.caseName === hg.caseName;
-  const target = hearings.find((h) => same(h) && h.row === hg.row)
-    || hearings.find((h) => same(h) && h.date === hg.date);
+  const target = findRowNow(hearings, hg);
   if (!target) throw new Error(`the row for ${hg.caseName} is no longer in the sheet`);
   const entries = zipEntries(data);
   const byName = new Map(entries.map((e) => [e.name, e]));
@@ -596,6 +619,113 @@ export async function markHearing(data, hg, mark) {
   const replace = { [target.part]: nextSheet };
   if (added.fills.length || added.xfs.length) replace["xl/styles.xml"] = styles;
   return replaceParts(data, replace);
+}
+
+// ---- a note on a hearing, in its Date cell -----------------------------------
+//
+// The owner (2026-11-19): "Change the * to a sticky note icon, and give them
+// all one. When it is transparent that means there is not currently a note,
+// but by clicking it, I can add a note. When there is a note, it is colored
+// in and I can view and edit the note by clicking on it." The owner keeps
+// notes in the Date column (dateNote), so that is where one is written: a row
+// whose Date cell is blank (a row under a date written once) takes the note
+// alone; a row whose Date cell holds the date keeps it in front
+// ("11/20/2026 · Check POS", splitNoteLead), so neither it nor the rows under
+// it lose their date. A note taken off gives the cell back its date as a date
+// (a number, where its style is a date's) or leaves it empty.
+
+/** M/D/YYYY of a local midnight. */
+const mdy = (at) => { const d = new Date(at); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
+
+/** Excel's serial number for a local midnight (1900 system, or 1904). */
+export function dateToSerial(at, date1904 = false) {
+  const d = new Date(at);
+  const utc = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((utc - (date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30))) / 86400000);
+}
+
+/** The <c> for a cell holding a number (a date's serial), keeping style `s`. */
+const numCell = (ref, s, n) => `<c r="${ref}"${s ? ` s="${s}"` : ""}><v>${n}</v></c>`;
+
+/**
+ * The sheet XML with cell (rowN, col) replaced by `cellXml` (built for its
+ * ref and its old style: cellXml(ref, s)); a cell the row lacks is put in
+ * column order. The row must be there.
+ */
+export function replaceCell(xml, rowN, col, build) {
+  const ref = colLetters(col) + rowN;
+  const rowRe = /<row\b([^>]*?)(\/>|>([\s\S]*?)<\/row>)/g;
+  let m, seq = 0;
+  while ((m = rowRe.exec(xml))) {
+    seq++;
+    const rn = parseInt(attrOf(m[1], "r") || "", 10);
+    if ((Number.isFinite(rn) ? rn : seq) === rowN) break;
+  }
+  if (!m) throw new Error("row " + rowN + " is not in the sheet");
+  const open = `<row${m[1].replace(/\s+$/, "")}>`;
+  let inner = m[3] || "";
+  let done = false;
+  inner = inner.replace(/<c\b([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g, (cell, attrs) => {
+    const r = attrOf(attrs, "r");
+    if (!r || colIndex(r.replace(/\d+$/, "")) !== col) return cell;
+    done = true;
+    return build(ref, attrOf(attrs, "s") || "");
+  });
+  if (!done) {
+    let at = inner.length;
+    for (const c of inner.matchAll(/<c\b([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g)) {
+      const r = attrOf(c[1], "r");
+      if (r && colIndex(r.replace(/\d+$/, "")) > col) { at = c.index; break; }
+    }
+    inner = inner.slice(0, at) + build(ref, "") + inner.slice(at);
+  }
+  return xml.slice(0, m.index) + open + inner + "</row>" + xml.slice(m.index + m[0].length);
+}
+
+/** The row of `hearings` that is `hg` now: at its row where its case name still stands there, else the same case name and date. */
+function findRowNow(hearings, hg) {
+  const same = (h) => h.sheet === hg.sheet && h.caseName === hg.caseName;
+  return hearings.find((h) => same(h) && h.row === hg.row) || hearings.find((h) => same(h) && h.date === hg.date) || null;
+}
+
+/**
+ * The workbook with hearing `hg`'s note set to `note` ("" takes it off), as
+ * new bytes; written in the row's Date cell as above. The row is found afresh
+ * as markHearing finds it; none, and it throws. A sheet without a Date column
+ * cannot hold one, and throws.
+ */
+export async function setHearingNote(data, hg, note) {
+  if (data && typeof data.arrayBuffer === "function" && !(data instanceof Uint8Array)) data = new Uint8Array(await data.arrayBuffer());
+  note = String(note || "").replace(/\s+/g, " ").trim();
+  const { hearings } = await readHearings(data);
+  const target = findRowNow(hearings, hg);
+  if (!target) throw new Error(`the row for ${hg.caseName} is no longer in the sheet`);
+  if (target.cols.date < 0) throw new Error("the sheet has no Date column to keep a note in");
+  const entries = zipEntries(data);
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const text = async (name) => { const e = byName.get(name); return e ? readEntry(data, e) : ""; };
+  const shared = parseSharedStrings(await text("xl/sharedStrings.xml"));
+  const styles = parseStyles(await text("xl/styles.xml"), parseTheme(await text("xl/theme/theme1.xml")));
+  const date1904 = /<workbookPr\b[^>]*date1904="(1|true)"/.test(await text("xl/workbook.xml"));
+  const sheetXml = await text(target.part);
+  const { cells } = parseSheetCells(sheetXml, shared, new Map());
+  const x = cells.get(`${target.row - 1},${target.cols.date}`);
+  // The date the cell holds, if it holds one: as a number, or written in front.
+  let leadAt = 0;
+  const num = x ? Number(x.v) : NaN;
+  if (x && x.t !== "s" && x.t !== "inlineStr" && x.t !== "str" && x.v !== "" && Number.isFinite(num) && num > 20000 && num < 80000) leadAt = serialToDate(num, date1904);
+  else if (x && x.v !== "") {
+    const lead = splitNoteLead(x.v);
+    if (lead) leadAt = textToDate(lead.date);
+    else if (!dateNote(x.v) && textToDate(x.v)) leadAt = textToDate(x.v);
+  }
+  const isDateStyle = (s) => !!(styles[Number(s || 0)] && styles[Number(s || 0)].date);
+  const next = replaceCell(sheetXml, target.row, target.cols.date, (ref, s) => {
+    if (note) return `<c r="${ref}"${s ? ` s="${s}"` : ""} t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(leadAt ? mdy(leadAt) + NOTE_SEP + note : note)}</t></is></c>`;
+    if (leadAt) return isDateStyle(s) ? numCell(ref, s, dateToSerial(leadAt, date1904)) : `<c r="${ref}"${s ? ` s="${s}"` : ""} t="inlineStr"><is><t>${mdy(leadAt)}</t></is></c>`;
+    return `<c r="${ref}"${s ? ` s="${s}"` : ""}/>`;
+  });
+  return replaceParts(data, { [target.part]: next });
 }
 
 /**
@@ -805,7 +935,9 @@ export function hearingForPlace(hearings, place, now) {
 export const BRIEFING_FILE = "E-Court Briefing Status.json";
 
 /**
- * The whole file: { entries, refresh } — refresh is how E-Court Suite's last
+ * The whole file: { entries, refresh, calendar } — calendar is the next ten
+ * court days' agendas as Copy All would copy them (calendar-sync.js reads it),
+ * or null; refresh is how E-Court Suite's last
  * background or asked-for check went ({ at, state: "running" | "done" |
  * "failed" | "skipped", reason: "signin" | "notab" | "agenda" | …, cases,
  * how: "hourly" | "now" }), or null.
@@ -814,7 +946,8 @@ export function parseBriefingFile(text) {
   let data = null;
   try { data = JSON.parse(String(text || "")); } catch { data = null; }
   const refresh = data && data.refresh && typeof data.refresh === "object" && typeof data.refresh.at === "number" ? data.refresh : null;
-  return { entries: parseBriefing(text), refresh };
+  const cal = data && data.calendar && typeof data.calendar === "object" && Array.isArray(data.calendar.days) ? data.calendar : null;
+  return { entries: parseBriefing(text), refresh, calendar: cal };
 }
 
 /** How the last check went, as Home's summary says it: { text, tone ("ok" | "warn" | "run"), title }, or null. */
@@ -832,7 +965,7 @@ export function refreshText(refresh, now) {
     tab: "the eCourt tab could not be used",
     closed: "the eCourt tab was closed",
   }[refresh.reason] || "it did not finish";
-  return { text: `Briefing not checked: ${why}`, tone: "warn", title: `E-Court Suite's check at ${when} did not run through: ${why}. Refresh briefing tries again.` };
+  return { text: `Briefing not checked: ${why}`, tone: "warn", title: `E-Court Suite's check at ${when} did not run through: ${why}${refresh.error ? ` (Chrome said: ${refresh.error})` : ""}. Refresh briefing tries again.` };
 }
 
 /** The entries of the file's text, or [] where it is not that file. */

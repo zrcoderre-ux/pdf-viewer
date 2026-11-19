@@ -186,11 +186,19 @@ async function deflateRaw(bytes) {
  * from the original central directory. A replaced part is deflated where
  * the platform can (Chrome, Node 18+), else stored. Returns the new bytes.
  */
-export async function replaceParts(data, replace) {
+export async function replaceParts(data, replace, { add = {} } = {}) {
   const b = data instanceof Uint8Array ? data : new Uint8Array(data);
   const entries = zipEntries(b);
   const want = new Map(Object.entries(replace || {}));
   for (const name of want.keys()) if (!entries.some((e) => e.name === name)) throw new Error("xlsx: no part " + name);
+  // New parts (`add`: a sheet's first rels, say), after the old ones; one the
+  // workbook already has is refused, as a replace of a missing one is.
+  const extra = Object.entries(add || {});
+  for (const [name] of extra) if (entries.some((e) => e.name === name)) throw new Error("xlsx: already has part " + name);
+  for (const [name, text] of extra) {
+    entries.push({ name, method: 0, time: 0, date: 0x21, start: 0, size: 0, crc: 0, usize: 0, isNew: true });
+    want.set(name, text);
+  }
   const locals = [], centrals = [];
   let off = 0;
   for (const e of entries) {
