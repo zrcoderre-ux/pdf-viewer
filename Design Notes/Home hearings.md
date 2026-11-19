@@ -493,3 +493,35 @@ Tests: `test-hearing-sheet.mjs` parts 13 (the sticky note, a note written and
 removed) and 14f (In Downloads); `test-calendar-sync.mjs` part 10 (notes).
 The sheet kept up to date from eCourt is its own note: Home calendar.md.
 
+## At a glance, and the buttons under the case selected (2026-11-19)
+
+The owner: "I think that it looks too busy and I think it goes too far to the
+right. We should free up a margin on the side. ... we need to distinguish
+between information that I want ready at a glance for all cases, and buttons
+that I want available for the case I am currently working on. For the latter I
+could click on the case first to select it, and only then would all the
+buttons appear." And: "we can probably change the downloads button to just the
+icon."
+
+- **The row** keeps only what is read down the list: the sticky note, number,
+  name, ✓, the Downloads icon (`.ci-dl-chip`, an amber disc; the stripe stays),
+  motion and folder, the briefing chips, PDF-Linker's status dot, and the
+  folder's place in PDF-Linker's line (`.ci-place-glance`, inside the status
+  column so the chips stay in one column).
+- **Selecting.** A click on the row selects it (`selectHearing`,
+  `selectedHearing` by `noteKey`, kept across redraws); its bar
+  (`.hearing-tools`, built by `row.__tools`) opens inside the row, under the
+  name, with each button labelled (`labelTools` adds the aria-label as words):
+  Open case folder / Find its folder…, eCourt, Done, Off/On calendar, Claude
+  run, Word, Log to share, the line controls, Take over. A second click or
+  Escape closes it; a double click (`e.detail >= 2`) opens the folder. Only
+  the selection changes the DOM: no redraw on a click. The old fixed button
+  slots (`.ci-actions`, `.s-*`) stay for the Case folders list only.
+- **The margin.** The work area keeps 72px on the right and is at most 1560px
+  wide (`--work-max`), 2040px where the side column of case folders and Recent
+  stands beside Hearings.
+
+Tests: `test-hearing-sheet.mjs` parts 8 (no buttons until selected, the
+labels, Escape), 9b (one column for the status, the right margin) and every
+part that presses a row's button (`pick` first).
+

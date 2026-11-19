@@ -421,7 +421,7 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .hearing-note .note-hint { color: var(--c-muted, #8a8f98); font-size: 11.5px; }
 /* A case folder still in Downloads: a stripe down the row and a chip by the name. */
 .hearing-row.in-downloads { box-shadow: inset 5px 0 0 #f59e0b; background: rgba(245, 158, 11, 0.08); }
-.ci-dl-chip { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; padding: 2px 9px 2px 7px; border-radius: 999px; background: #f59e0b; color: #2a1800; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
+.ci-dl-chip { flex: none; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 8px; border-radius: 50%; background: #f59e0b; color: #2a1800; }
 .hearing-row.draggable .ri-icon { cursor: grab; }
 /* Calendar changes, at the top of Hearings. */
 .calendar-changes { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--c-border); border-left: 4px solid var(--c-accent); border-radius: 8px; background: var(--c-accent-soft); font-size: 12.5px; }
@@ -554,13 +554,14 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .tree-hint { padding: 0 6px; margin-top: 10px; }
 .home-app .tree-empty { padding: 6px; }
 
-/* The work area. */
-.home-app > .home-main { flex: 1; min-width: 0; padding: 0 40px 48px; }
-.home-app .home-inner { max-width: 1880px; margin: 0; }
+/* The work area, with a margin on the right (the owner, 2026-11-19: "it goes
+   too far to the right. We should free up a margin on the side"). */
+.home-app > .home-main { flex: 1; min-width: 0; padding: 0 72px 48px 40px; }
+.home-app .home-inner { max-width: var(--work-max, 1560px); margin: 0; }
 
 /* The bar: logo, title, what Home opens, settings. */
 .home-app .home-top {
-  max-width: 1880px;
+  max-width: var(--work-max, 1560px);
   margin: 0;
   display: flex;
   align-items: center;
@@ -604,6 +605,7 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 /* Wide: Hearings in the main column; case folders, Recent and the help in one beside it. */
 /* …only where that column has something to hold. */
 @media (min-width: 2200px) {
+  .home-app .home-main:has(#case-folders:not([hidden]), #recent:not([hidden])) { --work-max: 2040px; }
   .home-app .home-inner:has(> #case-folders:not([hidden]), > #recent:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) 440px; column-gap: 40px; align-items: start; }
   .home-app .home-inner > * { grid-column: 2; }
   .home-app .home-inner > #hearings { grid-column: 1; grid-row: 1 / span 20; }
@@ -720,3 +722,37 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 @media (max-width: 960px) {
   .home-foot .home-more[open] .home-more-body { position: static; width: auto; max-height: none; box-shadow: none; }
 }
+
+/* The Hearings list: what every case says at a glance on its row, and the
+   buttons only under the case selected (the owner, 2026-11-19: "distinguish
+   between information that I want ready at a glance for all cases, and buttons
+   that I want available for the case I am currently working on ... I could
+   click on the case first to select it, and only then would all the buttons
+   appear"). */
+.home-app .hearing-row { flex-wrap: wrap; }
+.home-app .hearing-row > .hearing-item { cursor: pointer; }
+.home-app .hearing-row.selected { background: var(--c-accent-soft); box-shadow: inset 0 0 0 1.5px var(--c-accent); border-radius: 6px; }
+.home-app .hearing-row.selected.in-downloads { box-shadow: inset 5px 0 0 #f59e0b, inset 0 0 0 1.5px var(--c-accent); }
+.home-app .hearing-row.selected:hover { background: var(--c-accent-soft); }
+.home-app .ci-place-glance { flex: none; margin-right: 10px; padding: 1px 7px; border-radius: 999px; font-size: var(--fs-label); }
+.hearing-tools { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 16px 14px 76px; }
+.home-app .hearing-tools .ht-open,
+.home-app .hearing-tools .ci-ico,
+.home-app .hearing-tools button.ci-ico {
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; min-width: 0; padding: 0 13px;
+  border: 1px solid var(--c-border-strong, var(--c-border)); border-radius: 8px; background: var(--c-card); color: var(--c-text);
+  font: inherit; font-size: var(--fs-meta); cursor: pointer; opacity: 1; white-space: nowrap;
+}
+.home-app .hearing-tools .ht-open { background: var(--c-accent-strong, var(--c-accent)); border-color: var(--c-accent-strong, var(--c-accent)); color: #fff; font-weight: 600; }
+.home-app .hearing-tools .ht-open:hover { filter: brightness(1.08); }
+.home-app .hearing-tools .ci-ico:hover, .home-app .hearing-tools .ci-ico:focus-visible { background: var(--c-card-hover); border-color: var(--c-accent); color: var(--c-text); }
+.home-app .hearing-tools .ci-ico-n { display: none; }
+.home-app .hearing-tools .ci-done.on { background: rgba(34, 197, 94, 0.14); border-color: rgba(22, 163, 74, 0.6); color: #16a34a; }
+.home-app .hearing-tools .ci-cal:hover { color: #dc2626; border-color: rgba(220, 38, 38, 0.6); }
+.home-app .hearing-tools .ci-claude:hover { color: #d97757; }
+.home-app .hearing-tools .ci-line { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.home-app .hearing-tools .ci-line-btn { height: 32px; min-width: 32px; border-radius: 8px; border: 1px solid var(--c-border); background: var(--c-card); color: var(--c-text-2); cursor: pointer; }
+.home-app .hearing-tools .ci-takeover { margin: 0; height: 32px; }
+.home-app .hearing-tools .tl-label { line-height: 1; }
+@media (max-width: 960px) { .hearing-tools { padding-left: 16px; } }
+

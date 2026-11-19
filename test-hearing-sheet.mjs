@@ -402,12 +402,21 @@ async function browserPart() {
     const rows = () => shell.$$eval("#hearing-list .hearing-item", (bs) => bs.map((b) => ({
       name: b.querySelector(".ri-name").textContent, where: b.querySelector(".ci-where").textContent, status: b.querySelector(".ci-status").textContent,
     })));
+    // A case's buttons open under it once it is selected (a click on the row).
+    const pick = async (row) => { if (!(await row.evaluate((r) => r.classList.contains("selected")))) await row.locator(".ci-where").click(); await row.locator(".hearing-tools").waitFor({ timeout: 5000 }); };
     let got = await rows();
     check("the hearings from today on, by date, the one off calendar left out", got.map((r) => r.name.slice(0, 11)), ["25STCV12345", "24STCV00777", "26STCV09999", "23STCV04444", "22STCV05555"]);
     check("a case downloaded says what PDF-Linker has done in it; the rest where the case stands", got.map((r) => r.status.replace(/^Finished .*/, "Finished")),
       ["Finished", "Not downloaded", "Not run yet", "Not run yet", "Zip in Downloads"]);
     check("the one done carries a ✓, and only it", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => !!r.querySelector(".ci-done-mark"))), [false, false, false, true, false]);
-    check("…its Done button pressed", await shell.$$eval("#hearing-list .ci-done", (bs) => bs.map((b) => b.getAttribute("aria-pressed"))), ["false", "false", "false", "true", "false"]);
+    check("no row shows buttons until it is selected", await shell.$$eval("#hearing-list .ci-done, #hearing-list .ci-ecourt, #hearing-list .ci-cal", (bs) => bs.length), 0);
+    const roeRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("23STCV04444"))');
+    await pick(roeRow);
+    check("…selected, the done one's Done button is pressed", await roeRow.locator(".ci-done").getAttribute("aria-pressed"), "true");
+    check("…the buttons say what they do", await roeRow.locator(".hearing-tools").evaluate((t) => [...t.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean).slice(0, 4)), ["Open case folder", "Not done", "Off calendar"]);
+    check("…only that row has them", await shell.$$eval("#hearing-list .hearing-tools", (t) => t.length), 1);
+    await shell.keyboard.press("Escape");
+    check("…and Escape closes them", await shell.$$eval("#hearing-list .hearing-tools", (t) => t.length), 0);
     check("…an Order Template Input sheet three days old is no sign of Doe v. Globex", got[1].status, "Not downloaded");
     check("…a folder in Downloads, by its name", got[0].where, "Demurrer · 25STCV12345 ACME");
     check("…a folder opened elsewhere, by its Register of Actions", got[2].where, "Motion to Compel · Initech compel");
@@ -422,11 +431,19 @@ async function browserPart() {
     check("…and opens nothing else", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 0);
     await acmePill.click();
     check("a second press closes it", await acmePill.evaluate((p) => p.classList.contains("expanded")), false);
-    const buttons = () => shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => ({
-      ecourt: !!r.querySelector(".ci-ecourt:not(.ci-ecourt-gap)"), line: !!r.querySelector(".ci-line"),
-    })));
-    check("the eCourt buttons stand where the sheet links the case; Prioritize where the case is downloaded", await buttons(),
-      [{ ecourt: true, line: true }, { ecourt: true, line: false }, { ecourt: true, line: true }, { ecourt: false, line: true }, { ecourt: false, line: false }]);
+    const buttons = async () => {
+      const out = [];
+      const n = await shell.locator("#hearing-list .hearing-row").count();
+      for (let i = 0; i < n; i++) {
+        const row = shell.locator("#hearing-list .hearing-row").nth(i);
+        await pick(row);
+        out.push(await row.evaluate((r) => ({ ecourt: !!r.querySelector(".hearing-tools .ci-ecourt"), open: r.querySelector(".hearing-tools .ht-open").textContent })));
+      }
+      await shell.keyboard.press("Escape");
+      return out;
+    };
+    check("selected: eCourt where the sheet links the case; Open where its folder is found, else Find its folder", await buttons(),
+      [{ ecourt: true, open: "Open case folder" }, { ecourt: true, open: "Find its folder…" }, { ecourt: true, open: "Open case folder" }, { ecourt: false, open: "Open case folder" }, { ecourt: false, open: "Find its folder…" }]);
 
     console.log("9. Case folders: only the folders no hearing on the list claims, above the hearings");
     const caseNames = () => shell.$$eval("#case-list .case-item .ri-name", (x) => x.map((e) => e.textContent).sort());
@@ -477,19 +494,21 @@ async function browserPart() {
         // The name of a row done stands after its ✓.
         names: new Set([...document.querySelectorAll("#hearing-list .ci-case")].filter((e) => !e.previousElementSibling.classList.contains("ci-done-mark")).map((e) => Math.round(e.getBoundingClientRect().left))).size,
         nums: new Set(xs("#hearing-list .ci-num")).size,
-        done: new Set(xs("#hearing-list .s-done")).size,
-        ecourt: new Set(xs("#hearing-list .s-ecourt")).size,
+        rightMargin: Math.round(window.innerWidth - hear.right),
+        chips: new Set(xs("#hearing-list .ci-status-col")).size,
         sidebar: [Math.round(tree.left), Math.round(tree.top), Math.round(tree.height) >= 1300],
         beside: cases.left > hear.right && Math.abs(cases.top - hear.top) < 40,
       };
     });
     check("the case names read at 15px or more", lay.name >= 15, true);
-    check("case numbers, names, Done and eCourt each in one column", [lay.nums, lay.names, lay.done, lay.ecourt], [1, 1, 1, 1]);
+    check("case numbers, names and the status each in one column", [lay.nums, lay.names, lay.chips], [1, 1, 1]);
+    check("a margin left on the right", lay.rightMargin >= 64, true);
     check("the Folders list runs the window's height from its left edge", [lay.sidebar[0], lay.sidebar[2]], [0, true]);
     check("Case folders beside Hearings, where the screen has room", lay.beside, true);
     await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
 
     console.log("10. eCourt, and a case folder's buttons on its hearing's row");
+    await pick(shell.locator("#hearing-list .hearing-row:nth-of-type(3)"));
     await shell.click("#hearing-list .hearing-row:nth-of-type(3) .ci-ecourt");
     check("eCourt opens the sheet's link", await shell.evaluate(() => window.__opened), ["https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
     // The owner: a click on a case not downloaded "should let me try to locate the file".
@@ -502,14 +521,15 @@ async function browserPart() {
       window.showDirectoryPicker = async () => window.__picks.shift();
     });
     const doeLoc = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe v. Globex"))');
-    await doeLoc.locator(".hearing-item").click();
+    await pick(doeLoc);
+    await doeLoc.locator(".ht-open").click();
     await shell.waitForFunction(() => /is not 24STCV00777 Doe v\. Globex's folder/.test(document.getElementById("shell-toast").textContent), null, { timeout: 10000 });
     check("a click on it asks for its folder; one carrying another case's number is refused", await shell.textContent("#shell-toast"), "25STCV12345 ACME is not 24STCV00777 Doe v. Globex's folder: it carries 25STCV12345, not 24STCV00777.");
     check("…and eCourt is not opened by the click", await shell.evaluate(() => window.__opened.length), 1);
-    await doeLoc.locator(".hearing-item").click();
+    await doeLoc.locator(".hearing-item").dblclick();
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.textContent.includes("Globex papers")), null, { timeout: 10000 });
     check("the folder picked is that hearing's, whatever its name", [await doeLoc.locator(".ci-where").textContent(), await doeLoc.locator(".ci-status").textContent()], ["MSJ · Globex papers", "Not run yet"]);
-    check("…its buttons on the row", await doeLoc.locator(".ci-done").count(), 1);
+    check("…its buttons under it, still selected", await doeLoc.locator(".hearing-tools .ci-done").count(), 1);
     // Prioritize is offered on a run going: one starts in ACME.
     const etaIn = (on) => shell.evaluate(async (on) => {
       const acme = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("25STCV12345 ACME");
@@ -517,6 +537,7 @@ async function browserPart() {
       else await acme.removeEntry("ETA ~6.04PM (1 of 2).txt");
       window.dispatchEvent(new Event("focus"));
     }, on);
+    await pick(shell.locator("#hearing-list .hearing-row:nth-of-type(2)"));
     check("no Prioritize on a case whose run is not going", await shell.$$eval("#hearing-list .hearing-row:nth-of-type(2) .ci-line-add", (b) => b.length), 0);
     await etaIn(true);
     await shell.waitForSelector("#hearing-list .hearing-row:nth-of-type(2) .ci-line-add", { timeout: 10000 });
@@ -588,6 +609,7 @@ async function browserPart() {
       const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
       return (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName.startsWith("24STCV00777"));
     };
+    await pick(doe);
     check("the row offers Off calendar", await doe.locator(".ci-cal").getAttribute("aria-label"), "Off calendar");
     await doe.locator(".ci-cal").click();
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.querySelector(".ci-cal").getAttribute("aria-label") === "On calendar"), null, { timeout: 10000 });
@@ -613,6 +635,7 @@ async function browserPart() {
       const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
       return (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName.startsWith("22STCV05555"));
     };
+    await pick(vanceRow);
     check("the row offers Done", await vanceRow.locator(".ci-done").getAttribute("aria-label"), "Done");
     await vanceRow.locator(".ci-done").click();
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("22STCV05555") && r.querySelector(".ci-done-mark")), null, { timeout: 10000 });
@@ -671,15 +694,20 @@ async function browserPart() {
     check("Refresh briefing opens the eCourt page E-Court Suite answers", (await shell.evaluate(() => window.__opened)).slice(before), ["https://civil.lacourt.org/#lac-refresh-briefing"]);
 
     console.log("14e. a Claude workflow run for the case, from PDF+");
+    const acmeC = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
+    await pick(acmeC);
     check("in a browser there is no Claude button: no path to give", await shell.$$eval("#hearing-list .ci-claude", (b) => b.length), 0);
     // As PDF+'s bridge answers where a folder is.
     await shell.evaluate(() => {
       window.pdfplusNative = { folderPath: async (req) => { window.__asked = req; return "C:\\Users\\Clerk\\Downloads\\" + [...req.chain].join("\\"); } };
       window.dispatchEvent(new Event("focus"));
     });
-    const acmeC = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-claude").length > 0, null, { timeout: 15000 });
-    check("in PDF+, a Claude button on each hearing that carries its folder", [await acmeC.locator(".ci-claude").getAttribute("aria-label"), await shell.$$eval('#hearing-list .hearing-row', (rs) => rs.filter((r) => /22STCV05555/.test(r.textContent)).map((r) => !!r.querySelector(".ci-claude")))], ["Claude run", [false]]);
+    const claudeOnAcme = await acmeC.locator(".ci-claude").getAttribute("aria-label");
+    await pick(shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("22STCV05555"))'));
+    const claudeOnVance = await shell.$$eval('#hearing-list .hearing-row', (rs) => rs.filter((r) => /22STCV05555/.test(r.textContent)).map((r) => !!r.querySelector(".ci-claude")));
+    check("in PDF+, a Claude button on each hearing that carries its folder", [claudeOnAcme, claudeOnVance], ["Claude run", [false]]);
+    await pick(acmeC);
     const opened0 = await shell.evaluate(() => window.__opened.length);
     await acmeC.locator(".ci-claude").click();
     await shell.waitForFunction((n) => window.__opened.length > n, opened0, { timeout: 10000 });
@@ -773,6 +801,7 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-item")].some((b) => b.textContent.includes("(in November)")), null, { timeout: 15000 });
     const moved = await acmeRow.locator(".ci-where").textContent();
     check("the hearing still carries its folder, at its new place", moved, "Demurrer · 25STCV12345 ACME (in November)");
+    await pick(acmeRow);
     check("…with its status and its buttons", [/^Finished /.test(await acmeRow.locator(".ci-status").textContent()), await acmeRow.locator(".ci-line").count()], [true, 1]);
     check("…and the case folder shows in the list, closed", await shell.$$eval("#tree-list .tree-node.leaf .tree-name", (x) => x.map((e) => e.textContent)), ["25STCV12345 ACME"]);
     await shell.click("#move-bar .mb-cancel");

@@ -2111,6 +2111,41 @@ const notesOpen = new Set();
 let noteEditing = ""; // the note being written: the list is not redrawn under it
 const noteKey = (hg) => `${hg.sheet}|${hg.row}|${hg.caseName}`;
 
+// The case selected on the Hearings list (its buttons open under it), by
+// noteKey; kept across redraws, cleared by Escape or a second click.
+let selectedHearing = "";
+function selectHearing(row, key, on) {
+  const list = document.getElementById("hearing-list");
+  for (const r of list ? list.querySelectorAll(".hearing-row.selected") : []) {
+    if (r === row && on) continue;
+    r.classList.remove("selected");
+    r.querySelector(".hearing-tools")?.remove();
+    r.querySelector(".hearing-item")?.setAttribute("aria-expanded", "false");
+  }
+  selectedHearing = on ? key : "";
+  if (on && row && !row.classList.contains("selected")) {
+    row.classList.add("selected");
+    if (row.__tools) row.appendChild(row.__tools());
+    row.querySelector(".hearing-item")?.setAttribute("aria-expanded", "true");
+  }
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !selectedHearing) return;
+  if (e.target && /^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName)) return;
+  if (document.querySelector(".hearing-row.selected")) selectHearing(null, "", false);
+});
+/** A row button as the selected case's bar shows it: its icon, then its name in words. */
+function labelTools(el) {
+  for (const b of el.matches(".ci-ico") ? [el] : el.querySelectorAll(".ci-ico")) {
+    if (b.querySelector(".tl-label")) continue;
+    const t = document.createElement("span");
+    t.className = "tl-label";
+    t.textContent = b.getAttribute("aria-label") || b.title || "";
+    b.appendChild(t);
+  }
+  return el;
+}
+
 /** The case numbers the files in a listing carry ("Register of Actions 25STCV12345.pdf"). */
 function listingNumbers(listing) {
   const out = new Set();
@@ -2462,7 +2497,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       row.classList.add("in-downloads");
       const chip = document.createElement("span");
       chip.className = "ci-dl-chip";
-      chip.innerHTML = `${icon("download", { size: 12, stroke: 2.25 })}<span>Downloads</span>`;
+      chip.innerHTML = icon("download", { size: 13, stroke: 2.4 });
+      chip.setAttribute("aria-label", "In Downloads");
       chip.title = "This case folder is still in Downloads. Drag the row onto a folder on the left to file it there.";
       b.querySelector(".ci-name-line").appendChild(chip);
     }
@@ -2486,39 +2522,64 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (hg.waiting) pill.classList.add("waiting");
     if (st && said === st && !r.locked) compactStatus(pill, "f:" + r.name);
     const placeSaid = hearingLib.placeText(place);
-    b.title = (folder ? `Open ${place.name}, the whole case folder, in one reader.` : "Find this case's folder (moved somewhere Home does not look?): pick it, and Home keeps it as this hearing's. eCourt is the button on the right.")
+    b.title = (folder ? `Click for this case's buttons; double-click to open ${place.name}, the whole case folder.` : "Click for this case's buttons, Find its folder among them; double-click to look for it at once.")
       + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`
       + (hg.waiting ? `\nMarked ${hg.mark === "off" ? "off" : "on"} calendar here; not yet written into ${sheet.name} (open in Excel?).` : "");
-    b.addEventListener("click", async () => {
+    const openIt = async () => {
       if (folder) {
         if (!(await permitted(folder, "readwrite", true))) return;
         try { await openCaseFolder(folder, { inWindow: true }); }
         catch { shellToast(`“${place.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
       } else locateCase(hg);
+    };
+    // A click selects the case and opens its buttons under it; a second click
+    // closes them; a double click opens the case folder (the owner: "I could
+    // click on the case first to select it, and only then would all the
+    // buttons appear").
+    const selKey = noteKey(hg);
+    b.setAttribute("aria-expanded", selectedHearing === selKey ? "true" : "false");
+    b.addEventListener("click", (e) => {
+      if (e.detail >= 2) { selectHearing(row, selKey, true); openIt(); return; }
+      selectHearing(row, selKey, selectedHearing !== selKey);
     });
     row.appendChild(b);
     if (r) caseDraggable(row, r);
     // The buttons in fixed slots, each in the same place on every row, an
     // empty slot keeping its room: the folder's own (on the first hearing of
     // its case only), then Done, Off calendar and eCourt.
-    const acts = document.createElement("span");
-    acts.className = "ci-actions";
-    const slot = (name, ...els) => {
-      const sl = document.createElement("span");
-      sl.className = "ci-slot s-" + name;
-      for (const el of els) if (el) sl.appendChild(el);
-      acts.appendChild(sl);
+    // At a glance: where the folder stands in PDF-Linker's line.
+    if (controls && r && r.rank) {
+      const tag = document.createElement("span");
+      tag.className = "ci-place ci-place-glance";
+      tag.textContent = caseLib.ordinal(r.rank);
+      tag.title = caseLib.lineTitle(r.rank, r.name);
+      statusCol.prepend(tag);
+    }
+    // The buttons, built when the case is selected: under the row, labelled.
+    row.__selKey = selKey;
+    row.__tools = () => {
+      const bar = document.createElement("div");
+      bar.className = "hearing-tools";
+      const add = (el, label = true) => { if (!el) return; if (label) labelTools(el); bar.appendChild(el); };
+      const open = document.createElement("button");
+      open.className = "ht-open";
+      open.innerHTML = `${icon(folder ? "folder" : "search", { size: 16 })}<span>${folder ? "Open case folder" : "Find its folder…"}</span>`;
+      open.title = folder ? `Open ${place.name}, the whole case folder, in a window of its own (or double-click the case)` : "Pick this case's folder (moved somewhere Home does not look?); Home keeps it as this hearing's";
+      open.addEventListener("click", (e) => { e.stopPropagation(); openIt(); });
+      bar.appendChild(open);
+      add(hearingLib.isWebLink(hg.url) ? ecourtButton(hg) : null);
+      const editable = sheet.state === "ok" || sheet.state === "error";
+      if (editable) { add(doneButton(hg)); add(calendarButton(hg)); }
+      add(r && !r.locked && canAskClaude() ? claudeButton(hg, r) : null);
+      const own = controls && r && !r.locked;
+      if (own && canOpenWord() && caseLib.wordDocs(r.listing).length) add(wordButton(r));
+      if (own && caseLib.hasShareLog(r.listing)) add(shareLogButton(r));
+      if (own && r.listing) { const lc = lineControls(r); if (lc.childNodes.length) { if (lc.querySelector(".ci-line-add")) labelTools(lc); bar.appendChild(lc); } }
+      if (own && r.status && r.status.state === "stalled") add(takeOverButton(r), false);
+      bar.addEventListener("click", (e) => e.stopPropagation());
+      return bar;
     };
-    const own = controls && r && !r.locked;
-    slot("files", own && canOpenWord() && caseLib.wordDocs(r.listing).length ? wordButton(r) : null, own && caseLib.hasShareLog(r.listing) ? shareLogButton(r) : null);
-    slot("line", own && r.listing ? lineControls(r) : null);
-    if (own && r.status && r.status.state === "stalled") slot("take", takeOverButton(r));
-    const editable = sheet.state === "ok" || sheet.state === "error";
-    slot("done", editable ? doneButton(hg) : null);
-    slot("cal", editable ? calendarButton(hg) : null);
-    slot("claude", r && !r.locked && canAskClaude() ? claudeButton(hg, r) : null);
-    slot("ecourt", hearingLib.isWebLink(hg.url) ? ecourtButton(hg) : null);
-    row.appendChild(acts);
+    if (selectedHearing === selKey) { row.classList.add("selected"); row.appendChild(row.__tools()); }
     listEl.appendChild(row);
     // The note's panel is in the list only while it is open.
     if (noteEl && !noteEl.hidden) listEl.appendChild(noteEl);

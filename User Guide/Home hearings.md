@@ -89,11 +89,20 @@ A folder is recognised by the case number in its name, or by the Register of
 Actions the E-Court Export saves into it. Name case folders with their case
 number for the surest match.
 
-## The row's buttons
+## A case's buttons
 
-The buttons on a row are icons; hover one for its name. From left to right:
-Word (open the folder's Word documents), Log to share, Prioritize (PDF-Linker's
-line), Done, Off calendar or On calendar, and eCourt.
+Each row shows only what you want to see for every case at a glance: the sticky
+note, case number and name, the ✓ when done, the Downloads icon, the motion and
+folder, the briefing chips, PDF-Linker's status and the case's place in
+PDF-Linker's line.
+
+**Click a case to select it.** Its buttons open in a bar under it, with their
+names: **Open case folder** (or **Find its folder…** when Home hasn't found
+it), **eCourt**, **Done**, **Off calendar** or **On calendar**, **Claude run**,
+**Word**, **Log to share**, and **Prioritize** or ▲ ▼ ✕ for PDF-Linker's line.
+Click the case again, or press Escape, to close the bar. **Double-click** a
+case to open its folder at once. Only one case is selected at a time, and it
+stays selected while Home refreshes.
 
 **Prioritize** appears only while PDF-Linker is running on the case. Once you
 use it, the case keeps its place in line for 24 hours, through any re-run, so
