@@ -765,6 +765,35 @@ async function browserPart() {
     check("Undo of an off calendar takes the red off", (await sheetRows()).find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark, "");
     await putCalendar(null);
 
+    console.log("14g. Claude workflow runs, from the Claude extension's file");
+    const putRuns = (data) => shell.evaluate(async (data) => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      if (data == null) { try { await dl.removeEntry("Claude Run Status.json"); } catch { /* none */ } }
+      else { const w = await (await dl.getFileHandle("Claude Run Status.json", { create: true })).createWritable(); await w.write(JSON.stringify(data)); await w.close(); }
+      window.dispatchEvent(new Event("focus"));
+    }, data);
+    check("no file: no Claude runs box", await shell.evaluate(() => document.getElementById("claude-runs").hidden), true);
+    await putRuns({ version: 1, written: Date.now(), runs: [
+      { id: "r1", name: "25STCV12345 ACME — 11/20/26", template: "Tentative ruling", caseNumber: "25STCV12345", status: "running", phase: "awaiting-reply", progress: "Step 2 of 3 · Chat B — waiting for Claude", step: 2, total: 3, at: Date.now() - 60000, url: "https://claude.ai/chat/aaa" },
+      { id: "r2", name: "Somebody Else v. Nobody", template: "Bench memo", caseNumber: "", status: "waiting", held: "usage limit", progress: "Step 1 of 4", step: 1, total: 4, at: Date.now() - 600000 },
+    ] });
+    await shell.waitForFunction(() => !document.getElementById("claude-runs").hidden, null, { timeout: 15000 });
+    check("the box lists the runs: state, matter, what it is doing", await shell.$$eval("#claude-runs .cr-item", (xs) => xs.map((x) => [x.querySelector(".cr-state").textContent, x.querySelector(".cr-name").textContent, x.querySelector(".cr-text").textContent])),
+      [["Step 2/3", "25STCV12345 ACME — 11/20/26", "Tentative ruling · Step 2 of 3 · Chat B — waiting for Claude"], ["Held", "Somebody Else v. Nobody", "Bench memo · Held: usage limit"]]);
+    check("…how many are going, in its heading", await shell.textContent("#claude-runs .cr-title"), "Claude runs · 2 going");
+    check("the case's row carries its run", await acmeRowB.locator(".ci-run-chip").textContent(), "Step 2/3");
+    check("…and no other row does", await shell.$$eval("#hearing-list .ci-run-chip", (x) => x.length), 1);
+    const opened1 = await shell.evaluate(() => window.__opened.length);
+    await shell.locator("#claude-runs .cr-item", { hasText: "ACME" }).locator(".cr-open").click();
+    check("Open chat opens the chat it last worked in", (await shell.evaluate(() => window.__opened)).slice(opened1), ["https://claude.ai/chat/aaa"]);
+    await shell.locator("#claude-runs .cr-name", { hasText: "ACME" }).click();
+    check("the run's name selects its case on the list", await acmeRowB.evaluate((r) => r.classList.contains("selected")), true);
+    check("…a run whose case is not on the list cannot", await shell.locator("#claude-runs .cr-name", { hasText: "Somebody" }).isDisabled(), true);
+    await shell.keyboard.press("Escape");
+    await putRuns(null);
+    await shell.waitForFunction(() => document.getElementById("claude-runs").hidden, null, { timeout: 15000 });
+    check("the file gone: the box goes", true, true);
+
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);
     await shell.evaluate(async () => {

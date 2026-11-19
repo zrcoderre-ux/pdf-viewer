@@ -1362,6 +1362,8 @@ async function renderCaseFoldersNow() {
   const sheet = await loadSheet();
   const hv = await hearingItems(rows, sheet, dl, dlState, now);
   hv.briefing = dlState === "ok" && sheet.hearings.length ? await readBriefing(dl) : { entries: [], at: 0, none: true };
+  // The Claude extension's workflow runs (viewer/claude-runs.js).
+  hv.runs = dlState === "ok" ? await readClaudeRuns(dl) : null;
   // The calendar E-Court Suite read, written into the sheet; a change made
   // reads the sheet again (the next pass).
   try { if (await syncCalendar(sheet, hv.briefing, now)) caseAgain = true; } catch (e) { console.warn("calendar", e); }
@@ -2015,6 +2017,97 @@ async function undoCalendar(e) {
   shellToast(e.kind === "added" ? `${e.caseText} taken back out of ${h.name}; it will not be added again.` : `${e.caseText} is on calendar again in ${h.name}.`, 6000);
   renderCaseFolders();
 }
+// ---- Home: Claude runs ---------------------------------------------------------
+//
+// The owner (2026-11-19): "I'd like to have the dashboard display include the
+// current status of any claude run going." The Claude extension keeps
+// CLAUDE_RUNS_FILE in Downloads through the E-Court Suite's native host
+// (viewer/claude-runs.js); Home reads it each look, again only where it moved,
+// lists the runs at the top of Hearings, and puts each case's run on its row.
+let runsLib = null;
+let runsSeen = null; // { key, written, runs }
+async function readClaudeRuns(dl) {
+  if (!runsLib) runsLib = await import("./viewer/claude-runs.js");
+  let fh;
+  try { fh = await dl.getFileHandle(runsLib.CLAUDE_RUNS_FILE); } catch { return null; }
+  try {
+    const f = await fh.getFile();
+    const key = `${f.size}|${f.lastModified}`;
+    if (!runsSeen || runsSeen.key !== key) runsSeen = { key, ...runsLib.parseClaudeRuns(await f.text()) };
+    return runsSeen;
+  } catch { return runsSeen; }
+}
+/** A hearing row's run, at a glance: a chip with its state; a click opens its chat. */
+function runChip(hg, placeName, runs, now) {
+  if (!runs || !runsLib) return null;
+  const mine = runsLib.runsForHearing(hg, runs.runs, placeName);
+  if (!mine.length) return null;
+  const r = mine[0];
+  const st = runsLib.runState(r, runs.written, now);
+  const chip = document.createElement("span");
+  chip.className = "ci-run-chip tone-" + st.tone;
+  chip.innerHTML = `${icon("message", { size: 12, stroke: 2.2 })}<span></span>`;
+  chip.lastChild.textContent = st.short;
+  chip.title = `Claude run: ${r.name}${r.template ? " (" + r.template + ")" : ""}\n${st.title}${r.url ? "\nClick to open its chat." : ""}${mine.length > 1 ? `\n${mine.length - 1} more run${mine.length > 2 ? "s" : ""} for this case under Claude runs.` : ""}`;
+  chip.setAttribute("role", "button");
+  chip.setAttribute("aria-label", `Claude run ${st.short}`);
+  chip.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); if (r.url) window.open(r.url, "_blank", "noopener"); });
+  return chip;
+}
+/** The runs at the top of Hearings: going first, then those lately ended. */
+function renderClaudeRuns(box, runs, items, now) {
+  box.textContent = "";
+  const list = runs ? runs.runs : [];
+  box.hidden = !list.length;
+  if (box.hidden) return;
+  const head = document.createElement("div");
+  head.className = "cr-head";
+  const going = list.filter(runsLib.isGoing).length;
+  head.innerHTML = `<span class="cr-title">${icon("message", { size: 15 })}<span></span></span><span class="cr-when"></span>`;
+  head.querySelector(".cr-title span").textContent = going ? `Claude runs · ${going} going` : "Claude runs";
+  head.querySelector(".cr-when").textContent = runs.written ? `from the Claude extension, ${caseLib.whenText(runs.written, now)}` : "";
+  box.appendChild(head);
+  for (const r of list.slice(0, 10)) {
+    const st = runsLib.runState(r, runs.written, now);
+    const row = document.createElement("div");
+    row.className = "cr-item tone-" + st.tone + (runsLib.isGoing(r) ? "" : " ended");
+    const chip = document.createElement("span");
+    chip.className = "cr-state";
+    chip.textContent = st.short;
+    const name = document.createElement("button");
+    name.className = "cr-name link-btn";
+    name.textContent = r.name;
+    const it = items.find((x) => runsLib.runsForHearing(x.hg, [r], x.place ? x.place.name : "").length);
+    name.title = it ? "Show this case on the list" : "Not on the hearings list";
+    name.disabled = !it;
+    name.addEventListener("click", () => {
+      if (!it) return;
+      const key = noteKey(it.hg);
+      const rowEl = [...document.querySelectorAll("#hearing-list .hearing-row")].find((x) => x.__selKey === key);
+      if (!rowEl) return;
+      selectHearing(rowEl, key, true);
+      rowEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    const what = document.createElement("span");
+    what.className = "cr-text";
+    what.textContent = (r.template ? r.template + " · " : "") + st.text;
+    const when = document.createElement("span");
+    when.className = "cr-at";
+    when.textContent = r.finishedAt ? `finished ${caseLib.whenText(r.finishedAt, now)}` : r.at ? `last moved ${caseLib.whenText(r.at, now)}` : "";
+    row.title = st.title;
+    row.append(chip, name, what, when);
+    if (r.url) {
+      const open = document.createElement("button");
+      open.className = "link-btn cr-open";
+      open.textContent = "Open chat";
+      open.addEventListener("click", () => window.open(r.url, "_blank", "noopener"));
+      row.appendChild(open);
+    }
+    box.appendChild(row);
+  }
+  if (list.length > 10) { const more = document.createElement("div"); more.className = "cr-item cr-more"; more.textContent = `and ${list.length - 10} more in the Claude extension's Options`; box.appendChild(more); }
+}
+
 /** The list of changes at the top of Hearings. */
 function renderCalendarChanges(box, sheet, briefing, now) {
   box.textContent = "";
@@ -2297,6 +2390,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   if (noteEditing && listEl.contains(document.activeElement)) return;
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
     (calLog || []).map((e) => e.id + (e.undone ? "u" : "") + (e.cleared ? "c" : "") + (e.resolved ? "r" : "")).join(","), calState.waiting, calState.why, calState.refused.length,
+    hv.runs ? hv.runs.key : "", Math.floor(now / 120000),
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
     Math.floor(now / 600000), canAskClaude() ? "claude" : "",
     ...items.map(({ hg, place, r, controls, inDl }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hg.url, hg.submitted, hg.submittedText,
@@ -2362,6 +2456,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
 
   const calBox = document.getElementById("calendar-changes");
   if (calBox) renderCalendarChanges(calBox, sheet, hv.briefing, now);
+  const runsBox = document.getElementById("claude-runs");
+  if (runsBox) renderClaudeRuns(runsBox, hv.runs, items, now);
   listEl.textContent = "";
   noteEditing = "";
   const empty = (text) => { const p = document.createElement("p"); p.className = "case-empty"; p.textContent = text; listEl.appendChild(p); };
@@ -2502,6 +2598,9 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       chip.title = "This case folder is still in Downloads. Drag the row onto a folder on the left to file it there.";
       b.querySelector(".ci-name-line").appendChild(chip);
     }
+    // Its Claude run, where one is going or lately ended.
+    const rc = runChip(hg, place ? place.name : "", hv.runs, now);
+    if (rc) b.querySelector(".ci-name-line").appendChild(rc);
     const where = [];
     if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);

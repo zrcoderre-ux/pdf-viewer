@@ -525,3 +525,27 @@ Tests: `test-hearing-sheet.mjs` parts 8 (no buttons until selected, the
 labels, Escape), 9b (one column for the status, the right margin) and every
 part that presses a row's button (`pick` first).
 
+## Claude runs on Home (2026-11-19)
+
+The owner: "I'd like to have the dashboard display include the current status
+of any claude run going." The Claude extension (`src/pdfplusstatus.js`, wired
+in its `background.js`, "PDF+'s Home: the runs") summarizes each run going or
+ended in the last 18 hours — its matter (the case folder's name, so the case
+number), workflow, the runs list's own progress words, hold or failure, and
+the chat it last worked in; nothing it sent or received — and sends it to the
+E-Court Suite's native host (`writeClaudeRuns`), which writes
+`Claude Run Status.json` into Downloads. It writes on every run change and
+every five minutes while one is going.
+
+Home reads it each look (`readClaudeRuns`, again only where it moved;
+`viewer/claude-runs.js`: `parseClaudeRuns`, `runsForHearing` by case number,
+else the folder's name in the run's, `runState`). A **Claude runs** box at the
+top of Hearings (`renderClaudeRuns`) lists them: the state, the matter (a click
+selects its case's row), the workflow and progress, when it last moved, Open
+chat. Each case's row carries its newest run as a chip (`runChip`; a click
+opens the chat). A run "running" in a file older than `QUIET_MS` (15 minutes)
+reads **No word**: the extension has gone quiet. Only a claude.ai address is
+ever opened.
+
+Tests: `test-claude-runs.mjs`; `test-hearing-sheet.mjs` part 14g.
+
