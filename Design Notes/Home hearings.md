@@ -539,13 +539,20 @@ every five minutes while one is going.
 
 Home reads it each look (`readClaudeRuns`, again only where it moved;
 `viewer/claude-runs.js`: `parseClaudeRuns`, `runsForHearing` by case number,
-else the folder's name in the run's, `runState`). A **Claude runs** box at the
-top of Hearings (`renderClaudeRuns`) lists them: the state, the matter (a click
-selects its case's row), the workflow and progress, when it last moved, Open
-chat. Each case's row carries its newest run as a chip (`runChip`; a click
-opens the chat). A run "running" in a file older than `QUIET_MS` (15 minutes)
-reads **No word**: the extension has gone quiet. Only a claude.ai address is
-ever opened.
+else the folder's name in the run's, `runState`, `runLine`, `stepLines`).
+First a box at the top of Hearings; the owner then: "I was thinking more like
+having a simplified version of the options page runs history (for the most
+recent run of that case) like what time it finished or what step it was on.
+Similar to the E-court motion opposition reply display." So each row has a
+**Claude** column beside the briefing (`runCell`, `.ci-run`, shown only where a
+row has a run, `has-runs`): the case's newest run as a bar of its steps (the
+extension now sends each step's label, chat, state done / here / next / failed
+/ todo, and how long it took: `stepsOf` in its `src/pdfplusstatus.js`) and a
+line (`runLine`: "Step 3 of 7", "Finished 3:10 PM", "Held: usage limit",
+"Failed at step 3"). The hover is the runs list's history a line a step
+(`stepLines`); a click opens the chat. The summary counts the runs going,
+those on no hearing included. A run "running" in a file older than `QUIET_MS`
+(15 minutes) reads "No word since …". Only a claude.ai address is ever opened.
 
 Tests: `test-claude-runs.mjs`; `test-hearing-sheet.mjs` part 14g.
 

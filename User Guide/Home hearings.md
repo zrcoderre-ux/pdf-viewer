@@ -203,18 +203,23 @@ it. **Refresh from eCourt** in the Hearings heading reads eCourt at once.
 
 With your Claude extension and E-Court Suite 3.49.33 or later (and the
 extension let in to E-Court's native host, as for the Claude button below),
-Home shows your Claude workflow runs. A **Claude runs** box at the top of
-Hearings lists every run going (queued, running, held, paused, failed) and
-those finished in the last 18 hours: its state, the matter, the workflow and
-what it is doing ("Step 2 of 3 · Chat B — waiting for Claude"), when it last
-moved, and **Open chat** for the chat it last worked in. Click a run's name to
-select its case on the list. The case's row also carries a chip with the run's
-state; click the chip to open its chat.
+each hearing shows its case's latest Claude workflow run in a **Claude**
+column beside the Mot/Opp/Rep chips:
+
+- a bar with one segment per step: green done, pulsing orange running now,
+  amber next (held or paused), red failed, grey still to come;
+- under it, a line: **Step 3 of 7**, **Finished 3:10 PM**, **Held: usage
+  limit**, **Paused before 4**, **Failed at step 3**, or **Queued**.
+
+Hover the column for the run's history, a line per step with its chat and how
+long it took, as in the extension's Options. Click it to open the chat the run
+last worked in. The summary line counts the runs going ("2 Claude runs going";
+hover it for each one, including runs whose case isn't on the list).
 
 The extension updates the file whenever a run changes, and every five minutes
 while one is going. If a run says running but nothing has come from the
-extension in a quarter of an hour, the chip reads **No word** (is Chrome
-open?).
+extension in a quarter of an hour, the line reads **No word since …** (is
+Chrome open?).
 
 ## Setting up a Claude workflow run
 

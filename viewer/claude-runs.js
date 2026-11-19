@@ -32,6 +32,11 @@ export function parseClaudeRuns(text) {
     step: Number(r.step) || 0, total: Number(r.total) || 0, at: Number(r.at) || 0, startedAt: Number(r.startedAt) || 0,
     finishedAt: Number(r.finishedAt) || 0, held: String(r.held || ""), error: String(r.error || ""),
     url: /^https:\/\/claude\.ai\//.test(String(r.url || "")) ? r.url : "",
+    steps: (Array.isArray(r.steps) ? r.steps : []).slice(0, 30).filter((x) => x && typeof x === "object").map((x) => ({
+      label: String(x.label || ""), chat: String(x.chat || ""), pause: !!x.pause,
+      state: ["done", "here", "next", "failed", "todo"].includes(x.state) ? x.state : "todo",
+      ms: Number.isFinite(x.ms) ? x.ms : null,
+    })),
   }));
   return { written: Number(data.written) || 0, runs };
 }
@@ -49,6 +54,53 @@ export function runsForHearing(hg, runs, folderName = "") {
   const folder = String(folderName || "").trim().toLowerCase();
   const mine = (runs || []).filter((r) => (num && r.caseNumber ? r.caseNumber === num : !!folder && folder.length >= 4 && r.name.toLowerCase().includes(folder)));
   return mine.sort((a, b) => (isGoing(b) - isGoing(a)) || b.at - a.at);
+}
+
+/** "4m 12s", "1h 05m", "38s". */
+export function durationText(ms) {
+  const s = Math.round((ms || 0) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+/** "3:10 PM" today, "Nov 18, 3:10 PM" another day. */
+export function clockText(at, now = Date.now()) {
+  const d = new Date(at);
+  const t = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return new Date(now).toDateString() === d.toDateString() ? t : `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${t}`;
+}
+/** The step a run is on (its label, "2A"), or "". */
+function currentLabel(r) {
+  const s = (r.steps || []).find((x) => x.state === "here" || x.state === "failed" || x.state === "next");
+  return s ? s.label : r.step ? String(r.step) : "";
+}
+/**
+ * A run's history as the case's row says it, like the runs list in the
+ * extension's Options: one line a step ("1 · Chat A — done, 4m 12s").
+ */
+export function stepLines(r) {
+  const word = { done: "done", here: "running now", next: "next", failed: "failed here", todo: "to come" };
+  return (r.steps || []).map((x) => `${x.label} · ${x.pause ? "pause" : x.chat || "step"} — ${word[x.state]}${x.ms != null ? ", " + durationText(x.ms) : ""}`);
+}
+/**
+ * How a run reads on its case's row: { tone, line } — what step it is on, or
+ * when it finished — beside its steps.
+ */
+export function runLine(r, written, now = Date.now()) {
+  const st = runState(r, written, now);
+  const at = currentLabel(r);
+  const total = r.total || (r.steps || []).length;
+  let line;
+  if (st.tone === "quiet") line = `No word since ${clockText(written, now)}`;
+  else if (r.status === "running") line = at ? `Step ${at} of ${total}` : "Running";
+  else if (r.status === "done") line = r.finishedAt ? `Finished ${clockText(r.finishedAt, now)}` : "Finished";
+  else if (r.status === "error") line = at ? `Failed at step ${at}` : "Failed";
+  else if (r.status === "waiting") line = r.held ? `Held: ${r.held}` : "Held";
+  else if (r.status === "paused") line = at ? `Paused before ${at}` : "Paused";
+  else if (r.status === "pending") line = "Queued";
+  else line = r.finishedAt ? `Canceled ${clockText(r.finishedAt, now)}` : "Canceled";
+  return { tone: st.tone, line };
 }
 
 /**

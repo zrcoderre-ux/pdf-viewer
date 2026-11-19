@@ -765,34 +765,42 @@ async function browserPart() {
     check("Undo of an off calendar takes the red off", (await sheetRows()).find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark, "");
     await putCalendar(null);
 
-    console.log("14g. Claude workflow runs, from the Claude extension's file");
+    console.log("14g. Claude workflow runs, from the Claude extension's file: a column on the case's row");
     const putRuns = (data) => shell.evaluate(async (data) => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
       if (data == null) { try { await dl.removeEntry("Claude Run Status.json"); } catch { /* none */ } }
       else { const w = await (await dl.getFileHandle("Claude Run Status.json", { create: true })).createWritable(); await w.write(JSON.stringify(data)); await w.close(); }
       window.dispatchEvent(new Event("focus"));
     }, data);
-    check("no file: no Claude runs box", await shell.evaluate(() => document.getElementById("claude-runs").hidden), true);
+    check("no file: no Claude column", await shell.evaluate(() => document.getElementById("hearing-list").classList.contains("has-runs")), false);
     await putRuns({ version: 1, written: Date.now(), runs: [
-      { id: "r1", name: "25STCV12345 ACME — 11/20/26", template: "Tentative ruling", caseNumber: "25STCV12345", status: "running", phase: "awaiting-reply", progress: "Step 2 of 3 · Chat B — waiting for Claude", step: 2, total: 3, at: Date.now() - 60000, url: "https://claude.ai/chat/aaa" },
+      { id: "r1", name: "25STCV12345 ACME — 11/20/26", template: "Tentative ruling", caseNumber: "25STCV12345", status: "running", phase: "awaiting-reply", progress: "Step 2 of 3 · Chat B — waiting for Claude", step: 2, total: 3, at: Date.now() - 60000, url: "https://claude.ai/chat/aaa",
+        steps: [{ label: "1", chat: "Chat A", state: "done", ms: 252000 }, { label: "2", chat: "Chat B", state: "here" }, { label: "3", chat: "Chat A", state: "todo" }] },
+      { id: "r0", name: "25STCV12345 ACME — earlier", caseNumber: "25STCV12345", status: "done", progress: "Finished all 3 steps", step: 3, total: 3, at: Date.now() - 7200000, finishedAt: Date.now() - 7200000 },
       { id: "r2", name: "Somebody Else v. Nobody", template: "Bench memo", caseNumber: "", status: "waiting", held: "usage limit", progress: "Step 1 of 4", step: 1, total: 4, at: Date.now() - 600000 },
     ] });
-    await shell.waitForFunction(() => !document.getElementById("claude-runs").hidden, null, { timeout: 15000 });
-    check("the box lists the runs: state, matter, what it is doing", await shell.$$eval("#claude-runs .cr-item", (xs) => xs.map((x) => [x.querySelector(".cr-state").textContent, x.querySelector(".cr-name").textContent, x.querySelector(".cr-text").textContent])),
-      [["Step 2/3", "25STCV12345 ACME — 11/20/26", "Tentative ruling · Step 2 of 3 · Chat B — waiting for Claude"], ["Held", "Somebody Else v. Nobody", "Bench memo · Held: usage limit"]]);
-    check("…how many are going, in its heading", await shell.textContent("#claude-runs .cr-title"), "Claude runs · 2 going");
-    check("the case's row carries its run", await acmeRowB.locator(".ci-run-chip").textContent(), "Step 2/3");
-    check("…and no other row does", await shell.$$eval("#hearing-list .ci-run-chip", (x) => x.length), 1);
-    const opened1 = await shell.evaluate(() => window.__opened.length);
-    await shell.locator("#claude-runs .cr-item", { hasText: "ACME" }).locator(".cr-open").click();
-    check("Open chat opens the chat it last worked in", (await shell.evaluate(() => window.__opened)).slice(opened1), ["https://claude.ai/chat/aaa"]);
-    await shell.locator("#claude-runs .cr-name", { hasText: "ACME" }).click();
-    check("the run's name selects its case on the list", await acmeRowB.evaluate((r) => r.classList.contains("selected")), true);
-    check("…a run whose case is not on the list cannot", await shell.locator("#claude-runs .cr-name", { hasText: "Somebody" }).isDisabled(), true);
+    await shell.waitForFunction(() => document.getElementById("hearing-list").classList.contains("has-runs"), null, { timeout: 15000 });
+    const runCellOf = acmeRowB.locator(".ci-run");
+    check("the case's newest run: its steps as a bar, and the step it is on", [await runCellOf.locator(".cr-line").textContent(), await runCellOf.locator(".cr-seg").evaluateAll((xs) => xs.map((x) => x.className.replace("cr-seg ", "")))], ["Step 2 of 3", ["s-done", "s-here", "s-todo"]]);
+    check("…hover tells its history, a line a step", /1 · Chat A — done, 4m 12s\n2 · Chat B — running now\n3 · Chat A — to come/.test(await runCellOf.getAttribute("title")), true);
+    check("…and that an earlier run exists", /1 earlier run for this case/.test(await runCellOf.getAttribute("title")), true);
+    await shell.setViewportSize({ width: 2560, height: 1300 }); await shell.waitForTimeout(400);
+    check("other rows keep the column empty, so it lines up", await shell.$$eval("#hearing-list .ci-run", (xs) => [xs.filter((x) => x.classList.contains("has")).length, new Set(xs.map((x) => Math.round(x.getBoundingClientRect().left))).size]), [1, 1]);
+    await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
+    check("the summary counts the runs going, the one on no hearing too", await shell.textContent("#hearings-summary .hs-claude"), "2 Claude runs going");
     await shell.keyboard.press("Escape");
+    const opened1 = await shell.evaluate(() => window.__opened.length);
+    await runCellOf.click();
+    check("a click opens the chat it last worked in", (await shell.evaluate(() => window.__opened)).slice(opened1), ["https://claude.ai/chat/aaa"]);
+    check("…and does not select the row", await acmeRowB.evaluate((r) => r.classList.contains("selected")), false);
+    await putRuns({ version: 1, written: Date.now(), runs: [
+      { id: "r1", name: "25STCV12345 ACME — 11/20/26", caseNumber: "25STCV12345", status: "done", progress: "Finished all 3 steps", step: 3, total: 3, at: Date.now(), finishedAt: new Date().setHours(15, 10, 0, 0),
+        steps: [{ label: "1", state: "done" }, { label: "2", state: "done" }, { label: "3", state: "done" }] }] });
+    await shell.waitForFunction(() => /Finished/.test((document.querySelector("#hearing-list .ci-run.has .cr-line") || {}).textContent || ""), null, { timeout: 15000 });
+    check("finished: when", await runCellOf.locator(".cr-line").textContent(), "Finished 3:10 PM");
     await putRuns(null);
-    await shell.waitForFunction(() => document.getElementById("claude-runs").hidden, null, { timeout: 15000 });
-    check("the file gone: the box goes", true, true);
+    await shell.waitForFunction(() => !document.getElementById("hearing-list").classList.contains("has-runs"), null, { timeout: 15000 });
+    check("the file gone: the column goes", true, true);
 
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);

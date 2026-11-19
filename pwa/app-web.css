@@ -756,33 +756,30 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .hearing-tools .tl-label { line-height: 1; }
 @media (max-width: 960px) { .hearing-tools { padding-left: 16px; } }
 
-/* Claude runs (app-web.js, renderClaudeRuns, runChip): the owner's workflow
-   runs, at the top of Hearings and on each case's row. */
-.claude-runs { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--c-border); border-left: 4px solid #d97757; border-radius: 8px; background: rgba(217, 119, 87, 0.07); font-size: 12.5px; }
-.claude-runs .cr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.claude-runs .cr-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; }
-.claude-runs .cr-when { color: var(--c-muted, #8a8f98); }
-.claude-runs .cr-item { display: flex; align-items: baseline; gap: 10px; padding: 3px 0 3px 21px; min-width: 0; }
-.claude-runs .cr-item.ended { opacity: 0.65; }
-.claude-runs .cr-state { flex: none; min-width: 64px; padding: 1px 7px; border-radius: 999px; text-align: center; font-size: 11px; font-weight: 700; border: 1px solid var(--c-border); }
-.claude-runs .cr-name { flex: none; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; font-weight: 600; color: var(--c-text); }
-.claude-runs .cr-name:disabled { cursor: default; }
-.claude-runs .cr-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text-2, var(--c-text)); }
-.claude-runs .cr-at { flex: none; color: var(--c-muted, #8a8f98); }
-.claude-runs .cr-more { color: var(--c-muted, #8a8f98); }
-.ci-run-chip { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 8px 1px 6px; border-radius: 999px; border: 1px solid var(--c-border); font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer; }
-.tone-run .cr-state, .ci-run-chip.tone-run { color: #c2410c; border-color: rgba(217, 119, 87, 0.6); background: rgba(217, 119, 87, 0.12); }
-.ci-run-chip.tone-run svg { animation: crPulse 1.6s ease-in-out infinite; }
+/* The Claude column (app-web.js, runCell): a case's newest Claude run as a
+   bar of its steps and a line, beside the briefing, like Mot/Opp/Rep. */
+.home-app .ci-run { flex: none; width: 196px; display: none; flex-direction: column; justify-content: center; gap: 4px; margin-right: 10px; min-width: 0; }
+.home-app #hearing-list.has-runs .ci-run { display: inline-flex; }
+.home-app .ci-run.link { cursor: pointer; }
+.ci-run .cr-bar { display: flex; gap: 2px; height: 7px; max-width: 100%; }
+.ci-run .cr-seg { flex: 1 1 0; min-width: 4px; max-width: 26px; border-radius: 2px; background: var(--c-border-strong, rgba(127, 127, 127, 0.35)); }
+.ci-run .cr-seg.pause { flex: 0 0 4px; }
+.ci-run .cr-seg.s-done { background: #16a34a; }
+.ci-run .cr-seg.s-here { background: #d97757; animation: crPulse 1.6s ease-in-out infinite; }
+.ci-run .cr-seg.s-next { background: #d97706; }
+.ci-run .cr-seg.s-failed { background: #dc2626; }
 @keyframes crPulse { 50% { opacity: 0.35; } }
-.tone-queued .cr-state, .ci-run-chip.tone-queued { color: var(--c-text-2, var(--c-text)); }
-.tone-held .cr-state, .ci-run-chip.tone-held, .tone-paused .cr-state, .ci-run-chip.tone-paused, .tone-quiet .cr-state, .ci-run-chip.tone-quiet { color: #b45309; border-color: rgba(217, 119, 6, 0.5); background: rgba(234, 179, 8, 0.1); }
-.tone-error .cr-state, .ci-run-chip.tone-error { color: #dc2626; border-color: rgba(220, 38, 38, 0.5); background: rgba(239, 68, 68, 0.09); }
-.tone-done .cr-state, .ci-run-chip.tone-done { color: #16a34a; border-color: rgba(22, 163, 74, 0.45); background: rgba(34, 197, 94, 0.08); }
-.tone-canceled .cr-state, .ci-run-chip.tone-canceled { color: var(--c-muted, #8a8f98); }
+.ci-run .cr-line { font-size: var(--fs-label, 11.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c-text-2, var(--c-text)); }
+.ci-run.tone-run .cr-line { color: #c2410c; }
+.ci-run.tone-done .cr-line { color: #16a34a; }
+.ci-run.tone-error .cr-line { color: #dc2626; }
+.ci-run.tone-held .cr-line, .ci-run.tone-paused .cr-line, .ci-run.tone-quiet .cr-line { color: #b45309; }
+.ci-run.tone-canceled .cr-line { color: var(--c-muted, #8a8f98); }
+.home-app .hearings-summary .hs-claude { color: #c2410c; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .tone-run .cr-state, :root:not([data-theme="light"]) .ci-run-chip.tone-run { color: #f0a080; }
-  :root:not([data-theme="light"]) .tone-held .cr-state, :root:not([data-theme="light"]) .ci-run-chip.tone-held, :root:not([data-theme="light"]) .tone-paused .cr-state, :root:not([data-theme="light"]) .ci-run-chip.tone-paused, :root:not([data-theme="light"]) .tone-quiet .cr-state, :root:not([data-theme="light"]) .ci-run-chip.tone-quiet { color: #fbbf24; }
+  :root:not([data-theme="light"]) .ci-run.tone-run .cr-line, :root:not([data-theme="light"]) .home-app .hearings-summary .hs-claude { color: #f0a080; }
+  :root:not([data-theme="light"]) .ci-run.tone-held .cr-line, :root:not([data-theme="light"]) .ci-run.tone-paused .cr-line, :root:not([data-theme="light"]) .ci-run.tone-quiet .cr-line { color: #fbbf24; }
 }
-:root[data-theme="dark"] .tone-run .cr-state, :root[data-theme="dark"] .ci-run-chip.tone-run { color: #f0a080; }
-:root[data-theme="dark"] .tone-held .cr-state, :root[data-theme="dark"] .ci-run-chip.tone-held, :root[data-theme="dark"] .tone-paused .cr-state, :root[data-theme="dark"] .ci-run-chip.tone-paused, :root[data-theme="dark"] .tone-quiet .cr-state, :root[data-theme="dark"] .ci-run-chip.tone-quiet { color: #fbbf24; }
-
+:root[data-theme="dark"] .ci-run.tone-run .cr-line, :root[data-theme="dark"] .home-app .hearings-summary .hs-claude { color: #f0a080; }
+:root[data-theme="dark"] .ci-run.tone-held .cr-line, :root[data-theme="dark"] .ci-run.tone-paused .cr-line, :root[data-theme="dark"] .ci-run.tone-quiet .cr-line { color: #fbbf24; }
+@media (max-width: 1300px) { .home-app .ci-run { width: 150px; } }

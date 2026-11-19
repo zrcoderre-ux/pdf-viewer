@@ -2023,7 +2023,8 @@ async function undoCalendar(e) {
 // current status of any claude run going." The Claude extension keeps
 // CLAUDE_RUNS_FILE in Downloads through the E-Court Suite's native host
 // (viewer/claude-runs.js); Home reads it each look, again only where it moved,
-// lists the runs at the top of Hearings, and puts each case's run on its row.
+// puts each case's newest run in its row's Claude column (runCell), and counts
+// the runs going in the summary.
 let runsLib = null;
 let runsSeen = null; // { key, written, runs }
 async function readClaudeRuns(dl) {
@@ -2037,75 +2038,48 @@ async function readClaudeRuns(dl) {
     return runsSeen;
   } catch { return runsSeen; }
 }
-/** A hearing row's run, at a glance: a chip with its state; a click opens its chat. */
-function runChip(hg, placeName, runs, now) {
-  if (!runs || !runsLib) return null;
+/**
+ * A hearing row's Claude column (the owner: "a simplified version of the
+ * options page runs history (for the most recent run of that case) like what
+ * time it finished or what step it was on. Similar to the E-court motion
+ * opposition reply display"): the case's newest run as a bar of its steps
+ * (done, the one running, failed, to come) and a line — "Step 3 of 7",
+ * "Finished 3:10 PM", "Held: usage limit". Hover lists every step as the
+ * extension's runs list does; a click opens the chat it last worked in.
+ */
+function runCell(hg, placeName, runs, now) {
+  const cell = document.createElement("span");
+  cell.className = "ci-run";
+  if (!runs || !runsLib) return cell;
   const mine = runsLib.runsForHearing(hg, runs.runs, placeName);
-  if (!mine.length) return null;
+  if (!mine.length) return cell;
   const r = mine[0];
-  const st = runsLib.runState(r, runs.written, now);
-  const chip = document.createElement("span");
-  chip.className = "ci-run-chip tone-" + st.tone;
-  chip.innerHTML = `${icon("message", { size: 12, stroke: 2.2 })}<span></span>`;
-  chip.lastChild.textContent = st.short;
-  chip.title = `Claude run: ${r.name}${r.template ? " (" + r.template + ")" : ""}\n${st.title}${r.url ? "\nClick to open its chat." : ""}${mine.length > 1 ? `\n${mine.length - 1} more run${mine.length > 2 ? "s" : ""} for this case under Claude runs.` : ""}`;
-  chip.setAttribute("role", "button");
-  chip.setAttribute("aria-label", `Claude run ${st.short}`);
-  chip.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); if (r.url) window.open(r.url, "_blank", "noopener"); });
-  return chip;
-}
-/** The runs at the top of Hearings: going first, then those lately ended. */
-function renderClaudeRuns(box, runs, items, now) {
-  box.textContent = "";
-  const list = runs ? runs.runs : [];
-  box.hidden = !list.length;
-  if (box.hidden) return;
-  const head = document.createElement("div");
-  head.className = "cr-head";
-  const going = list.filter(runsLib.isGoing).length;
-  head.innerHTML = `<span class="cr-title">${icon("message", { size: 15 })}<span></span></span><span class="cr-when"></span>`;
-  head.querySelector(".cr-title span").textContent = going ? `Claude runs · ${going} going` : "Claude runs";
-  head.querySelector(".cr-when").textContent = runs.written ? `from the Claude extension, ${caseLib.whenText(runs.written, now)}` : "";
-  box.appendChild(head);
-  for (const r of list.slice(0, 10)) {
-    const st = runsLib.runState(r, runs.written, now);
-    const row = document.createElement("div");
-    row.className = "cr-item tone-" + st.tone + (runsLib.isGoing(r) ? "" : " ended");
-    const chip = document.createElement("span");
-    chip.className = "cr-state";
-    chip.textContent = st.short;
-    const name = document.createElement("button");
-    name.className = "cr-name link-btn";
-    name.textContent = r.name;
-    const it = items.find((x) => runsLib.runsForHearing(x.hg, [r], x.place ? x.place.name : "").length);
-    name.title = it ? "Show this case on the list" : "Not on the hearings list";
-    name.disabled = !it;
-    name.addEventListener("click", () => {
-      if (!it) return;
-      const key = noteKey(it.hg);
-      const rowEl = [...document.querySelectorAll("#hearing-list .hearing-row")].find((x) => x.__selKey === key);
-      if (!rowEl) return;
-      selectHearing(rowEl, key, true);
-      rowEl.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-    const what = document.createElement("span");
-    what.className = "cr-text";
-    what.textContent = (r.template ? r.template + " · " : "") + st.text;
-    const when = document.createElement("span");
-    when.className = "cr-at";
-    when.textContent = r.finishedAt ? `finished ${caseLib.whenText(r.finishedAt, now)}` : r.at ? `last moved ${caseLib.whenText(r.at, now)}` : "";
-    row.title = st.title;
-    row.append(chip, name, what, when);
-    if (r.url) {
-      const open = document.createElement("button");
-      open.className = "link-btn cr-open";
-      open.textContent = "Open chat";
-      open.addEventListener("click", () => window.open(r.url, "_blank", "noopener"));
-      row.appendChild(open);
+  const { tone, line } = runsLib.runLine(r, runs.written, now);
+  cell.classList.add("has", "tone-" + tone);
+  if (r.steps.length) {
+    const bar = document.createElement("span");
+    bar.className = "cr-bar";
+    for (const x of r.steps) {
+      const seg = document.createElement("span");
+      seg.className = `cr-seg s-${x.state}${x.pause ? " pause" : ""}`;
+      bar.appendChild(seg);
     }
-    box.appendChild(row);
+    cell.appendChild(bar);
   }
-  if (list.length > 10) { const more = document.createElement("div"); more.className = "cr-item cr-more"; more.textContent = `and ${list.length - 10} more in the Claude extension's Options`; box.appendChild(more); }
+  const txt = document.createElement("span");
+  txt.className = "cr-line";
+  txt.textContent = line;
+  cell.appendChild(txt);
+  cell.title = [`Claude run: ${r.name}${r.template ? " (" + r.template + ")" : ""}`, ...runsLib.stepLines(r),
+    r.error ? `Failed: ${r.error}` : "", r.at ? `Last moved ${runsLib.clockText(r.at, now)}.` : "",
+    r.url ? "Click to open its chat." : "", mine.length > 1 ? `${mine.length - 1} earlier run${mine.length > 2 ? "s" : ""} for this case.` : ""].filter(Boolean).join("\n");
+  cell.setAttribute("aria-label", `Claude run: ${line}`);
+  if (r.url) {
+    cell.setAttribute("role", "button");
+    cell.classList.add("link");
+    cell.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); window.open(r.url, "_blank", "noopener"); });
+  }
+  return cell;
 }
 
 /** The list of changes at the top of Hearings. */
@@ -2427,6 +2401,15 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (doneCount) add(`${doneCount} done`, "hs-ok");
     const unbriefed = open.filter((h) => briefingMissing(h, hv.briefing)).length;
     if (unbriefed) add(`${unbriefed} with briefing not filed`, "hs-warn");
+    // The Claude runs going, the ones on no hearing of the list included.
+    const going = hv.runs && runsLib ? hv.runs.runs.filter(runsLib.isGoing) : [];
+    if (going.length) {
+      const sp = document.createElement("span");
+      sp.className = "hs-claude";
+      sp.textContent = `${going.length} Claude run${going.length === 1 ? "" : "s"} going`;
+      sp.title = going.map((r) => `${r.name}: ${runsLib.runLine(r, hv.runs.written, now).line}`).join("\n");
+      sumEl.appendChild(sp);
+    }
     // How E-Court Suite's last check of the briefing went.
     const rt = hv.briefing && !hv.briefing.none ? hearingLib.refreshText(hv.briefing.refresh, now) : null;
     if (rt) {
@@ -2456,8 +2439,6 @@ async function renderHearings(sheet, hv, dlState, now, line) {
 
   const calBox = document.getElementById("calendar-changes");
   if (calBox) renderCalendarChanges(calBox, sheet, hv.briefing, now);
-  const runsBox = document.getElementById("claude-runs");
-  if (runsBox) renderClaudeRuns(runsBox, hv.runs, items, now);
   listEl.textContent = "";
   noteEditing = "";
   const empty = (text) => { const p = document.createElement("p"); p.className = "case-empty"; p.textContent = text; listEl.appendChild(p); };
@@ -2490,6 +2471,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const dashes = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.caseNumber && hg.mark !== "done" && hg.mark !== "off" && !hearingLib.briefingFor(hg, hv.briefing.entries));
   listEl.classList.toggle("has-brief", chipMost > 0 || !!dashes);
   listEl.classList.toggle("has-claude", canAskClaude());
+  listEl.classList.toggle("has-runs", !!(hv.runs && runsLib && items.some(({ hg, place }) => runsLib.runsForHearing(hg, hv.runs.runs, place ? place.name : "").length)));
   listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 58 + (chipMost - 1) * 4 : 24) + "px");
   let lastDay = null;
   for (const { hg, place, r, controls, inDl } of items) {
@@ -2516,6 +2498,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     statusCol.className = "ci-status-col";
     b.querySelector(".ci-status").replaceWith(statusCol);
     statusCol.before(briefingCell(hg, hv.briefing, now));
+    statusCol.before(runCell(hg, place ? place.name : "", hv.runs, now));
     // The case number in a column of its own, the name beside it (the
     // owner's review, 2026-11-18: number and name each line up to be read
     // down). The name is the sheet's, as written.
@@ -2598,9 +2581,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       chip.title = "This case folder is still in Downloads. Drag the row onto a folder on the left to file it there.";
       b.querySelector(".ci-name-line").appendChild(chip);
     }
-    // Its Claude run, where one is going or lately ended.
-    const rc = runChip(hg, place ? place.name : "", hv.runs, now);
-    if (rc) b.querySelector(".ci-name-line").appendChild(rc);
+
     const where = [];
     if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
