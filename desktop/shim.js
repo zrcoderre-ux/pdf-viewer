@@ -408,8 +408,12 @@
         </div>
         <div class="pa-src-note" hidden></div>
       </div>`;
+    // At the foot of Home's Folders sidebar where Home has one (its
+    // #home-foot), else beside the help, as before.
+    const foot = document.getElementById("home-foot");
     const more = home.querySelector(".home-more");
-    if (more) home.insertBefore(box, more); else home.appendChild(box);
+    if (foot) foot.insertBefore(box, foot.firstChild);
+    else if (more) home.insertBefore(box, more); else home.appendChild(box);
 
     const $ = (sel) => box.querySelector(sel);
     const status = (t) => { $(".pa-status").textContent = t; };

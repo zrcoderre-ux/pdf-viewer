@@ -406,6 +406,38 @@ up whatever the pill beside them. ## The background refresh, and the bar's butto
   strip's Case folder opens the case in a window of its own while Home is
   showing (Home's own button did), and in the window it is in from a document.
 
+## Room for the name; the sidebar's foot; a Claude run for the case (2026-11-19)
+
+- The owner: names "cut off on the home page pretty early on, while most could
+  probably fit the entire case name without moving anything else, just by
+  reducing the buffer between them and the status marker". The briefing column
+  is as wide as the most chips any hearing shows (`--brief-w`), and takes no room
+  where no hearing has any; the status column is 132px and starts at its left
+  edge; Case folders stands beside Hearings only from 2200px.
+- The owner: "move the check for updates to the bottom left corner. same with
+  the app files: and how Home works". `#home-foot`, at the bottom of the Folders
+  sidebar, holds PDF+'s version, Check for updates and App files (the shim puts
+  `.pdfplus-about` there; `footAbout` moves it there from where an older shim put
+  it) and How Home's lists work, which opens as a panel beside the sidebar.
+- The owner: "Let's add integration with my Claude extension too ... press a
+  button to open the options tab and have it automatically bring the hearing date
+  and files up for me while I select the workflow run" ... "make sure that I can
+  continue using the options page normally too. Also make sure that this new
+  method respects all existing safeguards against accidental uploads." A
+  **Claude** button (`claudeButton`, `askClaude`) on each hearing that carries
+  its folder, in PDF+ only: PDF+'s main process says where the folder is
+  (`pdfplus:folder-path`, now also for a folder by its own name, an empty chain,
+  checked by one of its files), Home writes `Claude Run Request.json` into
+  Downloads (the case, its hearing date, the folder's name and path) and opens
+  `https://claude.ai/#cum-pdfplus-run`, the marker only, never the case (main.js
+  trusts claude.ai). The Claude extension (its `src/pdfplus-run.js`) opens its
+  Options on Workflows with the case named; Create run on a workflow brings the
+  folder over through the E-Court Suite's native host (which serves only that
+  request's folder, read-only) and into the run's editor through the same door,
+  and every check, as Choose folder…: the LEAKS gate, the case-folder split (Text
+  Files only, the key attached), the PDF question. Its README says how to set the
+  host up for it.
+
 Tests: `test-hearing-sheet.mjs` parts 5b (the
 file, the matching, the chips) and 14c (the chips on Home, a dash, the count,
 and the file written again updating the row).

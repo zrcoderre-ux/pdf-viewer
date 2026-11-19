@@ -1583,6 +1583,103 @@ document.getElementById("briefing-refresh")?.addEventListener("click", () => {
   shellToast("E-Court Suite is checking the next five court days in Chrome. Home shows it as soon as it is done.", 6000);
 });
 
+// ---- Home: the sidebar's foot ------------------------------------------------
+//
+// The owner (2026-11-19): "move the check for updates to the bottom left
+// corner. same with the app files: and how Home works". PDF+'s shim puts its
+// version, Check for updates and App files (.pdfplus-about) into #home-foot,
+// at the bottom of the Folders sidebar, beside How Home's lists work; an older
+// shim put it at the end of Home's main column, so it is moved here from
+// wherever it lands. The help opens as a panel beside the sidebar.
+function footAbout() {
+  const foot = document.getElementById("home-foot");
+  const box = document.querySelector(".pdfplus-about");
+  if (foot && box && box.parentElement !== foot) foot.insertBefore(box, foot.firstChild);
+}
+{
+  footAbout();
+  document.addEventListener("DOMContentLoaded", footAbout);
+  const inner = document.querySelector("#dropzone .home-inner");
+  if (inner) new MutationObserver(footAbout).observe(inner, { childList: true });
+  const help = document.querySelector("#home-foot .home-more");
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && help && help.open) help.open = false; });
+  document.addEventListener("click", (e) => { if (help && help.open && !help.contains(e.target)) help.open = false; });
+}
+
+// ---- Home: a Claude workflow run for the case --------------------------------
+//
+// The owner (2026-11-19): "Let's add integration with my Claude extension too.
+// I should be able to press a button to open the options tab and have it
+// automatically bring the hearing date and files up for me while I select the
+// workflow run" … "make sure that I can continue using the options page
+// normally too. Also make sure that this new method respects all existing
+// safeguards against accidental uploads."
+//
+// Chrome will not let an extension open a folder by its path, so PDF+, which
+// knows where the case folder is (main.js "pdfplus:folder-path", from the
+// folders it was given), writes CLAUDE_REQUEST_FILE into Downloads — the
+// case, its hearing date, the folder's name and path — and opens claude.ai
+// with a bare marker (CLAUDE_MARKER_URL: never the case's name, which
+// claude.ai's own page would see). The Claude extension opens its Options on
+// Workflows with the case shown; Create run on a workflow brings the folder
+// over through the E-Court Suite's native host (which serves only this
+// request's folder, read-only) and into the run's editor by the same door,
+// and the same checks, as Choose folder… (the extension's
+// src/pdfplus-run.js). PDF+ only in the desktop app: a browser has no path.
+const CLAUDE_REQUEST_FILE = "Claude Run Request.json";
+const CLAUDE_MARKER_URL = "https://claude.ai/#cum-pdfplus-run";
+function canAskClaude() {
+  return !!(window.pdfplusNative && typeof window.pdfplusNative.folderPath === "function");
+}
+function claudeButton(hg, r) {
+  const b = document.createElement("button");
+  b.className = "ci-claude";
+  b.title = `Claude: set up a workflow run for ${hg.caseName}, its hearing date and its case folder's papers, in the Claude extension's Options (choose the workflow and press Create run there)`;
+  iconise(b, "message", "Claude run");
+  b.addEventListener("click", (e) => { e.stopPropagation(); askClaude(hg, r); });
+  return b;
+}
+async function askClaude(hg, r) {
+  const native = window.pdfplusNative;
+  if (!canAskClaude()) { shellToast("A Claude run is set up from PDF+, the desktop app: a browser cannot say where a folder is.", 6000); return; }
+  const dl = await downloadsDir();
+  if (!dl) { shellToast("Link Downloads first (the settings menu): the request for the Claude extension is left there.", 6000); return; }
+  if (!(await permitted(dl, "readwrite", true))) { shellToast("PDF+ may not write into Downloads, so the Claude run was not set up.", 6000); return; }
+  // Where the folder is: asked of PDF+'s main process, which answers only
+  // where one place it knows holds this folder with this file in it.
+  const probe = ((r.listing && r.listing.files) || []).find((f) => typeof f.size === "number" && f.size > 0);
+  if (!probe) { shellToast(`${r.name} has nothing in it PDF+ can check its place by.`, 6000); return; }
+  const where = r.root && r.chain && r.chain.length ? { root: r.root.name, chain: r.chain } : { root: r.name, chain: [] };
+  let folderPath = "";
+  try { folderPath = await native.folderPath({ ...where, launcher: { name: probe.name, size: probe.size } }); } catch { folderPath = ""; }
+  if (!folderPath) {
+    shellToast(`PDF+ could not tell where ${r.name} is on this computer. Open it once with Case folder (or add the folder holding it to the Folders list) so PDF+ learns its place, then press Claude again.`, 9000);
+    return;
+  }
+  const iso = (at) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const request = {
+    version: 1,
+    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    at: Date.now(),
+    caseNumber: hg.caseNumber || "",
+    caseName: hg.caseName || "",
+    motion: hg.motion || "",
+    hearingDate: hg.date ? iso(hg.date) : "",
+    folderName: r.name,
+    folderPath,
+  };
+  try {
+    const w = await (await dl.getFileHandle(CLAUDE_REQUEST_FILE, { create: true })).createWritable();
+    await w.write(JSON.stringify(request, null, 1));
+    await w.close();
+  } catch (e) {
+    shellToast(`The request for the Claude extension could not be written into Downloads: ${(e && e.message) || e}.`, 7000);
+    return;
+  }
+  window.open(CLAUDE_MARKER_URL, "_blank", "noopener");
+  shellToast(`The Claude extension's Options opens in Chrome with ${hg.caseName}: choose the workflow and press Create run — its papers come from ${r.name}.`, 7000);
+}
+
 // ---- Home: the settings menu -------------------------------------------------
 //
 // The hearings sheet and Downloads are set once and changed rarely, so their
@@ -1928,7 +2025,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
   const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
-    Math.floor(now / 600000),
+    Math.floor(now / 600000), canAskClaude() ? "claude" : "",
     ...items.map(({ hg, place, r, controls }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.url, hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
@@ -2016,6 +2113,12 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   if (sheet.state === "ok" && !sheet.sheets.length) return empty(`No sheet in ${sheet.name} has a header row with Date and Case Name columns.`);
   if (!items.length) { if (sheet.state === "ok") empty(marked ? "Every upcoming hearing is off calendar." : "No hearings from today on in the sheet."); return; }
 
+  // The briefing column takes room only for the chips there are.
+  const chipMost = Math.max(0, ...items.map(({ hg }) => (hv.briefing && !hv.briefing.none && hg.mark !== "off" ? hearingLib.briefingChips(hearingLib.briefingFor(hg, hv.briefing.entries)).length : 0)));
+  const dashes = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.caseNumber && hg.mark !== "done" && hg.mark !== "off" && !hearingLib.briefingFor(hg, hv.briefing.entries));
+  listEl.classList.toggle("has-brief", chipMost > 0 || !!dashes);
+  listEl.classList.toggle("has-claude", canAskClaude());
+  listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 58 + (chipMost - 1) * 4 : 24) + "px");
   let lastDay = null;
   for (const { hg, place, r, controls } of items) {
     const dayKey = hg.date || hg.dateText;
@@ -2132,6 +2235,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const editable = sheet.state === "ok" || sheet.state === "error";
     slot("done", editable ? doneButton(hg) : null);
     slot("cal", editable ? calendarButton(hg) : null);
+    slot("claude", r && !r.locked && canAskClaude() ? claudeButton(hg, r) : null);
     slot("ecourt", hearingLib.isWebLink(hg.url) ? ecourtButton(hg) : null);
     row.appendChild(acts);
     listEl.appendChild(row);

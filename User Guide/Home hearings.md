@@ -148,3 +148,16 @@ hourly check off.
 After pulling E-Court Suite, reload the extension. Its native host writes the
 status to **E-Court Briefing Status.json** in Downloads, which Home reads (so
 Downloads must be linked).
+
+## Setting up a Claude workflow run
+
+In PDF+, each hearing whose case folder Home found has a **Claude** button.
+Press it and your Claude extension's Options opens in Chrome on Workflows, with
+the case named. Press **Create run** on the workflow you want: the run opens
+with the hearing date as its run date and the case folder's papers added, exactly
+as if you had picked the folder with Choose folder… (only its Text Files go up,
+the key is attached, a folder marked LEAKS never uploads, a PDF asks first).
+
+Once, to set it up: pull and reload the Claude extension, then run the E-Court
+Suite's `native-host\install.ps1 -ExtensionId <e-court-id> -ExtraExtensionIds
+<claude-extension-id>` and restart Chrome.

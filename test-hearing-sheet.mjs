@@ -444,6 +444,27 @@ async function browserPart() {
     check("the bar holds the title and the settings only", await shell.evaluate(() => [!!document.querySelector(".home-top #open-file, .home-top #open-case, .home-top #combine-files, .home-top #images-to-pdf"), !!document.querySelector(".home-top #home-settings")]), [false, true]);
     check("PDF from images stands beside Case folder in the strip", await shell.evaluate(() => { const b = document.querySelector("#tabstrip #images-to-pdf"); return !!b && b.previousElementSibling.id === "open-case-tab"; }), true);
 
+    console.log("9a2. the sidebar's foot: how Home works, and PDF+'s updates and app files");
+    // As an older PDF+'s shim did: its box at the end of Home's main column.
+    await shell.evaluate(() => {
+      const box = document.createElement("section");
+      box.className = "pdfplus-about";
+      box.innerHTML = '<div class="pa-row"><span class="pa-version">PDF+ 0.2.99</span><button class="link-btn pa-check">Check for updates</button></div><div class="pa-source"><div class="pa-row"><span>App files:</span></div></div>';
+      document.querySelector("#dropzone .home-inner").appendChild(box);
+    });
+    await shell.waitForFunction(() => !!document.querySelector("#home-foot .pdfplus-about"), null, { timeout: 5000 });
+    check("PDF+'s version, updates and app files move to the sidebar's foot", await shell.evaluate(() => [!!document.querySelector("#home-foot .pdfplus-about .pa-check"), !document.querySelector(".home-inner .pdfplus-about")]), [true, true]);
+    check("…with How Home's lists work", await shell.evaluate(() => !!document.querySelector("#home-foot .home-more")), true);
+    await shell.setViewportSize({ width: 1920, height: 1000 }); await shell.waitForTimeout(300);
+    const foot = await shell.evaluate(() => { const r = document.getElementById("home-foot").getBoundingClientRect(); return [Math.round(r.left), Math.round(r.bottom)]; });
+    check("…at the bottom left corner", [foot[0] < 40, foot[1] > 900], [true, true]);
+    await shell.click("#home-foot .home-more summary");
+    const panel = await shell.evaluate(() => { const b = document.querySelector("#home-foot .home-more-body").getBoundingClientRect(); return [Math.round(b.left), b.width > 400]; });
+    check("the help opens as a panel beside the sidebar", [panel[0] >= 268, panel[1]], [true, true]);
+    await shell.keyboard.press("Escape");
+    check("…and Escape closes it", await shell.evaluate(() => document.querySelector("#home-foot .home-more").open), false);
+    await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
+
     console.log("9b. Home as a workspace, on a large monitor");
     await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(400);
     const lay = await shell.evaluate(() => {
@@ -628,6 +649,25 @@ async function browserPart() {
     const before = await shell.evaluate(() => window.__opened.length);
     await shell.click("#briefing-refresh");
     check("Refresh briefing opens the eCourt page E-Court Suite answers", (await shell.evaluate(() => window.__opened)).slice(before), ["https://civil.lacourt.org/#lac-refresh-briefing"]);
+
+    console.log("14e. a Claude workflow run for the case, from PDF+");
+    check("in a browser there is no Claude button: no path to give", await shell.$$eval("#hearing-list .ci-claude", (b) => b.length), 0);
+    // As PDF+'s bridge answers where a folder is.
+    await shell.evaluate(() => {
+      window.pdfplusNative = { folderPath: async (req) => { window.__asked = req; return "C:\\Users\\Clerk\\Downloads\\" + [...req.chain].join("\\"); } };
+      window.dispatchEvent(new Event("focus"));
+    });
+    const acmeC = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-claude").length > 0, null, { timeout: 15000 });
+    check("in PDF+, a Claude button on each hearing that carries its folder", [await acmeC.locator(".ci-claude").getAttribute("aria-label"), await shell.$$eval('#hearing-list .hearing-row', (rs) => rs.filter((r) => /22STCV05555/.test(r.textContent)).map((r) => !!r.querySelector(".ci-claude")))], ["Claude run", [false]]);
+    const opened0 = await shell.evaluate(() => window.__opened.length);
+    await acmeC.locator(".ci-claude").click();
+    await shell.waitForFunction((n) => window.__opened.length > n, opened0, { timeout: 10000 });
+    const req = await shell.evaluate(async () => JSON.parse(await (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getFileHandle("Claude Run Request.json")).getFile()).text()));
+    check("the request left in Downloads: the case, its hearing, the folder and its place", [req.version, req.caseNumber, req.motion, req.hearingDate === iso(inDays(2)), req.folderName, req.folderPath], [1, "25STCV12345", "Demurrer", true, "25STCV12345 ACME", "C:\\Users\\Clerk\\Downloads\\25STCV12345 ACME"]);
+    check("…the place asked of PDF+ by the folder's own file", await shell.evaluate(() => [window.__asked.root, window.__asked.chain, typeof window.__asked.launcher.size]), ["Downloads", ["25STCV12345 ACME"], "number"]);
+    check("claude.ai opened with the marker only, never the case", (await shell.evaluate(() => window.__opened)).slice(opened0), ["https://claude.ai/#cum-pdfplus-run"]);
+    await shell.evaluate(() => { delete window.pdfplusNative; });
 
     console.log("15. the Folders list: drag a case onto a folder to move it there");
     check("Downloads stands on the list once linked", await shell.$$eval("#tree-list .tree-node.root .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads"]);

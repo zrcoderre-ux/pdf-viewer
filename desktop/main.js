@@ -174,7 +174,7 @@ async function findFoldersNamed(name, { depth = 4, ms = 5000 } = {}) {
 // Links that open in the browser without asking: the citation links' own
 // targets (viewer/code-tables.js), and eCourt, which Home's Hearings list
 // opens a case in (the hearings sheet's own links). Any other link is shown first.
-const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.)lexisnexis\.com$/i, /^civil\.lacourt\.org$/i];
+const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.)lexisnexis\.com$/i, /^civil\.lacourt\.org$/i, /^claude\.ai$/i];
 // PDF-Linker's own link (the text reader's Re-run PDF-Linker button,
 // textdoc.rerunUrl), handed to the program Windows has registered for it.
 // It carries a folder token and a nonce, and PDF-Linker runs only on the
@@ -779,7 +779,10 @@ function registerUpdateIpc() {
     const part = (x) => typeof x === "string" && x && x !== "." && x !== ".." && !/[\\/\0]/.test(x);
     const root = req.root, chain = Array.isArray(req.chain) ? req.chain : [];
     const launcher = req.launcher && typeof req.launcher === "object" ? req.launcher : null;
-    if (!part(root) || !chain.length || chain.length > 8 || !chain.every(part) || !launcher || !part(launcher.name) || !Number.isFinite(Number(launcher.size))) return "";
+    // An empty chain asks where the folder named `root` itself is (a case
+    // folder opened from anywhere, for Home's Claude button); `launcher` is
+    // then any file of the folder the page read, its name and size the check.
+    if (!part(root) || chain.length > 8 || !chain.every(part) || !launcher || !part(launcher.name) || !Number.isFinite(Number(launcher.size))) return "";
     const roots = knownFoldersNamed(root);
     try {
       const dl = app.getPath("downloads");

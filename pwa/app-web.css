@@ -405,7 +405,7 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .case-item .ci-status.waiting { outline: 1px dashed currentColor; outline-offset: 1px; }
 .ci-name-line { display: flex; align-items: baseline; gap: 2px; min-width: 0; overflow: hidden; }
 .case-item .ci-main .ci-name-line .ri-name { flex: 0 1 auto; min-width: 0; }
-.case-item .ci-main { margin-right: 10px; }
+.case-item .ci-main { margin-right: 4px; }
 .ci-note-mark { flex: none; padding: 0 5px; border-radius: 4px; color: var(--c-accent); font-weight: 700; cursor: pointer; }
 .ci-note-mark:hover, .ci-note-mark.open { background: var(--c-accent-soft); }
 .hearing-note { padding: 2px 14px 10px 44px; border-bottom: 1px solid var(--c-border); color: var(--c-text-2, var(--c-text)); font-size: 12.5px; white-space: pre-wrap; }
@@ -567,7 +567,7 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 
 /* Wide: Hearings in the main column; case folders, Recent and the help in one beside it. */
 /* …only where that column has something to hold. */
-@media (min-width: 1760px) {
+@media (min-width: 2200px) {
   .home-app .home-inner:has(> #case-folders:not([hidden]), > #recent:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) 440px; column-gap: 40px; align-items: start; }
   .home-app .home-inner > * { grid-column: 2; }
   .home-app .home-inner > #hearings { grid-column: 1; grid-row: 1 / span 20; }
@@ -622,6 +622,9 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .s-line { width: 124px; }
 .home-app .s-line .ci-line { margin-right: 2px; }
 .home-app .s-done, .home-app .s-cal, .home-app .s-ecourt { width: 36px; }
+.home-app .s-claude { width: 0; }
+.home-app #hearing-list.has-claude .s-claude { width: 36px; }
+.home-app .case-row .ci-claude:hover { color: #d97757; }
 .home-app .s-take .ci-takeover { margin: 0 8px 0 4px; }
 .home-app .ci-place { background: var(--c-accent-soft); color: var(--c-accent); font-weight: 650; }
 .home-app .ci-line-btn { color: var(--c-text-2); }
@@ -637,7 +640,12 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 
 /* The briefing E-Court Suite reports (app-web.js, briefingCell): Mot, Opp
    and Rep as the case page colours them, in a column of their own. */
-.home-app .ci-brief { flex: none; width: 176px; display: inline-flex; align-items: center; gap: 4px; justify-content: flex-start; }
+.home-app .ci-brief { flex: none; width: var(--brief-w, 0px); display: inline-flex; align-items: center; gap: 4px; justify-content: flex-start; overflow: hidden; }
+/* Only as wide as the most chips any hearing shows (renderHearings sets
+   --brief-w); none at all where no hearing has any, so the name has the room
+   (the owner: names "cut off pretty early ... just by reducing the buffer
+   between them and the status marker"). */
+.home-app #hearing-list:not(.has-brief) .ci-brief { display: none; }
 .home-app .ci-brief.none { color: var(--c-text-3); opacity: 0.6; padding-left: 6px; }
 .home-app .ci-brief.stale { opacity: 0.55; }
 .ci-chip { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 6px; font-size: var(--fs-label, 11.5px); font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; color: var(--c-text-2); background: transparent; border: 1px solid var(--c-border); }
@@ -646,7 +654,7 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .ci-chip.st-personal { color: #d97706; border-color: rgba(217, 119, 6, 0.4); background: rgba(234, 179, 8, 0.1); }
 .ci-chip.st-unposted { border-style: dashed; }
 @media (max-width: 1300px) { .home-app .ci-brief { width: auto; min-width: 0; } }
-.home-app .ci-status-col { flex: none; width: 168px; display: inline-flex; justify-content: center; }
+.home-app .ci-status-col { flex: none; width: 132px; display: inline-flex; justify-content: flex-start; }
 .home-app .ci-status-col .ci-status { max-width: 100%; }
 @media (max-width: 1300px) { .home-app .ci-status-col { width: auto; } }
 .home-app .hearings-summary .hs-refresh { color: var(--c-text-3); }
@@ -654,3 +662,25 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .hearings-summary .hs-refresh.tone-run { color: var(--c-accent); }
 /* The bar holds the title and the settings, the opening buttons now in the strip. */
 .home-app .home-top h1 { flex: 1; }
+
+/* The sidebar's foot (app-web.js, footAbout): PDF+'s version, updates and
+   app files, and how Home works, at the bottom left. */
+.home-app > .home-tree { display: flex; flex-direction: column; }
+.home-app > .home-tree .tree-list { flex: none; }
+.home-foot { margin-top: auto; padding: 14px 6px 0; border-top: 1px solid var(--c-border); display: flex; flex-direction: column; gap: 10px; }
+.home-app > .home-tree .home-foot { margin-top: auto; }
+.home-foot .pdfplus-about { margin-top: 0; font-size: 12px; }
+.home-foot .pdfplus-about .pa-row { gap: 4px 8px; }
+.home-foot .pdfplus-about .link-btn { font-size: 12px; }
+.home-foot .pdfplus-about .pa-update { padding: 10px 12px; }
+.home-foot .home-more { margin-top: 0; }
+.home-foot .home-more summary { font-size: 12px; }
+.home-foot .home-more[open] .home-more-body {
+  position: fixed; left: 284px; bottom: 20px; z-index: 45;
+  width: min(620px, calc(100vw - 320px)); max-height: 72vh; overflow: auto;
+  padding: 6px 20px; border: 1px solid var(--c-border); border-radius: 12px;
+  background: var(--c-card); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32); color: var(--c-text-2);
+}
+@media (max-width: 960px) {
+  .home-foot .home-more[open] .home-more-body { position: static; width: auto; max-height: none; box-shadow: none; }
+}
