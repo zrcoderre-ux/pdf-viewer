@@ -97,6 +97,13 @@ const LEAKS_BYTES = buildXlsx("LEAKS.xlsx", "LEAKS",
   ["Value", "Fix? (yes/no)", "Context", "File", "Type", "Where (page:line)", "Notes"],
   [["Gravenor", "", "Gravenor signed.", "A Complaint.pdf", "LEAK", "p.2", ""]]);
 
+// Two rows: Gravenor, and "the notice" (standing once, on page 2), for a
+// row answered and left behind.
+const LEAKS2_BYTES = buildXlsx("LEAKS.xlsx", "LEAKS",
+  ["Value", "Fix? (yes/no)", "Context", "File", "Type", "Where (page:line)", "Notes"],
+  [["Gravenor", "", "Gravenor signed.", "A Complaint.pdf", "LEAK", "p.2", ""],
+   ["notice", "", "signed the notice", "A Complaint.pdf", "LEAK", "p.2", ""]]);
+
 // The names the run left in the clear, two of them, between each other:
 // Corwin, Pellmont, Corwin | Pellmont, Corwin.
 const CASE = "Case Instances";
@@ -113,7 +120,7 @@ const A = [
 
 // ── the browser ─────────────────────────────────────────────────────────────
 let srv = null, browser = null;
-async function newReader() {
+async function newReader(leaksBytes = LEAKS_BYTES) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await context.newPage();
   const errors = [];
@@ -132,7 +139,7 @@ async function newReader() {
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "A Complaint.txt", A);
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, A, keyBytes: Array.from(KEY_BYTES), leaksBytes: Array.from(LEAKS_BYTES) });
+  }, { CASE, A, keyBytes: Array.from(KEY_BYTES), leaksBytes: Array.from(leaksBytes) });
   await page.evaluate((n) => window.__textReaderOpenDoc(n), "A Complaint.txt");
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
   await page.waitForFunction(() => /standing unfaked/.test(document.getElementById("st-leaks").textContent), null, { timeout: 8000 });
@@ -201,6 +208,29 @@ async function run() {
     }
 
     // ── the names bar, instance by instance ───────────────────────────────
+    console.log("1b. a row answered yes stays marked red wherever it stands, until the run that fakes it");
+    {
+      const r = await newReader(LEAKS2_BYTES);
+      const p = r.page;
+      const marked = (name) => p.evaluate((name) => { const h = CSS.highlights.get(name); return h ? [...h].map((x) => x.toString()) : []; }, name);
+      await p.evaluate(() => window.__textReaderGoToLeak(0));
+      await p.waitForFunction(() => /instance \d/.test(document.getElementById("lb-inst").textContent), null, { timeout: 8000 });
+      check("before: the other row's value marked as still to answer", await marked("leakrows"), ["notice"]);
+      check("…nothing answered yet", await marked("leakyes"), []);
+      await p.evaluate(() => window.__textReaderDecide("yes", false));
+      await p.waitForTimeout(300);
+      await p.evaluate(() => window.__textReaderGoToLeak(1));
+      await p.waitForTimeout(500);
+      check("answered yes and left: red wherever it stands", await marked("leakyes"), ["Gravenor", "Gravenor", "Gravenor"]);
+      check("…and no longer among the rows still to answer", (await marked("leakrows")).includes("Gravenor"), false);
+      await p.evaluate(() => window.__textReaderDecide("no", false));
+      await p.evaluate(() => window.__textReaderGoToLeak(0));
+      await p.waitForTimeout(500);
+      check("a row answered no is not marked so", await marked("leakyes"), []);
+      check("no errors", r.errors, []);
+      await r.context.close();
+    }
+
     console.log("2. the names bar steps the name in front through its own places");
     {
       const r = await newReader();

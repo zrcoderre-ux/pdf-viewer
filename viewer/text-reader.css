@@ -258,6 +258,10 @@ body {
    the walk gets there, so a name the worksheet already asks about is not
    flagged on the way. Lighter than the row in front, and dashed. */
 ::highlight(leakrows) { background-color: rgba(230, 81, 0, 0.16); text-decoration: underline dashed #e65100 2px; }
+/* Every row answered to be faked (yes, phrase), wherever its value still
+   stands: red until the run that fakes it, so an answered word never reads as
+   one nobody has looked at. */
+::highlight(leakyes) { background-color: rgba(211, 47, 47, 0.2); text-decoration: underline solid #c62828 2px; }
 /* The count of names standing in the clear is a control: it steps through
    them. Marked as one, and only while there are any. */
 #st-leaks.step { cursor: pointer; text-decoration: underline dotted; }

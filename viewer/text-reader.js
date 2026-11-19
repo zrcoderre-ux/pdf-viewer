@@ -10610,7 +10610,7 @@ function giveUpOnMarks(spent, page, pages) {
   flagMarks = [];
   scannedDocs = new Set();
   scanSoon.cancel();
-  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); CSS.highlights.delete("leakrows"); } catch { /* none to clear */ }
+  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); CSS.highlights.delete("leakrows"); CSS.highlights.delete("leakyes"); } catch { /* none to clear */ }
   $("st-leaks").textContent = "";
   $("st-kept").textContent = "";
   // A walk waiting on this document's reading is waiting on one that is not
@@ -10628,6 +10628,7 @@ function paintRowMarksNow() {
   leakRowRanges = rowRanges(leakRowValue);
   CSS.highlights.set("leakrow", highlightOf(leakRowRanges.flatMap((x) => x.pieces || [x.range])));
   CSS.highlights.set("leakrows", highlightOf(pendingSheetRanges()));
+  CSS.highlights.set("leakyes", highlightOf(fakedSheetRanges()));
   markLeakHere();
   renderRowInstance(); // …and which of them the bar stands on, read off the ranges just made
 }
@@ -18365,9 +18366,25 @@ function sheetFold(found) {
  * orange already, and inside a cited decision they are no leak at all.
  */
 function pendingSheetRanges() {
+  return sheetRangesWhere((r) => LK.isPending(r));
+}
+/**
+ * Every row answered to be FAKED (yes, phrase), wherever its value still
+ * stands: red, until the run that fakes it (the owner, 2026-11-19: "words
+ * flagged as potential leaks in LEAKS should stay red highlighted after marked
+ * yes prior to the next run so that I don't have to wonder if they need to be
+ * flagged"). A value with no pseudonym yet cannot be faked by a save here, so
+ * the answer stands in the worksheet and the word in the text until PDF-Linker
+ * runs again and the key has it; the mark says it has been answered.
+ */
+function fakedSheetRanges() {
+  return sheetRangesWhere((r) => !LK.isPending(r) && LK.isFakeKind(LK.classifyFix(r.fix, r.value).kind));
+}
+/** Where the values of the rows `want` takes stand, the row in front's aside and those the key binds. */
+function sheetRangesWhere(want) {
   if (!leaks || !sheetHits.length) return [];
   const open = new Set();
-  for (const r of leakRows()) if (LK.isPending(r)) open.add(TD.foldValue(r.value));
+  for (const r of leakRows()) if (want(r)) open.add(TD.foldValue(r.value));
   open.delete(TD.foldValue(leakRowValue));
   const bound = new Map();
   const out = [];

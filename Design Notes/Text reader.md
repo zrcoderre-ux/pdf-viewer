@@ -3344,8 +3344,17 @@ reading the page again. Left out: the row in front (it has its own mark) and a
 value the key binds (`boundByKey`), which standing unfaked is the key's
 orange already and inside a cited decision is no leak. They show whenever a
 worksheet is attached, the bar open or not, and go with `giveUpOnMarks`.
-Lighter than the row in front, with a dashed underline. The flag follows the
-mark: a selection that is a pending row's value word for word
+Lighter than the row in front, with a dashed underline. **A row answered to be
+faked stays marked, red** (`fakedSheetRanges`, `::highlight(leakyes)`; the
+owner, 2026-11-19: "words flagged as potential leaks in LEAKS should stay red
+highlighted after marked yes prior to the next run so that I don't have to
+wonder if they need to be flagged"): `yes` or `phrase` (`LK.isFakeKind`),
+not a suggestion still pending. A value with no pseudonym cannot be faked by
+a save here, so it stands in the text until PDF-Linker's run puts it in the
+key, and the worksheet the run writes then has no row for it; the mark goes
+with it. Both marks come off the same `sheetRangesWhere`, with the same rules
+(the row in front and a value the key binds left out). `test-review-instances.mjs`
+part 1b. The flag follows the mark: a selection that is a pending row's value word for word
 (`pendingRowIn`, `wordsOf`) is not flagged by 🚩's release or Ctrl+Shift+F,
 and the pop-up says so with **Answer its row…**, which opens that row in the
 bar without moving the text (`goToLeak(i, { locate: false })`). A selection

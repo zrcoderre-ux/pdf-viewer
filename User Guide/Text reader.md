@@ -840,7 +840,9 @@ app, which routes it to the reader tab.
   its stronger mark. A value wrapped inside a caption's column is marked half
   on each line, and the review stands on both halves rather than saying the
   value is not in the document. The marks show whenever a worksheet is attached, with the
-  bar open or closed, and a value goes unmarked once its row is answered. A
+  bar open or closed. A value answered **yes** (or **phrase**) turns **red**
+  wherever it stands and stays red until PDF-Linker's next run fakes it, so
+  you can see it has been answered; one answered no or never goes unmarked. A
   name the key binds is left to the key's own orange. Selecting one of these
   values on its own does not flag it (🚩 on, or Ctrl+Shift+F): the pop-up says
   the worksheet has a row for it, and **Answer its row…** opens that row in
