@@ -226,25 +226,11 @@ body.home-open .tab-view.active { display: none; }
   position: absolute;
   top: var(--tabstrip-h); left: 0; right: 0; bottom: 0;
   overflow-y: auto;
-  padding: 7vh 24px 40px;
-  background:
-    radial-gradient(1200px 500px at 50% -120px, var(--c-accent-soft), transparent 70%),
-    var(--c-page);
+  padding: 0;
+  background: var(--c-page);
 }
 .home-inner { max-width: 760px; margin: 0 auto; }
 /* Home's Folders list beside the rest (app-web.js, "Home: folders"). */
-/* The Folders list at the window's left edge, the rest centred in the room
-   beside it (the owner: "move the folders menu to the left a bit more,
-   everything is clumped up right now"). */
-.home-layout { display: flex; align-items: flex-start; gap: 40px; }
-.home-layout > .home-inner { flex: 1; min-width: 0; max-width: 1120px; margin: 0 auto; }
-/* The row's buttons as icons (app-web.js, iconise). */
-.case-row button.ci-ico, .case-row .ci-ico { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 30px; height: 28px; padding: 0 6px; margin-right: 6px; border-radius: 8px; font-size: 11px; line-height: 1; }
-.case-row .ci-word { margin-right: 0; }
-.case-row .ci-line { margin-right: 4px; }
-.case-row .ci-line.in-line { margin-right: 8px; }
-.case-row .ci-ico svg { flex: none; }
-.ci-ico-n { font-weight: 650; }
 .home-tree { flex: none; width: 240px; position: sticky; top: 0; max-height: calc(100vh - var(--tabstrip-h) - 7vh - 20px); overflow: auto; padding-top: 4px; }
 .home-tree .recent-head h2 { font-size: 12px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--c-text-3); margin: 0 0 8px; }
 .tree-list { border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card); padding: 4px 0; }
@@ -271,10 +257,6 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 #move-bar button { flex: none; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--c-border); background: transparent; color: var(--c-text); font-size: 13px; cursor: pointer; }
 #move-bar .mb-go { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
 #move-bar button:disabled { opacity: 0.5; cursor: default; }
-@media (max-width: 960px) {
-  .home-layout { flex-direction: column; align-items: stretch; }
-  .home-tree { position: static; width: auto; max-height: 260px; }
-}
 .home-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 28px; }
 .home-logo {
   width: 58px;
@@ -460,7 +442,7 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .home-more p { line-height: 1.6; font-size: 12.5px; }
 
 /* Dragging a file over the window. */
-body.dragging #dropzone .home-inner { outline: 2px dashed var(--c-accent); outline-offset: 16px; border-radius: 18px; }
+body.dragging #dropzone .home-main { outline: 2px dashed var(--c-accent); outline-offset: -12px; border-radius: 18px; }
 body.dragging.has-tabs:not(.home-open) #tab-views::after {
   content: "Drop to open in a new tab";
   position: absolute; inset: 0;
@@ -490,3 +472,165 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .ext-status.checking .dot { background: #eab308; }
 .ext-status.connected { color: #86efac; }
 .ext-status.connected .dot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
+
+
+/* ==========================================================================
+   Home as a workspace (the owner's design review, 2026-11-18: "what can you
+   do to make it look easier on the eyes and more professional?", on a large
+   monitor; "Do all of it"). A full-height Folders sidebar against the window's
+   edge; a slim bar with what Home opens and a settings menu; the work below,
+   Hearings first, and on a wide screen the case folders and Recent in a
+   column beside it. Type scales with the window, colour is kept for state,
+   secondary text is brighter, and a row's buttons are borderless icons in
+   fixed slots. These rules come last and win over the older Home rules above.
+   ========================================================================== */
+.home-app {
+  --fs-name: clamp(14px, 0.2vw + 10.5px, 16px);
+  --fs-meta: clamp(12.5px, 0.14vw + 9.8px, 14px);
+  --fs-label: clamp(11px, 0.08vw + 9.6px, 12px);
+  --num-w: calc(var(--fs-name) * 7.6);
+  --c-text-2: #b6bdc6;
+  --c-text-3: #939ba6;
+  display: flex;
+  align-items: stretch;
+  min-height: 100%;
+}
+:root[data-theme="light"] .home-app { --c-text-2: #4d5661; --c-text-3: #6c7580; }
+
+/* The sidebar: the window's left edge, full height, its own ground. */
+.home-app > .home-tree {
+  flex: none;
+  width: 268px;
+  position: sticky;
+  top: 0;
+  height: calc(100vh - var(--tabstrip-h));
+  max-height: none;
+  overflow: auto;
+  padding: 22px 14px 24px;
+  background: var(--c-app);
+  border-right: 1px solid var(--c-border);
+}
+.home-app .home-tree .recent-head { padding: 0 6px; }
+.home-app .tree-list { border: none; background: transparent; padding: 2px 0; border-radius: 0; }
+.home-app .tree-node { font-size: var(--fs-meta); padding-top: 5px; padding-bottom: 5px; margin: 0; }
+.home-app .tree-icon { color: var(--c-text-3); }
+.home-app .tree-node.root .tree-icon { color: var(--c-text-2); }
+.home-app .tree-hint { padding: 0 6px; margin-top: 10px; }
+.home-app .tree-empty { padding: 6px; }
+
+/* The work area. */
+.home-app > .home-main { flex: 1; min-width: 0; padding: 0 40px 48px; }
+.home-app .home-inner { max-width: 1880px; margin: 0; }
+
+/* The bar: logo, title, what Home opens, settings. */
+.home-app .home-top {
+  max-width: 1880px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0 18px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--c-border);
+}
+.home-app .home-top .home-logo { width: 32px; height: 32px; border-radius: 9px; box-shadow: none; }
+.home-app .home-top h1 { margin: 0 12px 0 0; font-size: 17px; font-weight: 650; letter-spacing: -0.005em; white-space: nowrap; }
+.home-app .home-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.home-app .home-action {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--c-border); background: var(--c-card);
+  font-size: var(--fs-meta); text-align: left; transform: none;
+}
+.home-app .home-action:hover { transform: none; background: var(--c-card-hover); border-color: var(--c-border-strong); }
+.home-app .home-action .ha-icon { width: auto; height: auto; padding: 0; border-radius: 0; background: none; color: var(--c-text-2); }
+.home-app .home-action.primary { background: var(--c-accent-strong); border-color: var(--c-accent-strong); color: #fff; }
+.home-app .home-action.primary .ha-icon { background: none; color: #fff; }
+.home-app .home-action.primary:hover { filter: brightness(1.08); }
+.home-app .home-action b { font-size: inherit; font-weight: 550; }
+.home-app .home-action small { display: none; }
+.home-settings-box { position: relative; flex: none; }
+.home-settings { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--c-text-2); cursor: pointer; }
+.home-settings:hover, .home-settings[aria-expanded="true"] { background: var(--c-card-hover); border-color: var(--c-border); }
+.home-settings:focus { outline: none; }
+.home-settings:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.home-settings.needs::after { content: ""; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #d97706; box-shadow: 0 0 0 2px var(--c-page); }
+.home-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 240px; padding: 4px; border: 1px solid var(--c-border); border-radius: 10px; background: var(--c-card); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28); display: flex; flex-direction: column; }
+.home-menu .link-btn { text-align: left; padding: 8px 10px; border-radius: 7px; color: var(--c-text); font-size: 13px; }
+.home-menu .link-btn:hover { background: var(--c-accent-soft); color: var(--c-accent); }
+
+/* Sections. */
+.home-app .home-recent { margin-top: 26px; }
+.home-app .home-recent h2 { font-size: var(--fs-label); color: var(--c-text-2); letter-spacing: 0.08em; }
+.home-app .link-btn { font-size: var(--fs-meta); color: var(--c-text-2); }
+.home-app .link-btn:hover { color: var(--c-accent); }
+
+/* Wide: Hearings in the main column; case folders, Recent and the help in one beside it. */
+/* …only where that column has something to hold. */
+@media (min-width: 1760px) {
+  .home-app .home-inner:has(> #case-folders:not([hidden]), > #recent:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) 440px; column-gap: 40px; align-items: start; }
+  .home-app .home-inner > * { grid-column: 2; }
+  .home-app .home-inner > #hearings { grid-column: 1; grid-row: 1 / span 20; }
+}
+
+/* The lists. */
+.home-app .case-list, .home-app #recent-list { border-radius: 10px; }
+.home-app .case-item { padding: 13px 16px; gap: 14px; }
+.home-app .case-item .ri-name, .home-app .recent-item .ri-name { font-size: var(--fs-name); font-weight: 500; }
+.home-app .case-item .ci-where { font-size: var(--fs-meta); color: var(--c-text-3); }
+.home-app .case-item .ri-icon, .home-app .hearing-item .ri-icon, .home-app .hearing-item.has-folder .ri-icon { color: var(--c-text-3); }
+.home-app .hearing-item.has-folder .ri-icon { color: var(--c-text-2); }
+.home-app .case-item .ci-status { font-size: var(--fs-meta); }
+.home-app .case-empty { font-size: var(--fs-meta); padding: 16px; color: var(--c-text-2); }
+.case-empty-go { margin-left: 6px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--c-accent-strong); background: var(--c-accent-strong); color: #fff; font-size: var(--fs-meta); cursor: pointer; }
+.case-empty-go:hover { filter: brightness(1.08); }
+
+/* Date headers: a label and a rule, no band. */
+.home-app .hearing-day {
+  background: transparent;
+  padding: 18px 16px 7px;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  color: var(--c-text-2);
+  border-bottom: 1px solid var(--c-border);
+}
+.home-app .hearing-day:first-child { padding-top: 12px; }
+
+/* The case number in its own column; the details under the name. */
+.home-app .hearing-item .ri-name { display: flex; align-items: baseline; min-width: 0; overflow: hidden; }
+.home-app .ci-num { flex: none; width: var(--num-w); color: var(--c-text-2); font-family: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace; font-size: 0.9em; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.home-app .ci-case { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-app .hearing-item .ci-done-mark { align-self: center; margin: 0 6px 0 0; }
+.home-app .hearing-item .ci-where { padding-left: var(--num-w); }
+
+/* The summary: words, with colour only where something is wanted. */
+.home-app .hearings-summary { font-size: var(--fs-meta); color: var(--c-text-2); gap: 6px 18px; margin: -2px 0 12px; }
+.home-app .hearings-summary .hs-ok { color: var(--c-text-2); }
+.home-app .hearings-summary .hs-note { padding: 0; color: var(--c-accent); }
+
+/* A row's buttons: borderless icons at full strength, in fixed slots. */
+.home-app .case-row .ci-ico,
+.home-app .case-row button.ci-ico { border-color: transparent; background: transparent; opacity: 1; color: var(--c-text-2); min-width: 32px; height: 30px; }
+.home-app .case-row .ci-ico:hover, .home-app .case-row .ci-ico:focus-visible { border-color: var(--c-border-strong); background: var(--c-card-hover); color: var(--c-text); }
+.home-app .case-row .ci-done.on { background: rgba(34, 197, 94, 0.14); border-color: rgba(22, 163, 74, 0.5); color: #16a34a; }
+.home-app .case-row .ci-cal:hover { color: #dc2626; }
+.home-app .ci-actions { flex: none; display: flex; align-items: center; margin-right: 10px; }
+.home-app .ci-slot { display: inline-flex; align-items: center; justify-content: flex-end; }
+.home-app .ci-slot .ci-ico { margin-right: 2px; }
+.home-app .s-files { width: 72px; }
+.home-app .s-line { width: 124px; }
+.home-app .s-line .ci-line { margin-right: 2px; }
+.home-app .s-done, .home-app .s-cal, .home-app .s-ecourt { width: 36px; }
+.home-app .s-take .ci-takeover { margin: 0 8px 0 4px; }
+.home-app .ci-place { background: var(--c-accent-soft); color: var(--c-accent); font-weight: 650; }
+.home-app .ci-line-btn { color: var(--c-text-2); }
+
+/* Narrow: the sidebar above, as before. */
+@media (max-width: 960px) {
+  .home-app { flex-direction: column; }
+  .home-app > .home-tree { position: static; width: auto; height: auto; max-height: 260px; border-right: none; border-bottom: 1px solid var(--c-border); }
+  .home-app > .home-main { padding: 0 16px 40px; }
+  .home-app .home-top { flex-wrap: wrap; }
+  .home-app .ci-actions { margin: 0 6px 10px 44px; }
+}

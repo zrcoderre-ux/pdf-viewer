@@ -316,5 +316,53 @@ room".
   clumped up right now." The Folders list stands at the window's left edge,
   and the rest is centred in the room beside it (up to 1120px).
 
+## Home as a workspace (the design review, 2026-11-19)
+
+The owner asked for "a professional UI design review on the home page ...
+what can you do to make it look easier on the eyes and more professional?",
+on a large monitor (2560 wide), and then "Do all of it". The findings: sized
+for a laptop (13px rows in a 1,120px column, two thirds of the window empty);
+the top third a welcome page; colour on everything (yellow and blue icons,
+filled date bands, a three-colour summary) so the colours that mean something
+did not stand out; secondary text and 55%-opacity icons too faint; a box round
+every icon, and controls that moved from row to row; setup links as loud as
+the work; the case number glued to the name; a decorative glow. What changed
+(pwa/index.html, the "Home as a workspace" block at the end of app-web.css):
+
+- **Layout.** `.home-app`: the Folders list a full-height sidebar against the
+  window's edge on its own ground (`--c-app`), sticky; the work area beside it
+  (`.home-main`), up to 1,880px, starting at the sidebar. Under 960px the
+  sidebar stands above, as before.
+- **The bar** (`.home-top`, still `.home-hero` with its `h1`, which PDF+'s
+  shim renames): a small logo and title, the four ways to open as plain
+  buttons (their descriptions now their hovers), and a settings menu
+  (`#home-settings`) holding Link hearings sheet and Link Downloads, with a
+  dot while either wants setting up. An empty Hearings list offers the same
+  button where it is wanted, and the summary's Downloads note is one. The
+  tagline and the "drop files anywhere" line are gone from view (the line
+  stays in the page, hidden, for the shim, which rewrites its words).
+- **Order.** Hearings first. Where the screen is 1,760px or more and there is
+  something to show, Case folders and Recent stand in a 440px column beside
+  it (`:has`), the help and PDF+'s update box (which the shim puts before
+  `.home-more`, a child of `.home-inner` still) with them.
+- **Type.** Sizes scale with the window (`--fs-name` 14–16px,
+  `--fs-meta` 12.5–14px, `--fs-label`); secondary text brighter in both
+  themes; no background glow.
+- **Rows.** The case number in a column of its own (`.ci-num`, fixed width,
+  tabular figures) and the name beside it as the sheet has it (`.ci-case`; the
+  owner's ALL-CAPS captions are left as written, since a guess at title case
+  would get "LLC" and "McDONALD" wrong); the details under the name. The
+  buttons are borderless icons in fixed slots (`.ci-actions`: files, line,
+  take over, Done, calendar, eCourt), an empty slot keeping its room, so each
+  stands in one column down the list. Date headers are a label over a rule,
+  with no band. Icons are neutral; colour is for state only (Not downloaded,
+  running, done, off calendar, the place in line). In the summary only "not
+  downloaded" is coloured.
+- Tests: `test-hearing-sheet.mjs` part 9b (at 2560: names at 15px or more,
+  numbers, names, Done and eCourt each in one column, the sidebar the window's
+  height from its edge, Case folders beside Hearings) and the settings menu
+  in part 9. Hearing-row locators match the name with `:has-text`, since the
+  number and the name are two spans.
+
 Tests: `test-hearing-sheet.mjs` (the rules in node over a workbook built with
 `viewer/zip.js`; the list in the assembled site over an OPFS Downloads).

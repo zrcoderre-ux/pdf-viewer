@@ -5,8 +5,10 @@ each one, whether its case is downloaded yet.
 
 ## Linking the sheet
 
-Click **Link hearings sheet…** in the Hearings heading and pick the workbook
-(`.xlsx` or `.xlsm`). You link it once. Home reads it again each time you save
+Open the settings menu (the sliders button at the top right of Home) and
+choose **Link hearings sheet…**, then pick the workbook (`.xlsx` or `.xlsm`).
+**Link Downloads…** is in the same menu. While either still needs setting up,
+the button shows an orange dot, and the empty list offers the same button. You link it once. Home reads it again each time you save
 it in Excel. If the browser asks for leave to read it again in a later session,
 the button reads **Allow hearings sheet**.
 

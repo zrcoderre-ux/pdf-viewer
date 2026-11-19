@@ -384,7 +384,7 @@ async function browserPart() {
     check("grouped under their days", await shell.$$eval("#hearing-list .hearing-day", (d) => d.length), 3);
     check("the summary", await shell.textContent("#hearings-summary"), "4 to work up2 downloaded2 not downloaded1 done");
     // The owner: "The finished time takes up too much space ... expand to give that detail when pressed".
-    const acmePill = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE")) .ci-status');
+    const acmePill = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE")) .ci-status');
     check("PDF-Linker's status is a dot; where the case stands keeps its words", await shell.$$eval("#hearing-list .ci-status", (ps) => ps.map((p) => p.classList.contains("compact"))), [true, false, true, true, false]);
     check("…the dot is small", (await acmePill.boundingBox()).width <= 24, true);
     await acmePill.click();
@@ -404,7 +404,35 @@ async function browserPart() {
     // The owner: "cases that are done and off don't need to be shown in the Case Folders rows".
     check("Case Zeta only: the folder whose hearing is done is on that hearing's row", await caseNames(), ["Case Zeta"]);
     check("the list stands above the hearings", await shell.evaluate(() => !!(document.getElementById("case-folders").compareDocumentPosition(document.getElementById("hearings")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
-    check("the Downloads link is in the Hearings heading", await shell.evaluate(() => !!document.querySelector("#hearings #case-downloads")), true);
+    check("the sheet and Downloads links are in the settings menu", await shell.evaluate(() => !!document.querySelector("#home-settings-menu #case-downloads") && !!document.querySelector("#home-settings-menu #hearings-link")), true);
+    await shell.click("#home-settings");
+    check("…which opens on its button", await shell.isVisible("#home-settings-menu #hearings-link"), true);
+    await shell.keyboard.press("Escape");
+    check("…and closes on Escape", await shell.isVisible("#home-settings-menu"), false);
+
+    console.log("9b. Home as a workspace, on a large monitor");
+    await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(400);
+    const lay = await shell.evaluate(() => {
+      const xs = (sel) => [...document.querySelectorAll(sel)].map((e) => Math.round(e.getBoundingClientRect().left));
+      const tree = document.getElementById("folder-tree").getBoundingClientRect();
+      const hear = document.getElementById("hearings").getBoundingClientRect();
+      const cases = document.getElementById("case-folders").getBoundingClientRect();
+      return {
+        name: parseFloat(getComputedStyle(document.querySelector("#hearing-list .ci-case")).fontSize),
+        // The name of a row done stands after its ✓.
+        names: new Set([...document.querySelectorAll("#hearing-list .ci-case")].filter((e) => !e.previousElementSibling.classList.contains("ci-done-mark")).map((e) => Math.round(e.getBoundingClientRect().left))).size,
+        nums: new Set(xs("#hearing-list .ci-num")).size,
+        done: new Set(xs("#hearing-list .s-done")).size,
+        ecourt: new Set(xs("#hearing-list .s-ecourt")).size,
+        sidebar: [Math.round(tree.left), Math.round(tree.top), Math.round(tree.height) >= 1300],
+        beside: cases.left > hear.right && Math.abs(cases.top - hear.top) < 40,
+      };
+    });
+    check("the case names read at 15px or more", lay.name >= 15, true);
+    check("case numbers, names, Done and eCourt each in one column", [lay.nums, lay.names, lay.done, lay.ecourt], [1, 1, 1, 1]);
+    check("the Folders list runs the window's height from its left edge", [lay.sidebar[0], lay.sidebar[2]], [0, true]);
+    check("Case folders beside Hearings, where the screen has room", lay.beside, true);
+    await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
 
     console.log("10. eCourt, and a case folder's buttons on its hearing's row");
     await shell.click("#hearing-list .hearing-row:nth-of-type(3) .ci-ecourt");
@@ -418,7 +446,7 @@ async function browserPart() {
       window.__picks = [acme, papers];
       window.showDirectoryPicker = async () => window.__picks.shift();
     });
-    const doeLoc = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("24STCV00777 Doe v. Globex"))');
+    const doeLoc = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe v. Globex"))');
     await doeLoc.locator(".hearing-item").click();
     await shell.waitForFunction(() => /is not 24STCV00777 Doe v\. Globex's folder/.test(document.getElementById("shell-toast").textContent), null, { timeout: 10000 });
     check("a click on it asks for its folder; one carrying another case's number is refused", await shell.textContent("#shell-toast"), "25STCV12345 ACME is not 24STCV00777 Doe v. Globex's folder: it carries 25STCV12345, not 24STCV00777.");
@@ -469,7 +497,7 @@ async function browserPart() {
     check("the list is hidden", await shell.evaluate(() => document.getElementById("case-folders").hidden), true);
 
     console.log("13. a note in the Date cell: a * that opens it");
-    const doeRow = '#hearing-list .hearing-row:has(.ri-name:text-is("24STCV00777 Doe v. Globex"))';
+    const doeRow = '#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe v. Globex"))';
     const doe = shell.locator(doeRow);
     check("the note's * stands after the case name, only there", await shell.$$eval("#hearing-list .ci-note-mark", (x) => x.length), 1);
     check("…on Doe v. Globex", await doe.locator(".ci-note-mark").count(), 1);
@@ -505,7 +533,7 @@ async function browserPart() {
     check("once Excel lets go, the next look writes it: the red is off", (await sheetNow()).mark, "");
 
     console.log("14b. Done: a ✓ here, the Motion Type and Case Name cells green in the sheet");
-    const vanceRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("22STCV05555 Vance v. Stark"))');
+    const vanceRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("22STCV05555 Vance v. Stark"))');
     const vanceNow = async () => {
       const bytes = await shell.evaluate(async () => [...new Uint8Array(await (await (await (await navigator.storage.getDirectory()).getFileHandle("Hearings.xlsx")).getFile()).arrayBuffer())]);
       return (await readHearings(new Uint8Array(bytes))).hearings.find((x) => x.caseName.startsWith("22STCV05555"));
@@ -539,7 +567,7 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#tree-list .tree-name")].some((e) => e.textContent === "November"), null, { timeout: 10000 });
     check("a click opens a folder, as File Explorer's do", await shell.$$eval("#tree-list .tree-name", (x) => x.map((e) => e.textContent)), ["Downloads", "Filed", "November"]);
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-row.draggable").length >= 2, null, { timeout: 10000 });
-    const acmeRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE"))');
+    const acmeRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE"))');
     check("a hearing that carries its folder can be dragged; one that has none cannot", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.filter((r) => /24STCV00777|22STCV05555/.test(r.textContent)).map((r) => r.draggable)), [true, false]);
     await acmeRow.dragTo(shell.locator('#tree-list .tree-node:has(.tree-name:text-is("November"))'));
     await shell.waitForSelector("#move-bar:not([hidden])", { timeout: 5000 });
@@ -587,7 +615,7 @@ async function browserPart() {
       const w = await (await init.getFileHandle("ETA ~6.04PM (1 of 3).txt", { create: true })).createWritable(); await w.close();
       window.dispatchEvent(new Event("focus"));
     });
-    const initRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:text-is("26STCV09999 Jane Doe v. Initech"))');
+    const initRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("26STCV09999 Jane Doe v. Initech"))');
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("26STCV09999") && /Running/.test(r.textContent)), null, { timeout: 15000 });
     await initRow.dragTo(shell.locator('#tree-list .tree-node:has(.tree-name:text-is("Filed"))'));
     await shell.waitForSelector("#move-bar:not([hidden])", { timeout: 5000 });

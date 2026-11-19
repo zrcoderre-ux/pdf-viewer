@@ -36,41 +36,48 @@
   <div id="tab-views"></div>
 
   <div id="dropzone">
-   <div class="home-layout">
+   <div class="home-app">
     <aside id="folder-tree" class="home-tree" aria-label="Folders">
       <div class="recent-head"><h2>Folders</h2><button id="tree-add" class="link-btn tree-add" title="Add a folder you file cases into: drag a case onto it to move the case folder there. To add several at once, select them in File Explorer and drop them on this list">+ Add</button></div>
       <div id="tree-list" class="tree-list"></div>
       <p class="tree-hint">Several at once: select them in File Explorer and drop them here.</p>
     </aside>
-    <div class="home-inner">
-      <header class="home-hero">
-        <div class="home-logo"><i data-icon="logo" data-icon-size="30"></i></div>
-        <div>
-          <h1>PDF Viewer</h1>
-          <p>Read, comment, fill &amp; sign, organize and protect PDFs — with every citation linked to Lexis+ or Westlaw.</p>
-        </div>
+    <div class="home-main">
+      <!-- The bar: what Home is, and what it opens. PDF+'s shim names the
+           title (.home-hero h1) and adds its version and updates beside
+           .home-more, so both stay where it looks for them. -->
+      <header class="home-hero home-top">
+        <div class="home-logo"><i data-icon="logo" data-icon-size="20"></i></div>
+        <h1>PDF Viewer</h1>
+        <nav class="home-actions" aria-label="Open">
+          <button id="open-file" class="home-action primary" title="Open a PDF, or a PDF-Linker text export. Or drop files anywhere in this window.">
+            <span class="ha-icon"><i data-icon="file" data-icon-size="16"></i></span>
+            <span class="ha-text"><b>Open a file</b><small>A PDF, or a PDF-Linker text export</small></span>
+          </button>
+          <button id="open-case" class="home-action" title="Open a case folder: the whole matter in one reader, in a window of its own">
+            <span class="ha-icon"><i data-icon="folder" data-icon-size="16"></i></span>
+            <span class="ha-text"><b>Open a case folder</b><small>The whole matter in one reader</small></span>
+          </button>
+          <button id="combine-files" class="home-action" title="Combine files: merge several PDFs into one">
+            <span class="ha-icon"><i data-icon="files" data-icon-size="16"></i></span>
+            <span class="ha-text"><b>Combine files</b><small>Merge several PDFs into one</small></span>
+          </button>
+          <button id="images-to-pdf" class="home-action" title="Create a PDF from images: photos and scans, one per page">
+            <span class="ha-icon"><i data-icon="images" data-icon-size="16"></i></span>
+            <span class="ha-text"><b>PDF from images</b><small>Photos and scans, one per page</small></span>
+          </button>
+        </nav>
+        <span class="home-settings-box">
+          <button id="home-settings" class="home-settings" title="The hearings sheet and the Downloads folder Home reads" aria-label="Settings" aria-haspopup="menu" aria-expanded="false"><i data-icon="sliders" data-icon-size="17"></i></button>
+          <div id="home-settings-menu" class="home-menu" role="menu" hidden>
+            <button id="hearings-link" class="link-btn" role="menuitem">Link hearings sheet…</button>
+            <button id="case-downloads" class="link-btn" role="menuitem">Link Downloads…</button>
+          </div>
+        </span>
       </header>
 
-      <div class="home-actions">
-        <button id="open-file" class="home-action primary">
-          <span class="ha-icon"><i data-icon="file" data-icon-size="22"></i></span>
-          <span class="ha-text"><b>Open a file</b><small>A PDF, or a PDF-Linker text export</small></span>
-        </button>
-        <button id="open-case" class="home-action">
-          <span class="ha-icon"><i data-icon="folder" data-icon-size="22"></i></span>
-          <span class="ha-text"><b>Open a case folder</b><small>The whole matter in one reader</small></span>
-        </button>
-        <button id="combine-files" class="home-action">
-          <span class="ha-icon"><i data-icon="files" data-icon-size="22"></i></span>
-          <span class="ha-text"><b>Combine files</b><small>Merge several PDFs into one</small></span>
-        </button>
-        <button id="images-to-pdf" class="home-action">
-          <span class="ha-icon"><i data-icon="images" data-icon-size="22"></i></span>
-          <span class="ha-text"><b>Create PDF from images</b><small>Photos and scans, one per page</small></span>
-        </button>
-      </div>
-
-      <p class="home-drop"><i data-icon="upload" data-icon-size="16"></i> Or drop files anywhere in this window. Once installed, PDFs you open from your computer land here too.</p>
+    <div class="home-inner">
+      <p class="home-drop" hidden><i data-icon="upload" data-icon-size="16"></i> Or drop files anywhere in this window. Once installed, PDFs you open from your computer land here too.</p>
 
       <section id="case-folders" class="home-recent home-cases" hidden>
         <div class="recent-head"><h2>Case folders</h2><span class="case-head-btns"><button id="case-clear" class="link-btn" title="Forget the case folders opened here (today's in Downloads stay listed)" hidden>Clear</button></span></div>
@@ -78,7 +85,7 @@
       </section>
 
       <section id="hearings" class="home-recent home-hearings" hidden>
-        <div class="recent-head"><h2>Hearings</h2><span class="case-head-btns"><button id="hearings-all" class="link-btn" hidden>Show off calendar</button><button id="hearings-link" class="link-btn">Link hearings sheet…</button><button id="case-downloads" class="link-btn">Link Downloads…</button></span></div>
+        <div class="recent-head"><h2>Hearings</h2><span class="case-head-btns"><button id="hearings-all" class="link-btn" hidden>Show off calendar</button></span></div>
         <p id="hearings-summary" class="hearings-summary" hidden></p>
         <div id="hearing-list" class="case-list"></div>
       </section>
@@ -91,9 +98,10 @@
       <details class="home-more">
         <summary>How Home's lists work</summary>
         <p><strong>A whole matter in one pick:</strong> opened from Home, a case folder opens in a window of its own, so Home stays on screen; it opens as <em>one</em> reader — the <strong>Combined Text.txt</strong> where the run made one, else the first export in its <strong>Text Files</strong> folder — with the folder's <strong>pseudonym_key.xlsx</strong>, its PDFs and its <strong>LEAKS.xlsx</strong> already attached. Every other export is listed in that reader's Documents panel, a click away, and Find and the leak review read straight through the folder without leaving the tab. A <strong>.txt</strong> export from PDF-Linker opens in the text reader: real names on screen from the pseudonym key, citations linked, editable. Each PDF opens in its own tab with citation links, comments, OCR and the Table of Authorities.</p>
-        <p><strong>Hearings:</strong> <strong>Link hearings sheet…</strong> points Home at your Excel sheet of upcoming hearings once (its <strong>Date</strong>, <strong>Motion Type</strong>, <strong>Case Name</strong> and <strong>Date Submitted</strong> columns). Each hearing is matched to its case folder by the case number, in Downloads or among the folders opened here, and says whether it is downloaded; a row filled green (done) carries a ✓, and one filled red (off calendar) is set aside. <strong>eCourt</strong> opens the case name's own link. A hearing whose case folder is found carries that folder: PDF-Linker's status, and its Word, Log to share, Prioritize and Take over buttons; <strong>Case folders</strong> lists only the folders that match no hearing on the list. <strong>✓ Done</strong> fills the hearing's Motion Type and Case Name cells green in the sheet (and a ✓ stands before its name here until it has passed), <strong>Off calendar</strong> fills the same two cells red and sets it aside, and pressed again each takes its colour off (while Excel has the workbook open, the change waits and is written when it closes). Words typed in a case's Date cell are a note: click the <strong>*</strong> after the case name. <strong>Folders</strong>, on the left, holds Downloads and the folders you add with <strong>+ Add</strong> (or several at once, dropped from File Explorer): drag a case's row onto one to move its case folder there, and it stays on its hearing's row until the hearing has passed. Save the sheet in Excel and Home reads it again.</p>
+        <p><strong>Hearings:</strong> <strong>Link hearings sheet…</strong> (in the settings menu, top right) points Home at your Excel sheet of upcoming hearings once (its <strong>Date</strong>, <strong>Motion Type</strong>, <strong>Case Name</strong> and <strong>Date Submitted</strong> columns). Each hearing is matched to its case folder by the case number, in Downloads or among the folders opened here, and says whether it is downloaded; a row filled green (done) carries a ✓, and one filled red (off calendar) is set aside. <strong>eCourt</strong> opens the case name's own link. A hearing whose case folder is found carries that folder: PDF-Linker's status, and its Word, Log to share, Prioritize and Take over buttons; <strong>Case folders</strong> lists only the folders that match no hearing on the list. <strong>✓ Done</strong> fills the hearing's Motion Type and Case Name cells green in the sheet (and a ✓ stands before its name here until it has passed), <strong>Off calendar</strong> fills the same two cells red and sets it aside, and pressed again each takes its colour off (while Excel has the workbook open, the change waits and is written when it closes). Words typed in a case's Date cell are a note: click the <strong>*</strong> after the case name. <strong>Folders</strong>, on the left, holds Downloads and the folders you add with <strong>+ Add</strong> (or several at once, dropped from File Explorer): drag a case's row onto one to move its case folder there, and it stays on its hearing's row until the hearing has passed. Save the sheet in Excel and Home reads it again.</p>
         <p><strong>PDF-Linker's line:</strong> <strong>Prioritize</strong> (the double up-arrow) on a case whose run is going puts it in line, and ▲ ▼ ✕ move it or take it out. The line is listed first. While a case runs, PDF-Linker gives it the computer's OCR cores ahead of every run behind it, and those runs drop to below-normal CPU priority. They keep working, just slower. A case keeps its place for 24 hours from when it was given, through any re-run, unless you move it or take it out.</p>
       </details>
+    </div>
     </div>
    </div>
   </div>

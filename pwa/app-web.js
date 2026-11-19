@@ -1504,12 +1504,40 @@ function folderControlsSig(r, line) {
 }
 /** The Downloads link, in the Hearings heading: it serves both lists. */
 function showDownloadsLink(dl, dlState) {
+  setupNeeded("downloads", dlState !== "ok");
   const dlBtn = document.getElementById("case-downloads");
   if (!dlBtn) return;
   dlBtn.textContent = dlState === "none" ? "Link Downloads…" : dlState === "locked" ? "Allow Downloads" : "Change Downloads folder…";
   dlBtn.title = dlState === "none"
     ? "Point the app at your Downloads folder once: each hearing's case is looked for in it, and the case folders that come into it each day are listed"
     : dlState === "locked" ? "The browser wants your leave to read Downloads again" : `Case folders are read from ${dl.name}`;
+}
+
+// ---- Home: the settings menu -------------------------------------------------
+//
+// The hearings sheet and Downloads are set once and changed rarely, so their
+// buttons (#hearings-link, #case-downloads: their own handlers, below) are in
+// a menu in Home's bar (the owner's review, 2026-11-18: "setup actions as loud
+// as the work"). The menu's button carries a dot while either wants setting
+// up or allowing; an empty list offers the same button where it is wanted.
+const setupNeeds = new Set();
+function setupNeeded(what, on) {
+  if (on) setupNeeds.add(what); else setupNeeds.delete(what);
+  document.getElementById("home-settings")?.classList.toggle("needs", setupNeeds.size > 0);
+}
+{
+  const gear = document.getElementById("home-settings");
+  const menu = document.getElementById("home-settings-menu");
+  const shut = () => { if (menu) menu.hidden = true; gear?.setAttribute("aria-expanded", "false"); };
+  gear?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    gear.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  menu?.addEventListener("click", () => setTimeout(shut, 0));
+  document.addEventListener("click", (e) => { if (menu && !menu.hidden && !menu.contains(e.target)) shut(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") shut(); });
 }
 
 // ---- Home: hearings ---------------------------------------------------------
@@ -1842,6 +1870,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     ? "Point Home at your Excel sheet of upcoming hearings once (Date, Motion Type, Case Name, Date Submitted)"
     : sheet.state === "locked" ? `The browser wants your leave to read ${sheet.name} again`
       : `Read from ${sheet.name}${sheet.sheets && sheet.sheets.length ? " (" + sheet.sheets.join(", ") + ")" : ""}. Saved in Excel, it is read again on the next look.`;
+  setupNeeded("sheet", sheet.state === "none" || sheet.state === "locked");
+  setupNeeded("downloads", dlState !== "ok");
   const allBtn = document.getElementById("hearings-all");
   const offCount = all.filter((h) => h.mark === "off").length;
   const doneCount = all.filter((h) => h.mark === "done").length;
@@ -1858,7 +1888,13 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     add(`${downloaded} downloaded`, "hs-ok");
     if (notDl) add(`${notDl} not downloaded`, "hs-warn");
     if (doneCount) add(`${doneCount} done`, "hs-ok");
-    if (dlState !== "ok") add(dlState === "none" ? "Downloads not linked: only folders opened here are matched" : "Allow Downloads to match the folders in it", "hs-note");
+    if (dlState !== "ok") {
+      const note = document.createElement("button");
+      note.className = "hs-note link-btn";
+      note.textContent = dlState === "none" ? "Link Downloads to match the folders in it" : "Allow Downloads to match the folders in it";
+      note.addEventListener("click", () => document.getElementById("case-downloads").click());
+      sumEl.appendChild(note);
+    }
   }
   const waiting = (hearingEdits || []).length;
   if (waiting) {
@@ -1872,8 +1908,21 @@ async function renderHearings(sheet, hv, dlState, now, line) {
 
   listEl.textContent = "";
   const empty = (text) => { const p = document.createElement("p"); p.className = "case-empty"; p.textContent = text; listEl.appendChild(p); };
-  if (sheet.state === "none") return empty("Link your Excel sheet of upcoming hearings, and each one is listed here with whether its case is downloaded.");
-  if (sheet.state === "locked") return empty(`The browser wants your leave to read ${sheet.name} again: click Allow hearings sheet.`);
+  // An empty list says what to do, with the button that does it (the same
+  // as the settings menu's).
+  const emptyWith = (text, label, id) => {
+    const p = document.createElement("p");
+    p.className = "case-empty with-action";
+    p.textContent = text + " ";
+    const go = document.createElement("button");
+    go.className = "case-empty-go";
+    go.textContent = label;
+    go.addEventListener("click", () => document.getElementById(id).click());
+    p.appendChild(go);
+    listEl.appendChild(p);
+  };
+  if (sheet.state === "none") return emptyWith("Link your Excel sheet of upcoming hearings, and each one is listed here with whether its case is downloaded.", "Link hearings sheet…", "hearings-link");
+  if (sheet.state === "locked") return emptyWith(`The browser wants your leave to read ${sheet.name} again.`, "Allow hearings sheet", "hearings-link");
   if (sheet.state === "error") {
     const p = document.createElement("p");
     p.className = "case-empty hearings-error";
@@ -1902,15 +1951,22 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     row.className = "case-row hearing-row" + (hg.mark ? " mark-" + hg.mark : "");
     const b = document.createElement("button");
     b.className = "recent-item case-item hearing-item" + (folder ? " has-folder" : "");
-    b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 18 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
-    b.querySelector(".ri-name").textContent = hg.caseName;
+    b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 17 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"><span class="ci-num"></span> <span class="ci-case"></span></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    // The case number in a column of its own, the name beside it (the
+    // owner's review, 2026-11-18: number and name each line up to be read
+    // down). The name is the sheet's, as written.
+    const num = hg.caseNumber || "";
+    const lead = num ? new RegExp("^\\s*" + num + "(?![A-Za-z0-9])[\\s,:;-]*", "i") : null;
+    b.querySelector(".ci-num").textContent = num;
+    b.querySelector(".ci-case").textContent = lead && lead.test(hg.caseName) ? hg.caseName.replace(lead, "") : hg.caseName;
+    b.querySelector(".ri-name").title = hg.caseName;
     if (hg.mark === "done") {
       const tick = document.createElement("span");
       tick.className = "ci-done-mark";
       tick.innerHTML = icon("check", { size: 15, stroke: 2.5 });
       tick.title = "Done: marked green in the sheet";
       tick.setAttribute("aria-label", "Done");
-      b.querySelector(".ci-name-line").prepend(tick);
+      b.querySelector(".ci-case").before(tick);
     }
     let noteEl = null;
     if (hg.note) {
@@ -1967,17 +2023,26 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     });
     row.appendChild(b);
     if (r && !r.locked) caseDraggable(row, r);
-    // The folder's own buttons, on the first hearing of its case only.
-    if (controls) for (const x of folderControls(r, line)) row.appendChild(x);
-    if (sheet.state === "ok" || sheet.state === "error") { row.appendChild(doneButton(hg)); row.appendChild(calendarButton(hg)); }
-    if (hearingLib.isWebLink(hg.url)) row.appendChild(ecourtButton(hg));
-    else {
-      // Its place kept, so the eCourt buttons stand in one column.
-      const gap = document.createElement("span");
-      gap.className = "ci-ecourt ci-ico ci-ecourt-gap";
-      gap.setAttribute("aria-hidden", "true");
-      row.appendChild(gap);
-    }
+    // The buttons in fixed slots, each in the same place on every row, an
+    // empty slot keeping its room: the folder's own (on the first hearing of
+    // its case only), then Done, Off calendar and eCourt.
+    const acts = document.createElement("span");
+    acts.className = "ci-actions";
+    const slot = (name, ...els) => {
+      const sl = document.createElement("span");
+      sl.className = "ci-slot s-" + name;
+      for (const el of els) if (el) sl.appendChild(el);
+      acts.appendChild(sl);
+    };
+    const own = controls && r && !r.locked;
+    slot("files", own && canOpenWord() && caseLib.wordDocs(r.listing).length ? wordButton(r) : null, own && caseLib.hasShareLog(r.listing) ? shareLogButton(r) : null);
+    slot("line", own && r.listing ? lineControls(r) : null);
+    if (own && r.status && r.status.state === "stalled") slot("take", takeOverButton(r));
+    const editable = sheet.state === "ok" || sheet.state === "error";
+    slot("done", editable ? doneButton(hg) : null);
+    slot("cal", editable ? calendarButton(hg) : null);
+    slot("ecourt", hearingLib.isWebLink(hg.url) ? ecourtButton(hg) : null);
+    row.appendChild(acts);
     listEl.appendChild(row);
     if (noteEl) listEl.appendChild(noteEl);
   }
