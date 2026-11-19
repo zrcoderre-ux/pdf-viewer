@@ -53,6 +53,10 @@ import {
 } from "./naming-override.js";
 import {
   pageNeedsOcr,
+  pageTextIsGarbled,
+  invisibleTextGarbled,
+  sparseText,
+  pageIsScan,
   ocrPageToTextLayer,
   resetOcr,
   openOcrDocument,
@@ -2440,8 +2444,22 @@ async function renderAllPages() {
     if (signal.aborted) return;
     refs.textContent = await refs.page.getTextContent();
     if (signal.aborted) return;
-    if (ocrEnabled && pageNeedsOcr(refs.textContent)) { refs.textContent = null; ocrQueue.push(refs); continue; }
-    refs.pageWrapper.classList.toggle("no-text", pageNeedsOcr(refs.textContent));
+    // Which pages Recognize text reads (ocr.js): next to no text; an
+    // INVISIBLE text layer too garbled to be the page's words (read instead;
+    // text drawn visibly garbled is left, its picture no better); or a scrap
+    // of text, an e-filing stamp, over a picture covering the page (read, the
+    // stamp kept). The operator list is asked only where the text has garbled
+    // characters at all.
+    const garbled = pageTextIsGarbled(refs.textContent) && (await invisibleTextGarbled(refs.page, pdfjsLib.OPS));
+    if (signal.aborted) return;
+    if (ocrEnabled) {
+      if (pageNeedsOcr(refs.textContent) || garbled) { refs.keepText = null; refs.textContent = null; ocrQueue.push(refs); continue; }
+      if (sparseText(refs.textContent) && (await pageIsScan(refs.page, pdfjsLib.OPS))) {
+        if (signal.aborted) return;
+        refs.keepText = refs.textContent; refs.textContent = null; ocrQueue.push(refs); continue;
+      }
+    }
+    refs.pageWrapper.classList.toggle("no-text", pageNeedsOcr(refs.textContent) || garbled);
     await pageTextFromPdf(refs);
     footerPass();
   }
@@ -3155,8 +3173,16 @@ async function pageTextFromPdf(refs) {
 // on every zoom.
 async function pageTextFromOcr(refs) {
   refs.pageWrapper.classList.add("ocr-running");
+  const keep = refs.keepText || null;
   try {
-    refs.textContent = await ocrPageToTextLayer({
+    // A stamp over a scan: the stamp's own text first, as PDF.js lays it out,
+    // then the recognizer's reading of the rest beside it.
+    if (keep) {
+      const textLayer = new pdfjsLib.TextLayer({ textContentSource: keep, container: refs.textLayerDiv, viewport: refs.displayViewport });
+      await textLayer.render();
+      repairTextLayer(textLayer, keep.items);
+    }
+    const read = await ocrPageToTextLayer({
       page: refs.page,
       pageNumber: refs.pageNumber,
       displayScale: refs.displayViewport.scale,
@@ -3165,13 +3191,18 @@ async function pageTextFromOcr(refs) {
       rotation: refs.rotationDelta,
       textLayerDiv: refs.textLayerDiv,
       setStatus: null, // the progress chip says which pages are being read
+      keep,
     });
+    refs.textContent = keep ? { ...keep, items: [...keep.items, { str: "", hasEOL: true }, ...read.items] } : read;
   } catch (e) {
     // One page the recognizer could not read leaves that page without text;
     // the rest of the document is still read.
     console.warn(`[pdf-viewer] OCR failed on page ${refs.pageNumber}:`, e);
     refs.textLayerDiv.textContent = "";
-    refs.textContent = { items: [] };
+    refs.textContent = keep || { items: [] };
+    if (keep) {
+      try { const tl = new pdfjsLib.TextLayer({ textContentSource: keep, container: refs.textLayerDiv, viewport: refs.displayViewport }); await tl.render(); repairTextLayer(tl, keep.items); } catch { /* the page keeps no text */ }
+    }
     if (!ocrFailureShown) {
       ocrFailureShown = true;
       toast(`Text could not be recognized on page ${refs.pageNumber}.`, { kind: "error", timeout: 6000 });

@@ -179,6 +179,13 @@ In addition to citation linking, the viewer supports:
   URL or name) brings its text straight back without recognizing it again;
   a scan not opened for 30 days is forgotten (Options → "Keep OCR results
   for", 0 = don't keep; "Forget saved OCR" clears them now).
+  Which pages it reads: a page with no text of its own; a scanned page with
+  only an e-filing stamp set over it as text (the stamp keeps its own text and
+  the scan under it is read); and a page whose **invisible** text layer is
+  garbled (boxes when you select or copy it, though the page itself reads
+  fine), whose text is replaced by what the page shows. A page whose garbled
+  text you can **see** on the page is left as it is, so its text matches what
+  the page shows. Ordinary text pages are never read.
 - **Rotate pages** — the **⟳ Rotate pages** tool (or the **R** key) turns a
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate

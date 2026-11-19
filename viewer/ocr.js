@@ -56,6 +56,129 @@ export function pageNeedsOcr(textContent) {
   return n < MIN_CHARS;
 }
 
+// ── Which pages Recognize text reads ─────────────────────────────────────────
+//
+// The owner (2026-11-19): "PDF+ OCR does not work … Yes, the recognize text
+// button." A page was read only where it had next to no text (pageNeedsOcr),
+// and two kinds of page the owner gets every day have some:
+//
+//   A SCAN UNDER A STAMP. eCourt sets its e-filing stamp ("Electronically
+//   FILED by Superior Court of California …") over a scanned page as text, so
+//   the page had a line of text and its scanned body was never read. Such a
+//   page is read where its own text is a scrap (fewer than SPARSE_CHARS) and
+//   a picture covers most of it (imageCoverage, off the page's operator
+//   list); the stamp keeps its own text, and the recognizer's reading of it is
+//   left out (ocrPageToTextLayer's `keep`).
+//
+//   A PAGE WHOSE INVISIBLE TEXT IS GARBLED. The text layer laid over a scan
+//   (drawn invisibly, render mode 3 or 7) can carry private-use code points,
+//   control characters and U+FFFD instead of words, which show as boxes when
+//   selected or copied, while the page itself reads right. Where enough of the
+//   page's INVISIBLE characters are so (pageTextIsGarbled on the whole text,
+//   then invisibleTextCounts off the operator list), the page is read from its
+//   picture and the recognizer's text replaces the PDF's. Text drawn VISIBLY
+//   garbled is left alone (the owner: "When the PDF is visibly garbled, that
+//   should be treated as if it is not garbled. it is only when the invisible
+//   text layer is garbled …"): the picture shows the same boxes, and reading
+//   it gives nothing better.
+export const SPARSE_CHARS = 400;
+const GARBLED_MIN = 12, GARBLED_SHARE = 0.03;
+const isGarbledChar = (c) => {
+  const n = c.codePointAt(0);
+  return (n >= 0xe000 && n <= 0xf8ff) || n === 0xfffd || (n < 0x20 && n !== 9 && n !== 10 && n !== 13) || (n >= 0x7f && n < 0xa0) || (n >= 0xf0000);
+};
+/** The page's characters that are not white space, and those of them that are garbled. */
+export function textCounts(textContent) {
+  let chars = 0, garbled = 0;
+  for (const it of (textContent && textContent.items) || []) {
+    if (typeof it.str !== "string") continue;
+    for (const ch of it.str) {
+      if (/\s/.test(ch)) continue;
+      chars++;
+      if (isGarbledChar(ch)) garbled++;
+    }
+  }
+  return { chars, garbled };
+}
+/** Whether the page's text is too garbled to be its words (above). */
+export function pageTextIsGarbled(textContent) {
+  const { chars, garbled } = textCounts(textContent);
+  return garbled >= GARBLED_MIN && garbled >= chars * GARBLED_SHARE;
+}
+/**
+ * The characters of the text drawn INVISIBLY on a page (render mode 3 or 7),
+ * and those of them garbled, from its operator list (`ops`, pdf.js's OPS as
+ * `O`): each text-showing operation's glyphs carry their `unicode`.
+ */
+export function invisibleTextCounts(ops, O) {
+  let chars = 0, garbled = 0;
+  if (!ops || !O) return { chars, garbled };
+  const show = new Set([O.showText, O.showSpacedText, O.nextLineShowText, O.nextLineSetSpacingShowText].filter((x) => x != null));
+  let mode = 0;
+  const stack = [];
+  for (let k = 0; k < ops.fnArray.length; k++) {
+    const fn = ops.fnArray[k];
+    if (fn === O.save) stack.push(mode);
+    else if (fn === O.restore) mode = stack.length ? stack.pop() : 0;
+    else if (fn === O.setTextRenderingMode) mode = ops.argsArray[k][0];
+    else if (show.has(fn) && (mode === 3 || mode === 7)) {
+      const args = ops.argsArray[k] || [];
+      const glyphs = Array.isArray(args[0]) ? args[0] : args;
+      for (const g of glyphs) {
+        if (!g || typeof g !== "object") continue;
+        for (const ch of String(g.unicode || "")) {
+          if (/\s/.test(ch)) continue;
+          chars++;
+          if (isGarbledChar(ch)) garbled++;
+        }
+      }
+    }
+  }
+  return { chars, garbled };
+}
+/** Whether the page's INVISIBLE text is garbled, by the same measure as pageTextIsGarbled. */
+export async function invisibleTextGarbled(page, O) {
+  try {
+    const { chars, garbled } = invisibleTextCounts(await page.getOperatorList(), O);
+    return garbled >= GARBLED_MIN && garbled >= chars * GARBLED_SHARE;
+  } catch { return false; }
+}
+/** Whether the page's own text is no more than a stamp's worth. */
+export function sparseText(textContent) {
+  return textCounts(textContent).chars < SPARSE_CHARS;
+}
+/**
+ * The share of the page's area the largest picture drawn on it covers, from
+ * its operator list (`ops`: { fnArray, argsArray }, pdf.js's OPS as `O`): the
+ * current transform followed through save / restore / transform, and a
+ * picture's area the unit square it is drawn into, so transformed. 0..1.
+ */
+export function imageCoverage(ops, O, pageArea) {
+  if (!ops || !O || !(pageArea > 0)) return 0;
+  const paint = new Set([O.paintImageXObject, O.paintInlineImageXObject, O.paintImageMaskXObject, O.paintImageXObjectRepeat, O.paintJpegXObject].filter((x) => x != null));
+  let m = [1, 0, 0, 1, 0, 0];
+  const stack = [];
+  const mul = (a, b) => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3], a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
+  let best = 0;
+  for (let k = 0; k < ops.fnArray.length; k++) {
+    const fn = ops.fnArray[k];
+    if (fn === O.save) stack.push(m);
+    else if (fn === O.restore) m = stack.length ? stack.pop() : [1, 0, 0, 1, 0, 0];
+    else if (fn === O.transform) m = mul(ops.argsArray[k], m);
+    else if (fn === O.paintFormXObjectBegin && Array.isArray(ops.argsArray[k]) && Array.isArray(ops.argsArray[k][0])) { stack.push(m); m = mul(ops.argsArray[k][0], m); }
+    else if (fn === O.paintFormXObjectEnd) m = stack.length ? stack.pop() : [1, 0, 0, 1, 0, 0];
+    else if (paint.has(fn)) best = Math.max(best, Math.abs(m[0] * m[3] - m[1] * m[2]) / pageArea);
+  }
+  return Math.min(1, best);
+}
+/** Whether a page is a picture under a scrap of text: a picture over half of it at least. */
+export async function pageIsScan(page, O) {
+  try {
+    const vp = page.getViewport({ scale: 1 });
+    return imageCoverage(await page.getOperatorList(), O, vp.width * vp.height) >= 0.5;
+  } catch { return false; }
+}
+
 // Tear down between documents: clears the per-page cache and terminates the
 // worker so a new PDF doesn't inherit stale boxes or leak a worker per load.
 export async function resetOcr() {
@@ -214,6 +337,31 @@ async function recognizeWords(page, pageNumber, setStatus) {
   return words;
 }
 
+/**
+ * The recognized words that do not stand on the page's own text (`keep`'s
+ * items, each a box from its transform, width and height, in the page's own
+ * view at scale 1 — its /Rotate taken, as the picture read was drawn).
+ */
+export function withoutKept(words, keep, page) {
+  let vp;
+  try { vp = page.getViewport({ scale: 1 }); } catch { return words; }
+  const boxes = [];
+  for (const it of keep.items || []) {
+    if (!it || !it.transform || !String(it.str || "").trim()) continue;
+    const [, , c, d, e, f] = it.transform;
+    const h = Math.abs(it.height || Math.hypot(c, d)) || 1;
+    const w = Math.abs(it.width || 0);
+    const pts = [[e, f - h * 0.3], [e + w, f - h * 0.3], [e, f + h], [e + w, f + h]].map(([x, y]) => vp.convertToViewportPoint(x, y));
+    const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+    boxes.push({ x0: Math.min(...xs) - 1.5, x1: Math.max(...xs) + 1.5, y0: Math.min(...ys) - 1.5, y1: Math.max(...ys) + 1.5 });
+  }
+  if (!boxes.length) return words;
+  return words.filter((w) => {
+    const cx = (w.x0 + w.x1) / 2, cy = (w.y0 + w.y1) / 2;
+    return !boxes.some((b) => cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1);
+  });
+}
+
 function getLeftMarginPct() {
   return new Promise((resolve) => {
     chrome.storage.sync.get({ ocrLeftMarginPct: 8 }, ({ ocrLeftMarginPct }) => {
@@ -234,9 +382,12 @@ function getLeftMarginPct() {
 // only their placement changes.
 export async function ocrPageToTextLayer({
   page, pageNumber, displayScale, userHeight, userWidth, rotation = 0,
-  textLayerDiv, setStatus,
+  textLayerDiv, setStatus, keep = null,
 }) {
-  const allWords = await ocrWords(page, pageNumber, setStatus);
+  let allWords = await ocrWords(page, pageNumber, setStatus);
+  // `keep`: the page's own text (a stamp over a scan), laid out already. The
+  // recognizer read it off the picture too; its words there are left out.
+  if (keep && keep.items && keep.items.length) allWords = withoutKept(allWords, keep, page);
 
   // Filter words in the left-margin exclusion zone. The cutoff is a
   // percentage of the page's user-space width, read from storage each call

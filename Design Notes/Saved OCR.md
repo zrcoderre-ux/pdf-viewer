@@ -28,3 +28,38 @@ page, keyed by a SHA-256 of the document's bytes plus the page number.
 
 `test-ocr-store.mjs` pins the pure parts: the key, the record round trip,
 expiry, and which pages survive a page plan.
+
+## Which pages Recognize text reads (`viewer/ocr.js`, 2026-11-19)
+
+The owner: "PDF+ OCR does not work … Yes, the recognize text button", then
+"When the PDF is visibly garbled, that should be treated as if it is not
+garbled. it is only when the invisible text layer is garbled …" and "it should
+always produce a text file that looks like the visible PDF (so it shouldn't
+produce invisible garbles, but should produce visible garbles)".
+
+A page used to be read only where its text layer had under `MIN_CHARS` (8)
+characters, so two kinds of page went unread:
+
+- **A scan under an e-filing stamp.** eCourt sets "Electronically FILED by
+  Superior Court of California …" over a scan as text. A page whose own text
+  is under `SPARSE_CHARS` (400) and a picture covers half of it or more
+  (`imageCoverage` over the operator list, the transform followed through
+  save / restore / transform and form XObjects; `pageIsScan`) is read with the
+  stamp KEPT (`refs.keepText`): PDF.js lays the stamp out first, the
+  recognizer's words standing on it are dropped (`withoutKept`, the items'
+  boxes in the page's view at scale 1), and the textContent is the stamp's
+  items then the recognizer's.
+- **A garbled invisible text layer.** Private-use code points, U+FFFD and
+  control characters (`isGarbledChar`) in at least 12 characters and 3% of
+  the page (`pageTextIsGarbled`), counted again over only the text drawn
+  invisibly (render mode 3 or 7, `invisibleTextCounts` off the glyphs'
+  `unicode` in the operator list; `invisibleTextGarbled`): the page is read
+  and the recognizer's text replaces the layer. Garbled text drawn VISIBLY
+  is the page's own appearance and is left: the text matches what the page
+  shows, boxes and all.
+
+`renderAllPages` decides per page; the operator list is asked only where the
+text has garbled characters at all, or is a scrap. Tests:
+`test-ocr-button.mjs` (a plain scan, a stamped scan, a garbled invisible
+layer, visibly garbled text left, an ordinary page left, and the weighing).
+
