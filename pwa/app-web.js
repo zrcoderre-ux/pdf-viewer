@@ -2875,13 +2875,16 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     // A case folder still in Downloads, marked so it is plain which are left
     // to file (the owner: "It should be visually obvious which case folders on
     // the hearings table are in the downloads folder").
-    if (inDl) {
+    // …only once the hearing is marked done (the owner, 2026-11-20: "Change
+    // the still in download symbol to only show up after I mark the item
+    // done"): a case still being worked belongs in Downloads.
+    if (inDl && hg.mark === "done") {
       row.classList.add("in-downloads");
       const chip = document.createElement("span");
       chip.className = "ci-dl-chip";
       chip.innerHTML = icon("download", { size: 13, stroke: 2.4 });
       chip.setAttribute("aria-label", "In Downloads");
-      chip.title = "This case folder is still in Downloads. Drag the row onto a folder on the left to file it there.";
+      chip.title = "Marked done, and its case folder is still in Downloads. Drag the row onto a folder on the left to file it there.";
       b.querySelector(".ci-name-line").appendChild(chip);
     }
 

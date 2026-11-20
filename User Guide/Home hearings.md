@@ -70,9 +70,10 @@ Each hearing is matched to its case by the case number, in the case name or in
 the eCourt link. When its case folder is found, in Downloads or among the
 folders opened in the app, the hearing row *is* that folder:
 
-- A case folder that is **still in Downloads** has an amber stripe down its
-  row and a **Downloads** chip by its name: those are the ones left to file.
-  Drag the row onto a folder on the left to file it.
+- A hearing you have marked **Done** whose case folder is **still in
+  Downloads** has an amber stripe down its row and a download icon by its
+  name: those are the ones left to file. (A case still being worked shows
+  none.) Drag the row onto a folder on the left to file it.
 - The pill says what PDF-Linker has done in it (Not run yet, Running — ETA …,
   Finished …), and the line under the name names the folder.
 - The folder's buttons are on the row: **Word**, **Log to share**,

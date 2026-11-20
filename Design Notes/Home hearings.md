@@ -817,3 +817,11 @@ Otherwise it usually refers to an earlier motion in that case."
 now (`isGoingNow`) or finished, or last moved, within `RECENT_MS` (7 days).
 The extension still sends 90 days; the summary's count is unchanged (it only
 counts runs going now). `test-claude-runs.mjs`.
+
+### The Downloads marker only once done (2026-11-20)
+
+The owner: "Change the still in download symbol to only show up after I mark
+the item done." The `in-downloads` stripe and `.ci-dl-chip` now need
+`hg.mark === "done"` as well as `inDl`: a case still being worked belongs in
+Downloads; one done and still there is left to file. Dragging a row onto a
+folder works as before, marked or not. `test-hearing-sheet.mjs` 14f.

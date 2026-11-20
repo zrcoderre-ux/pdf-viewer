@@ -918,7 +918,10 @@ async function browserPart() {
     await fillRow.locator(".hearing-tools .ci-ecourt").click();
     check("…and opens the case's eCourt page", (await shell.evaluate(() => window.__opened)).slice(-1)[0], "https://civil.lacourt.org/ecourt/ecms/case?id=444");
     await shell.keyboard.press("Escape");
-    check("a case folder still in Downloads is marked so", await acmeRowB.evaluate((r) => [r.classList.contains("in-downloads"), !!r.querySelector(".ci-dl-chip")]), [true, true]);
+    // The owner (2026-11-20): "Change the still in download symbol to only show up after I mark the item done".
+    check("a case still in Downloads but not done: no marker (it is still being worked)", await acmeRowB.evaluate((r) => [r.classList.contains("in-downloads"), !!r.querySelector(".ci-dl-chip")]), [false, false]);
+    const roeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("23STCV04444"))');
+    check("…one marked done and still in Downloads: marked, to be filed", await roeRowB.evaluate((r) => [r.classList.contains("in-downloads"), !!r.querySelector(".ci-dl-chip")]), [true, true]);
     check("…one not in Downloads is not", await janeRowB.evaluate((r) => r.classList.contains("in-downloads")), false);
     // Undo: the row taken back out, and not added again on the next look.
     await shell.locator("#calendar-changes .cal-item.k-added button", { hasText: "Undo" }).click();
