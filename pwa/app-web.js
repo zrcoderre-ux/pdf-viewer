@@ -1543,13 +1543,23 @@ async function readBriefing(dl) {
     return briefingSeen;
   } catch { return briefingSeen || { entries: [], at: 0, none: true }; }
 }
-/** The row's briefing column: chips, or a faint dash where the extension has said nothing of the hearing yet. */
+// The sheet's rows a hearing's briefing is matched among (briefingsFor's
+// `sameDay`): every upcoming row not off calendar, set by renderHearings.
+let briefRows = null;
+/** The briefing entries a hearing's row shows: one per motion set that day (hearing-sheet.js, briefingsFor). */
+const briefingsOf = (hg, briefing) => (briefing && !briefing.none ? hearingLib.briefingsFor(hg, briefing.entries, briefRows) : []);
+/**
+ * The row's briefing column: chips, or a faint dash where the extension has
+ * said nothing of the hearing yet. A case with more than one motion set that
+ * day (one row, as Copy All writes it) shows one line of chips a motion, each
+ * led by the motion's tag, as the case page works each up apart.
+ */
 function briefingCell(hg, briefing, now) {
   const cell = document.createElement("span");
   cell.className = "ci-brief";
   if (!briefing || briefing.none || hg.mark === "off") return cell;
-  const entry = hearingLib.briefingFor(hg, briefing.entries);
-  if (!entry) {
+  const list = briefingsOf(hg, briefing);
+  if (!list.length) {
     if (hg.caseNumber && hg.mark !== "done") {
       cell.classList.add("none");
       cell.textContent = "—";
@@ -1557,35 +1567,48 @@ function briefingCell(hg, briefing, now) {
     }
     return cell;
   }
-  const asOf = `As of ${caseLib.whenText(entry.at, now)}, from E-Court Suite. Open the case in eCourt to bring it up to date.`;
-  if (now - entry.at > BRIEFING_STALE_MS) cell.classList.add("stale");
-  const chips = hearingLib.briefingChips(entry);
-  // Each chip's due date on a line under it, where any chip has one; a chip
-  // without keeps the line blank, so the chips stay one height.
-  const dueLine = chips.some((c) => c.due);
-  for (const ch of chips) {
-    const chip = document.createElement("span");
-    chip.className = "ci-chip st-" + ch.state + (dueLine ? " has-due" : "");
-    const top = document.createElement("span");
-    top.className = "cc-label";
-    top.textContent = ch.label + (ch.mark ? " " + ch.mark : "");
-    chip.appendChild(top);
-    if (dueLine) {
-      const due = document.createElement("span");
-      due.className = "cc-due";
-      due.textContent = ch.due || "\u00a0";
-      chip.appendChild(due);
+  const multi = list.length > 1;
+  if (multi) cell.classList.add("multi");
+  const lines = [];
+  for (const entry of list) {
+    const asOf = `As of ${caseLib.whenText(entry.at, now)}, from E-Court Suite. Open the case in eCourt to bring it up to date.`;
+    const group = multi ? document.createElement("span") : cell;
+    if (multi) {
+      group.className = "ci-brief-group";
+      const tag = document.createElement("span");
+      tag.className = "ci-brief-tag";
+      tag.textContent = hearingLib.motionTag(entry.motionType);
+      tag.title = entry.motionType || "";
+      group.appendChild(tag);
+      cell.appendChild(group);
     }
-    chip.title = ch.title + "\n" + asOf;
-    cell.appendChild(chip);
+    if (now - entry.at > BRIEFING_STALE_MS) group.classList.add("stale");
+    const chips = hearingLib.briefingChips(entry);
+    // Each chip's due date on a line under it, where any chip has one; a chip
+    // without keeps the line blank, so the chips stay one height.
+    const dueLine = chips.some((c) => c.due);
+    for (const ch of chips) {
+      const chip = document.createElement("span");
+      chip.className = "ci-chip st-" + ch.state + (dueLine ? " has-due" : "");
+      const top = document.createElement("span");
+      top.className = "cc-label";
+      top.textContent = ch.label + (ch.mark ? " " + ch.mark : "");
+      chip.appendChild(top);
+      if (dueLine) {
+        const due = document.createElement("span");
+        due.className = "cc-due";
+        due.textContent = ch.due || "\u00a0";
+        chip.appendChild(due);
+      }
+      chip.title = (multi && entry.motionType ? entry.motionType + " — " : "") + ch.title + "\n" + asOf;
+      group.appendChild(chip);
+    }
+    lines.push((multi && entry.motionType ? entry.motionType + ": " : "") + (entry.text || "") + "\n" + asOf);
   }
-  cell.title = (entry.text || "") + "\n" + asOf;
+  cell.title = lines.join("\n\n");
   return cell;
 }
-const briefingMissing = (hg, briefing) => {
-  const e = briefing && !briefing.none ? hearingLib.briefingFor(hg, briefing.entries) : null;
-  return !!e && ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed");
-};
+const briefingMissing = (hg, briefing) => briefingsOf(hg, briefing).some((e) => ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed"));
 
 // Refresh from eCourt: E-Court Suite reads the next ten court days at once
 // (its service worker, "The background refresh"). Home cannot reach eCourt,
@@ -2490,6 +2513,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   if (!section || !listEl) return;
   section.hidden = false;
   const { items, all, open, shownAll, downloaded } = hv;
+  briefRows = (all || []).filter((h) => h.mark !== "off");
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
   // Not redrawn under a note being written; it is once the note is closed.
   if (noteEditing && listEl.contains(document.activeElement)) return;
@@ -2598,12 +2622,15 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   if (!items.length) { if (sheet.state === "ok") empty(marked ? "Every upcoming hearing is off calendar." : "No hearings from today on in the sheet."); return; }
 
   // The briefing column takes room only for the chips there are.
-  const chipMost = Math.max(0, ...items.map(({ hg }) => (hv.briefing && !hv.briefing.none && hg.mark !== "off" ? hearingLib.briefingChips(hearingLib.briefingFor(hg, hv.briefing.entries)).length : 0)));
-  const dashes = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.caseNumber && hg.mark !== "done" && hg.mark !== "off" && !hearingLib.briefingFor(hg, hv.briefing.entries));
+  const chipMost = Math.max(0, ...items.map(({ hg }) => (hv.briefing && !hv.briefing.none && hg.mark !== "off" ? Math.max(0, ...briefingsOf(hg, hv.briefing).map((e) => hearingLib.briefingChips(e).length)) : 0)));
+  const dashes = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.caseNumber && hg.mark !== "done" && hg.mark !== "off" && !briefingsOf(hg, hv.briefing).length);
+  // A row with more than one motion set that day leads each line of chips with its tag.
+  const multiBrief = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.mark !== "off" && briefingsOf(hg, hv.briefing).length > 1);
+  listEl.classList.toggle("has-multi-brief", !!multiBrief);
   listEl.classList.toggle("has-brief", chipMost > 0 || !!dashes);
   listEl.classList.toggle("has-claude", canAskClaude());
   listEl.classList.toggle("has-runs", !!(hv.runs && runsLib && items.some(({ hg, place }) => runsLib.runsForHearing(hg, hv.runs.runs, place ? place.name : "").length)));
-  listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 66 + (chipMost - 1) * 4 : 24) + "px");
+  listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 72 + (chipMost - 1) * 4 : 24) + "px");
   let lastDay = null;
   for (const { hg, place, r, controls, inDl } of items) {
     const dayKey = hg.date || hg.dateText;
@@ -2713,6 +2740,18 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       b.querySelector(".ci-name-line").appendChild(chip);
     }
 
+    // More than one motion set that day for the case (the case page's "⚠ N
+    // motions set <date>"): said by the name, the motions on its hover.
+    {
+      const set = hg.mark === "off" ? [] : briefingsOf(hg, hv.briefing);
+      if (set.length > 1) {
+        const badge = document.createElement("span");
+        badge.className = "ci-motions-chip";
+        badge.textContent = `⚠ ${set.length} motions`;
+        badge.title = `${set.length} motions set ${hg.date ? new Date(hg.date).toLocaleDateString() : "that day"}, each worked up apart in eCourt:\n` + set.map((e) => "• " + (e.motionType || "motion")).join("\n");
+        b.querySelector(".ci-name-line").appendChild(badge);
+      }
+    }
     // A LEAKS sheet in the case folder: PDF-Linker flagged values to answer.
     if (r && !r.locked && r.status && r.status.leaks) b.querySelector(".ci-name-line").appendChild(leaksChip());
 

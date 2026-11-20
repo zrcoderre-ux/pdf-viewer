@@ -22,7 +22,7 @@ import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
   hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
-  fillEcourtLinks, ecourtUrlOf,
+  fillEcourtLinks, ecourtUrlOf, briefingsFor, motionTag,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -257,6 +257,30 @@ check("timely only if served personally", briefingChips({ kind: "motion", motion
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
 check("the file's name", BRIEFING_FILE, "E-Court Briefing Status.json");
+
+console.log("1b2. several motions the same day, as E-Court works them");
+{
+  // The owner (2026-11-20): "Look at how e-court handles multiple motions on the
+  // same day and make sure that a similar approach works for pdf home page".
+  const D = day(2026, 12, 4);
+  const ent = (motionType, at = 1) => ({ caseNumber: "25STCV12345", day: "2026-12-04", motionType, key: "25STCV12345|2026-12-04|" + motionType.toLowerCase().replace(/[^a-z0-9]+/g, ""), kind: "motion", motion: slot("filed"), at });
+  const es = [ent("Demurrer - without Motion to Strike"), ent("Motion for Summary Judgment"), { ...ent("Motion for Summary Judgment", 5), opp: slot("late") }];
+  const one = { caseNumber: "25STCV12345", date: D, motion: "Demurrer - without Motion to Strike Motion for Summary Judgment" };
+  check("one row (Copy All's): every motion of the day, the newest report of each", briefingsFor(one, es, [one]).map((e) => [e.motionType, e.at]), [["Demurrer - without Motion to Strike", 1], ["Motion for Summary Judgment", 5]]);
+  check("…a motion the row does not name (since dropped) left off", briefingsFor({ ...one, motion: "Demurrer" }, es, null).map((e) => e.motionType), ["Demurrer - without Motion to Strike"]);
+  check("…the owner's abbreviations count", briefingsFor({ ...one, motion: "MSJ" }, es, null).map((e) => e.motionType), ["Motion for Summary Judgment"]);
+  check("…a row naming none of them shows them all", briefingsFor({ ...one, motion: "Hearing" }, es, null).length, 2);
+  const dem = { caseNumber: "25STCV12345", date: D, motion: "Demurrer" };
+  const msj = { caseNumber: "25STCV12345", date: D, motion: "MSJ" };
+  const mts = { caseNumber: "25STCV12345", date: D, motion: "Motion to Strike (not Initial Pleading)" };
+  const rows = [dem, msj, mts];
+  check("rows split by hand: each row its own motion", [dem, msj].map((h) => briefingsFor(h, es, rows).map((e) => e.motionType)), [["Demurrer - without Motion to Strike"], ["Motion for Summary Judgment"]]);
+  check("…a motion to strike beside the demurrer shares the demurrer's (as the case page folds it in)", briefingsFor(mts, es, rows).map((e) => e.motionType), ["Demurrer - without Motion to Strike"]);
+  check("…a row with no motion of its own reported: none", briefingsFor({ caseNumber: "25STCV12345", date: D, motion: "Motion to Compel" }, es, [dem, msj, { caseNumber: "25STCV12345", date: D, motion: "Motion to Compel" }]).length, 0);
+  const bare = { caseNumber: "25STCV12345", date: D, motion: "Hearing" };
+  check("…one row and one entry left over pair up", briefingsFor(bare, [ent("Demurrer"), ent("Motion to Compel Arbitration")], [dem, bare]).map((e) => e.motionType), ["Motion to Compel Arbitration"]);
+  check("tags", ["Motion for Summary Judgment", "Demurrer - without Motion to Strike", "Hearing on Motion to Compel Further Discovery Responses", "Motion to Strike or Tax Costs"].map(motionTag), ["MSJ", "Demurrer", "Compel Discovery", "Tax costs"]);
+}
 
 console.log("1c. an eCourt link for a hearing the sheet gives none");
 {
@@ -743,6 +767,22 @@ async function browserPart() {
     check("…the briefing in one column down the list, whatever the status beside it", await shell.$$eval("#hearing-list .ci-brief", (bs) => new Set(bs.map((b) => Math.round(b.getBoundingClientRect().left))).size), 1);
     await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
     check("…and the summary counts the briefing not filed", /1 with briefing not filed/.test(await shell.textContent("#hearings-summary")), true);
+    // Two motions the same day, on one row as Copy All writes it: a line of chips each, and a badge.
+    await putBriefing([
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer - without Motion to Strike", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("missing", "Not Filed"), at: Date.now() },
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer to Cross-Complaint", key: "a2", kind: "motion", motion: st("filed"), opp: st("pending"), reply: null, at: Date.now() },
+      { caseNumber: "24STCV00777", day: iso(inDays(2)), motionType: "MSJ", key: "b", kind: "motion", motion: st("filed"), opp: st("pending", "Not Posted Yet"), reply: null, at: Date.now() },
+    ]);
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-brief-group").length === 2, null, { timeout: 15000 });
+    check("two motions the same day: a line of chips a motion, each led by its tag", await acmeRowB.locator(".ci-brief-group").evaluateAll((gs) => gs.map((g) => [g.querySelector(".ci-brief-tag").textContent, [...g.querySelectorAll(".cc-label")].map((x) => x.textContent)])),
+      [["Demurrer", ["Mot ✓", "Opp ✓", "Rep ✗"]], ["Demurrer", ["Mot ✓", "Opp"]]]);
+    check("…and a badge by the name, as the case page's", await acmeRowB.locator(".ci-motions-chip").textContent(), "⚠ 2 motions");
+    check("…a case with one motion: as before, no tag, no badge", [await doeRowB.locator(".ci-brief-group").count(), await doeRowB.locator(".ci-motions-chip").count()], [0, 0]);
+    check("…every chip whole in its column", await shell.$$eval("#hearing-list .ci-brief", (bs) => bs.every((b) => { const c = b.getBoundingClientRect(); return [...b.querySelectorAll(".ci-chip")].every((x) => x.getBoundingClientRect().right <= c.right + 0.5); })), true);
+    await shell.setViewportSize({ width: 1600, height: 900 }); await shell.waitForTimeout(400);
+    check("…and, on a wide screen, the chips of every row start in one line", await shell.$$eval("#hearing-list .ci-brief", (bs) => new Set(bs.map((b) => b.querySelector(".ci-chip")).filter(Boolean).map((x) => Math.round(x.getBoundingClientRect().left))).size), 1);
+    check("…whole there too", await shell.$$eval("#hearing-list .ci-brief", (bs) => bs.every((b) => { const c = b.getBoundingClientRect(); return [...b.querySelectorAll(".ci-chip")].every((x) => x.getBoundingClientRect().right <= c.right + 0.5); })), true);
+    await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
     // The case page works the reply out again: it is in.
     await putBriefing([
       { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("filed"), at: Date.now() },

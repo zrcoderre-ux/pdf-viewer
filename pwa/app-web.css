@@ -700,7 +700,18 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 /* Its due date under the label ("Due 11/14"), smaller and in the text colour. */
 .ci-chip.has-due { flex-direction: column; align-items: center; min-width: 66px; box-sizing: border-box; padding: 2px 6px 3px; line-height: 1.2; }
 .ci-chip .cc-due { font-size: 10.5px; font-weight: 500; color: var(--c-text-2); font-variant-numeric: tabular-nums; }
-@media (max-width: 1300px) { .home-app .ci-brief { width: auto; min-width: 0; } }
+/* A case with more than one motion that day: a line of chips a motion, each led by its tag (briefingCell). */
+.home-app #hearing-list.has-multi-brief .ci-brief { width: calc(var(--brief-w, 0px) + 88px); }
+/* …and a row of one motion keeps its chips in line with theirs. */
+.home-app #hearing-list.has-multi-brief .ci-brief:not(.multi):not(.none) { padding-left: 84px; }
+.home-app #hearing-list.has-multi-brief .ci-brief.none { padding-left: 90px; }
+.home-app .ci-brief.multi { flex-direction: column; align-items: flex-start; gap: 3px; padding: 3px 0; }
+.home-app .ci-brief-group { display: inline-flex; align-items: center; gap: 4px; }
+.home-app .ci-brief-group.stale { opacity: 0.55; }
+.home-app .ci-brief-tag { flex: none; width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-label, 11.5px); font-weight: 600; color: var(--c-text-2); }
+.ci-motions-chip { flex: none; align-self: center; display: inline-flex; align-items: center; height: 18px; margin-left: 8px; padding: 0 6px; border-radius: 4px; background: rgba(234, 179, 8, 0.16); border: 1px solid rgba(202, 138, 4, 0.5); color: #a16207; font-size: 10.5px; font-weight: 700; white-space: nowrap; cursor: default; }
+:root:not([data-theme="light"]) .ci-motions-chip { color: #facc15; }
+@media (max-width: 1300px) { .home-app .ci-brief { width: auto; min-width: 0; } .home-app #hearing-list.has-multi-brief .ci-brief { width: auto; } }
 /* PDF-Linker's status in its words again (the owner, 2026-11-20: "Since the
    reorganization, there is now more room for the pdf linker status, so lets
    make them full size again"), in a column wide enough for "Finished 11:42 AM

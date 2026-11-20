@@ -1028,19 +1028,111 @@ const isoDay = (at) => {
 };
 
 /**
- * The entry for a hearing: its case number and day; where the day has more
- * than one (two motions set together), the one whose motion shares the most
- * words with the sheet's Motion Type, else the newest. null for none.
+ * The entry for a hearing: the first of briefingsFor's (the best match). null for none.
  */
-export function briefingFor(hg, entries) {
-  if (!hg || !hg.caseNumber || !hg.date || !entries) return null;
+export function briefingFor(hg, entries, sameDay = null) {
+  return briefingsFor(hg, entries, sameDay)[0] || null;
+}
+
+// The words a motion is matched by: the sheet's Motion Type (Copy All's, or the
+// owner's own, abbreviations and all) against E-Court's motionType.
+const MOTION_ABBREVS = [
+  [/\bmsj\b/g, "summary judgment"], [/\bmsa\b/g, "summary adjudication"], [/\bmjop\b/g, "judgment pleadings"],
+  [/\bmtc\b/g, "compel"], [/\bmts\b/g, "strike"], [/\bmtq\b/g, "quash"], [/\bmil\b/g, "limine"],
+  [/\bdemur\b/g, "demurrer"], [/\bjnov\b/g, "notwithstanding verdict"],
+];
+const MOTION_STOP = new Set(["hearing", "motion", "the", "and", "for", "notice", "without", "with", "not", "initial", "pleading", "filed", "party", "parties", "plaintiff", "plaintiffs", "defendant", "defendants"]);
+function motionWords(s) {
+  let t = String(s || "").toLowerCase();
+  for (const [re, to] of MOTION_ABBREVS) t = t.replace(re, to);
+  return new Set(t.split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !MOTION_STOP.has(w)));
+}
+function motionScore(text, e) {
+  const want = motionWords(text);
+  let n = 0;
+  for (const w of motionWords(e && e.motionType)) if (want.has(w)) n++;
+  return n;
+}
+const isStrikeRow = (h) => /\b(motion to )?strike\b/i.test(String(h && h.motion || "")) && !/\bdemurrer\b/i.test(String(h && h.motion || "")) && !/\bcosts?\b/i.test(String(h && h.motion || ""));
+const isDemurrerRow = (h) => /\bdemurrer\b/i.test(String(h && h.motion || ""));
+
+/**
+ * Every briefing entry a hearing's row shows, as E-Court works a case's
+ * motions set the same day (the owner, 2026-11-20: "Look at how e-court
+ * handles multiple motions on the same day and make sure that a similar
+ * approach works for pdf home page for brief status"): its case page works
+ * each motion up apart, under one day (groupWorkableHearings), a standalone
+ * motion to strike folded into the same day's demurrer; Copy All writes them
+ * all into ONE row's Motion Type. So:
+ *
+ *   - one sheet row of the case that day (`sameDay`, the sheet's rows of that
+ *     case and date; null reads as one): every entry of that case and day, one
+ *     per motion, those its Motion Type names first; where some are named and
+ *     some not, only the named (an entry for a motion since dropped stays off);
+ *   - several rows (the owner split them, or the calendar added one): each row
+ *     its own motion's entry, matched one to one by the words their motions
+ *     share, best pairs first; a motion-to-strike row beside a demurrer row of
+ *     the day shares the demurrer's; one row and one entry left over pair up.
+ *
+ * Several entries for one motion (an older report) keep the newest.
+ */
+export function briefingsFor(hg, entries, sameDay = null) {
+  if (!hg || !hg.caseNumber || !hg.date || !entries) return [];
   const day = isoDay(hg.date);
-  const mine = entries.filter((e) => e.caseNumber === hg.caseNumber && e.day === day);
-  if (mine.length <= 1) return mine[0] || null;
-  const words = (s) => new Set(String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["hearing", "motion", "the", "and", "for", "notice"].includes(w)));
-  const want = words(hg.motion);
-  const score = (e) => { let n = 0; for (const w of words(e.motionType)) if (want.has(w)) n++; return n; };
-  return mine.slice().sort((a, b) => score(b) - score(a) || (b.at || 0) - (a.at || 0))[0];
+  const byMotion = new Map();
+  for (const e of entries) {
+    if (!e || e.caseNumber !== hg.caseNumber || e.day !== day) continue;
+    const k = e.key || String(e.motionType || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const was = byMotion.get(k);
+    if (!was || (e.at || 0) > (was.at || 0)) byMotion.set(k, e);
+  }
+  const mine = [...byMotion.values()];
+  if (!mine.length) return [];
+  const rows = (sameDay || []).filter((h) => h && h.caseNumber === hg.caseNumber && h.date === hg.date);
+  if (!rows.includes(hg)) rows.push(hg);
+  // In the order the row names them (Copy All writes the agenda's order),
+  // then by how many words they share, then the newest.
+  const rowText = (() => { let t = String(hg.motion || "").toLowerCase(); for (const [re, to] of MOTION_ABBREVS) t = t.replace(re, to); return t; })();
+  const at = (e) => { let best = Infinity; for (const w of motionWords(e.motionType)) { const i = rowText.indexOf(w); if (i !== -1 && i < best) best = i; } return best; };
+  const order = (list, text) => list.slice().sort((a, b) => at(a) - at(b) || motionScore(text, b) - motionScore(text, a) || (b.at || 0) - (a.at || 0));
+  if (rows.length <= 1) {
+    if (mine.length === 1) return mine;
+    const named = mine.filter((e) => motionScore(hg.motion, e) > 0);
+    return order(named.length ? named : mine, hg.motion);
+  }
+  // Several rows: one entry each.
+  const demurrer = rows.find((h) => isDemurrerRow(h));
+  const own = rows.filter((h) => !(demurrer && isStrikeRow(h)));
+  const pairs = [];
+  for (const h of own) for (const e of mine) { const sc = motionScore(h.motion, e); if (sc > 0) pairs.push({ h, e, sc }); }
+  pairs.sort((a, b) => b.sc - a.sc || (b.e.at || 0) - (a.e.at || 0));
+  const got = new Map(), used = new Set();
+  for (const p of pairs) if (!got.has(p.h) && !used.has(p.e)) { got.set(p.h, p.e); used.add(p.e); }
+  const leftRows = own.filter((h) => !got.has(h)), leftEntries = mine.filter((e) => !used.has(e));
+  if (leftRows.length === 1 && leftEntries.length === 1) got.set(leftRows[0], leftEntries[0]);
+  const target = demurrer && isStrikeRow(hg) ? demurrer : hg;
+  return got.has(target) ? [got.get(target)] : [];
+}
+
+/**
+ * A short tag for a motion, where a row shows more than one: "MSJ",
+ * "Demurrer", "Compel", … (the full motion is the tag's hover).
+ */
+export function motionTag(motionType) {
+  const t = String(motionType || "").replace(/^\s*hearing on\s+/i, "").trim();
+  const low = t.toLowerCase();
+  if (/summary judgment/.test(low)) return /adjudication/.test(low) ? "MSJ/MSA" : "MSJ";
+  if (/summary adjudication/.test(low)) return "MSA";
+  if (/judgment on the pleadings/.test(low)) return "MJOP";
+  if (/\bdemurrer\b/.test(low)) return "Demurrer";
+  if (/\bin limine\b/.test(low)) return "MIL";
+  if (/strike or tax costs|tax costs/.test(low)) return "Tax costs";
+  if (/new trial/.test(low)) return "New trial";
+  if (/reconsider/.test(low)) return "Reconsider";
+  const m = t.match(/^(?:motion|petition|application)\s+(?:to|for)\s+(.+)$/i);
+  const rest = (m ? m[1] : t).replace(/\b(?:the|of|and|a|an|further|responses?|to|for)\b/gi, " ").replace(/\s+/g, " ").trim();
+  const words = rest.split(" ").filter(Boolean).slice(0, 2).join(" ");
+  return words ? words[0].toUpperCase() + words.slice(1) : "Motion";
 }
 
 const SLOT_NAMES = { motion: "Motion", opp: "Opposition", reply: "Reply" };

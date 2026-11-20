@@ -160,6 +160,13 @@ as the eCourt case page colours them:
 - plain: not due yet; dashed ?: nothing on file yet, but eCourt may not have
   posted it.
 
+A case with more than one motion set the same day (eCourt and Copy All put
+them on one row) shows a line of chips for each, led by the motion's short name
+("MSJ", "Demurrer"), and a yellow **⚠ 2 motions** by the case name, as the
+eCourt case page does. A motion to strike set with a demurrer is worked up with
+it, as on the case page. If you split a day's motions onto rows of their own,
+each row shows its own motion.
+
 Hover a chip for its filed date as well and when it was last checked. The
 extension checks whenever you open the case in eCourt (the eCourt button) or
 open that day's agenda, and Home picks it up within seconds. A dash means the

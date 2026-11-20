@@ -688,3 +688,36 @@ makes a draft and brings the papers and date in through `afterCreate` as
 before. Starting the run stays the owner's press. `test-hearing-sheet.mjs`
 14e (the menu, the request) and `test-claude-runs.mjs` (the list read) check
 it; the extension's side is in its own tests.
+
+### Several motions the same day (2026-11-20)
+
+The owner: "Look at how e-court handles multiple motions on the same day and
+make sure that a similar approach works for pdf home page for brief status."
+E-Court's case page works each motion set the same day apart, under one day
+(`groupWorkableHearings`), keyed by `hearingIdentityKey`, a standalone motion
+to strike folded into the day's demurrer, with a "⚠ N motions set <date>"
+badge; eCourt's agenda lists a case's motions in ONE row, and Copy All writes
+them all into one Motion Type cell. Before, the agenda and the hourly refresh
+reported only the row's first motion, and Home took the one entry of a case
+and day for every row of it, so a second motion's row showed the first's
+briefing.
+
+- E-Court now reports every motion of an agenda row (`parseAgendaJobs`'
+  `hearings`, the strike folded in the same way); the agenda page paints its
+  first, as before, and reports the rest.
+- `briefingsFor(hg, entries, sameDay)` (hearing-sheet.js): one sheet row of
+  the case that day gets every entry of it, newest report of each motion, in
+  the order the row names them, and only those it names where it names some
+  (`motionWords`, abbreviations like MSJ, MTC, MJOP read as their words);
+  several rows get one entry each, matched one to one by shared words, a
+  motion-to-strike row beside a demurrer row taking the demurrer's, a lone row
+  and entry left over pairing up. `briefingFor` is its first.
+- `briefingCell` draws a line of chips a motion, each led by `motionTag`
+  ("MSJ", "Demurrer", "Compel Discovery"); the column widens by the tag
+  (`has-multi-brief`) and a row of one motion is indented so every row's chips
+  start in one line on a wide screen. The name line carries "⚠ N motions"
+  (`.ci-motions-chip`), its hover listing them. The summary's "briefing not
+  filed" counts a row where any of its motions has a paper not filed.
+
+Tests: `test-hearing-sheet.mjs` 1b2 (the matcher) and 14c (two lines, tags,
+the badge, chips whole and aligned).
