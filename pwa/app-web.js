@@ -59,7 +59,82 @@ function updateChrome() {
   for (const t of tabs) if (t.split) t.split.setVisible(!showHome && t.id === activeId);
   if (showHome) { renderRecent(); renderCaseFolders(); }
   else { clearTimeout(caseTimer); caseTimer = 0; }
+  updateCaseStrip();
 }
+
+// ---- The case's buttons in the strip --------------------------------------
+//
+// The owner (2026-11-20): "Let's add the home page case buttons ecourt claude
+// run word to the header when the case folder is open" … "Both pdf mode and
+// text mode". While the tab in front is a case folder's reader (in text or in
+// PDF mode: the strip is outside the reader), the strip carries that case's
+// eCourt, Claude run (its workflow menu) and Word, as its hearing's row on
+// Home does: the hearing found in the sheet by the folder's name (the next one,
+// else the latest), the folder read for its Word documents.
+const caseStrip = document.createElement("span");
+caseStrip.id = "case-strip";
+caseStrip.className = "case-strip";
+caseStrip.hidden = true;
+document.querySelector("#tabstrip .strip-spacer")?.after(caseStrip);
+let caseStripDir = null, caseStripSeq = 0;
+function activeCaseDir() {
+  if (homeOpen || !tabs.length) return null;
+  const t = tabs.find((x) => x.id === activeId);
+  if (!t || !t.text) return null;
+  try { return t.iframe.contentWindow.__textReaderSource?.()?.dir || t.dir || null; } catch { return t.dir || null; }
+}
+async function updateCaseStrip(force = false) {
+  const dir = activeCaseDir();
+  if (!dir) { caseStrip.hidden = true; caseStripDir = null; return; }
+  let same = false;
+  try { same = !!caseStripDir && (await caseStripDir.isSameEntry(dir)); } catch { same = false; }
+  if (same && !force) { caseStrip.hidden = !caseStrip.childElementCount; return; }
+  const seq = ++caseStripSeq;
+  caseStripDir = dir;
+  const out = [];
+  try {
+    if (!caseLib) caseLib = await import("./viewer/case-folders.js");
+    if (!hearingLib) hearingLib = await import("./viewer/hearing-sheet.js");
+    let listing = null;
+    try { listing = await readListing(dir); } catch { listing = null; }
+    const r = { name: dir.name, handle: dir, listing, opened: 0, today: false, parent: null, root: null, chain: [dir.name] };
+    let hg = null;
+    const sheet = await loadSheet();
+    const dl = await downloadsDir();
+    if (sheet.state === "ok" && sheet.hearings.length) {
+      hg = hearingLib.hearingForPlace(sheet.hearings, { name: dir.name, numbers: listing ? listingNumbers(listing) : [] }, Date.now());
+      if (hg && dl) {
+        const br = await readBriefing(dl);
+        hearingLib.fillEcourtLinks(sheet.hearings, br && !br.none ? br.calendar : null);
+      }
+    }
+    if (dl) { try { await readClaudeRuns(dl); } catch { /* none */ } }
+    const asStrip = (b, iconName, label) => {
+      b.classList.add("strip-btn", "text");
+      b.innerHTML = `${icon(iconName, { size: 16 })}<span>${label}</span>`;
+      return b;
+    };
+    if (hg && hearingLib.ecourtUrlOf(hg)) {
+      const b = document.createElement("button");
+      b.className = "case-strip-ecourt";
+      b.title = `eCourt: open ${hg.caseNumber || hg.caseName}`;
+      b.addEventListener("click", () => openEcourt(hg));
+      out.push(asStrip(b, "external", "eCourt"));
+    }
+    if (hg && listing && canAskClaude()) out.push(asStrip(claudeButton(hg, r), "message", "Claude run"));
+    if (listing && canOpenWord() && caseLib.wordDocs(listing).length) {
+      const box = wordButton(r);
+      const n = caseLib.wordDocs(listing).length;
+      asStrip(box.querySelector(".ci-word-btn"), "file-word", n > 1 ? `Word (${n})` : "Word");
+      out.push(box);
+    }
+  } catch (e) { console.warn("case strip", e); }
+  if (seq !== caseStripSeq) return;
+  caseStrip.textContent = "";
+  for (const x of out) caseStrip.appendChild(x);
+  caseStrip.hidden = !out.length;
+}
+window.addEventListener("focus", () => updateCaseStrip(true));
 function showHome(on) {
   homeOpen = on;
   for (const t of tabs) t.btn.classList.toggle("active", !on && t.id === activeId);
@@ -1574,7 +1649,7 @@ function briefingCell(hg, briefing, now) {
     if (hg.caseNumber && hg.mark !== "done") {
       cell.classList.add("none");
       cell.textContent = "—";
-      cell.title = "E-Court Suite has not reported this hearing's briefing yet: open the case in eCourt (the eCourt button) or its day's agenda, and it comes in here.";
+      cell.title = "E-Court Suite has not reported this hearing's briefing yet. Its hourly refresh (weekdays, 8 AM to 6 PM, while an eCourt tab is open in Chrome) reads every upcoming hearing on the sheet that has its eCourt link; Refresh from eCourt, above, runs it now.";
     }
     return cell;
   }
@@ -1582,7 +1657,7 @@ function briefingCell(hg, briefing, now) {
   if (multi) cell.classList.add("multi");
   const lines = [];
   for (const entry of list) {
-    const asOf = `As of ${caseLib.whenText(entry.at, now)}, from E-Court Suite. Open the case in eCourt to bring it up to date.`;
+    const asOf = `Last updated ${caseLib.whenText(entry.at, now)} by E-Court Suite, which reads it again every few hours on its own (Refresh from eCourt, above, does it now).`;
     const group = multi ? document.createElement("span") : cell;
     if (multi) {
       group.className = "ci-brief-group";
@@ -1617,6 +1692,16 @@ function briefingCell(hg, briefing, now) {
     lines.push((multi && entry.motionType ? entry.motionType + ": " : "") + (entry.text || "") + "\n" + asOf);
   }
   cell.title = lines.join("\n\n");
+  // When it was last brought up to date, first in the hover (the owner,
+  // 2026-11-20: "It should also show the time of most recent update" … "It
+  // doesn't need to be in the row, just visible on hover over the briefing"):
+  // the oldest of the row's motions, so it never claims more than every chip has.
+  const at = Math.min(...list.map((e) => e.at || 0));
+  // …and what E-Court Suite's own refresh last did, which says why an update
+  // is old (the owner: "it is saying yesterday, which is inaccurate").
+  const rs = briefing.refresh ? hearingLib.refreshText(briefing.refresh, now) : null;
+  const refreshLine = rs ? `E-Court Suite's background refresh: ${rs.text}${rs.title ? " — " + rs.title : ""}` : "E-Court Suite's background refresh has not reported running (it needs E-Court Suite 3.49.30 or later, reloaded, and an eCourt tab open in Chrome, weekdays 8 AM to 6 PM).";
+  if (at) cell.title = `Last updated ${caseLib.whenText(at, now)}\n${refreshLine}\n\n` + cell.title;
   return cell;
 }
 const briefingMissing = (hg, briefing) => briefingsOf(hg, briefing).some((e) => ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed"));

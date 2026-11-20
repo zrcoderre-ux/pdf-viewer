@@ -1139,11 +1139,9 @@ test(12, "a lone file, a light attach and Combined Text.txt keep Replace all on 
         await window.__textReaderLoadLocal(await h.getFile(), h, window.__case);
       });
       await r.page.waitForTimeout(1000);
-      await find(r.page, "vehicle");
-      await replaceAll(r.page, "automobile");
-      check("a light attach: no confirm", r.log.dialogs.filter((d) => d.type === "confirm"), []);
-      check("…and the offer bar says what was not read", await r.page.evaluate(() => [document.getElementById("key-offer-text").textContent, document.getElementById("key-offer-btn").textContent]),
-        ["Replace all changed only the pages on screen: only this file's key is attached; the rest of Case Harness is not read.", "Read the whole folder"]);
+      // The owner (2026-11-20): "remove the open full case folder precaution, it triggers way to often".
+      check("an older build's ask-first flag: ignored, the whole folder read, no offer to read the rest", await r.page.evaluate(() =>
+        /Read the whole folder/.test(document.getElementById("key-offer-btn")?.textContent || "") && !document.getElementById("key-offer")?.hidden), false);
       check("no page errors", r.log.errors, []);
     } finally { await r.close(); }
   }

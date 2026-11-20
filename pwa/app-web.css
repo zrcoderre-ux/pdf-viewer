@@ -814,3 +814,10 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 :root[data-theme="dark"] .ci-run.tone-run .cr-frac, :root[data-theme="dark"] .ci-run.tone-run .cr-line, :root[data-theme="dark"] .home-app .hearings-summary .hs-claude { color: #f0a080; }
 :root[data-theme="dark"] .ci-run.tone-held .cr-frac, :root[data-theme="dark"] .ci-run.tone-paused .cr-frac, :root[data-theme="dark"] .ci-run.tone-quiet .cr-frac, :root[data-theme="dark"] .ci-run.tone-held .cr-line, :root[data-theme="dark"] .ci-run.tone-paused .cr-line, :root[data-theme="dark"] .ci-run.tone-quiet .cr-line { color: #fbbf24; }
 @media (max-width: 1300px) { .home-app .ci-run { width: 150px; } }
+/* The open case's buttons in the strip (app-web.js, updateCaseStrip): eCourt,
+   Claude run and Word, as on its hearing's row on Home. */
+#tabstrip .case-strip { display: inline-flex; align-items: center; gap: 2px; margin-right: 6px; padding-left: 8px; border-left: 1px solid var(--c-border); }
+#tabstrip .case-strip[hidden] { display: none; }
+#tabstrip .case-strip .ci-word { margin: 0; }
+#tabstrip .case-strip .ci-word-btn, #tabstrip .case-strip .ci-claude { opacity: 1; border: none; border-radius: 6px; background: transparent; color: var(--c-text-2); }
+#tabstrip .case-strip .ci-ico-n { display: none; }

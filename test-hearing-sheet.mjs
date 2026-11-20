@@ -777,6 +777,8 @@ async function browserPart() {
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-chip").length >= 5, null, { timeout: 15000 });
     check("each hearing's Motion, Opposition and Reply, as the case page colours them", await chipsOf(acmeRowB), [["Mot ✓", "filed"], ["Opp ✓", "filed"], ["Rep ✗", "missing"]]);
     check("…an opposition not posted yet is unsure, not missing", await chipsOf(doeRowB), [["Mot ✓", "filed"], ["Opp ?", "unposted"]]);
+    // The owner (2026-11-20): "It should also show the time of most recent update".
+    check("…when it was last updated, first in the briefing's hover and on each chip's, not in the row", [/^Last updated \d{1,2}:\d\d\s?[AP]M\n/.test(await acmeRowB.locator(".ci-brief").getAttribute("title")), /Last updated /.test(await acmeRowB.locator(".ci-chip").first().getAttribute("title")), await acmeRowB.locator(".ci-brief-at").count()], [true, true, 0]);
     // The owner (2026-11-20): "expand the Motion Opposition Reply labels to include due dates underneath".
     const dueWant = await shell.evaluate((ms) => { const d = new Date(ms); return `Due ${d.getMonth() + 1}/${d.getDate()}`; }, inDays(-2));
     check("…each with its due date underneath", await acmeRowB.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => {
@@ -784,7 +786,7 @@ async function browserPart() {
       return [c.querySelector(".cc-due").textContent, b.top >= a.bottom - 1, c.scrollWidth <= c.clientWidth];
     })), [[dueWant, true, true], [dueWant, true, true], [dueWant, true, true]]);
     check("…and the chips whole in their column", await shell.$$eval("#hearing-list .ci-brief", (bs) => bs.every((b) => b.scrollWidth <= b.clientWidth + 0.5)), true);
-    check("…a hearing the extension has not reported: a dash that says how to get it", [await janeRowB.locator(".ci-brief").textContent(), /open the case in eCourt/.test(await janeRowB.locator(".ci-brief").getAttribute("title"))], ["—", true]);
+    check("…a hearing the extension has not reported: a dash that says how to get it", [await janeRowB.locator(".ci-brief").textContent(), /Refresh from eCourt/.test(await janeRowB.locator(".ci-brief").getAttribute("title"))], ["—", true]);
     await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(300);
     check("…the briefing in one column down the list, whatever the status beside it", await shell.$$eval("#hearing-list .ci-brief", (bs) => new Set(bs.map((b) => Math.round(b.getBoundingClientRect().left))).size), 1);
     await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);

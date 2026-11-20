@@ -167,7 +167,7 @@ let folderId = "";           // …the id its state is kept under, found again b
 let folderIsText = false;    // …and whether it is the Text Files folder rather than a case folder (looksLikeTextFiles)
 let folderDocs = [];         // [{ name, handle, quarantined }]
 let folderLight = false;     // …attached for its key alone, the whole folder having taken the reader down last time
-// THE WHOLE FOLDER IS THE DEFAULT, UNTIL IT CRASHES. A file opened from a case
+// THE WHOLE FOLDER, ALWAYS (the ask below is gone: see ASK_FOLDER_KEY). A file opened from a case
 // folder the reader knows brings the whole folder with it — the other exports,
 // their PDFs, the reel, the sweep — as it always did. A session that went down
 // holding a whole folder says so at the next open (reportLastStuck, off the
@@ -175,11 +175,16 @@ let folderLight = false;     // …attached for its key alone, the whole folder 
 // key, and the reader ASKS before reading the rest. Choosing the whole folder
 // again (the offer, or "Read the whole folder" in Documents) goes back to the
 // default; if it goes down again, the next open is asking again.
+// REMOVED (the owner, 2026-11-20: "remove the open full case folder
+// precaution, it triggers way to often"): the whole folder comes every time;
+// a session that went down is still said (reportLastStuck), but no longer
+// holds the next folder back. The stored flag of an older build is cleared.
 const ASK_FOLDER_KEY = "textReader.askFolder";
-function askBeforeFolder() { try { return !!localStorage.getItem(ASK_FOLDER_KEY); } catch { return false; } }
-function setAskBeforeFolder(on) {
-  try { if (on) localStorage.setItem(ASK_FOLDER_KEY, "1"); else localStorage.removeItem(ASK_FOLDER_KEY); } catch { /* no storage: the default stands */ }
+function askBeforeFolder() { return false; }
+function setAskBeforeFolder() {
+  try { localStorage.removeItem(ASK_FOLDER_KEY); } catch { /* no storage */ }
 }
+setAskBeforeFolder();
 let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let pdfModeOn = false;       // PDF mode: the folder's PDFs in the PDF viewer, in the text's place ("PDF mode")
 let key = null;              // parsed key (PK.parseKey)
@@ -453,9 +458,6 @@ function reportLastStuck() {
     localStorage.removeItem(DOING_KEY);
   } catch { /* nothing to report */ }
   window.__textReaderLastStuck = stuck;
-  // Down with the whole of a case folder open: the next file asks first. A
-  // breadcrumb from before `whole` was written cannot say, and is taken as yes.
-  if (stuck && stuck.what && stuck.whole !== false) setAskBeforeFolder(true);
   if (!stuck || !stuck.what) {
     console.info("[Text Reader] opened; the last session closed cleanly (nothing left unfinished).");
     return;

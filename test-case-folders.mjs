@@ -328,6 +328,24 @@ async function browserPart() {
     await reader.waitForFunction(() => { const s = window.__textReaderSource && window.__textReaderSource(); return !!(s && s.dir && s.handle); }, null, { timeout: 20000 });
     check("the reader holds the case folder", await reader.evaluate(() => window.__textReaderSource().dir.name), "Case Beta");
     check("…open at its first export", await reader.evaluate(() => window.__textReaderSource().handle.name), "Decl Ashdale.txt");
+    // The owner (2026-11-20): "add the home page case buttons ecourt claude run word to the header when the case folder is open" … "Both pdf mode and text mode".
+    check("the case window's strip: no case buttons where there is nothing to offer (a browser, no Word documents, no hearing)", await caseWin.evaluate(() => document.getElementById("case-strip").hidden), true);
+    await caseWin.evaluate(async () => {
+      const beta = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Beta");
+      const w = await (await beta.getFileHandle("Ruling draft.docx", { create: true })).createWritable(); await w.write("docx"); await w.close();
+      window.pdfplusNative = { openDocument: async () => true, folderPath: async () => "" };
+      window.dispatchEvent(new Event("focus"));
+    });
+    await caseWin.waitForFunction(() => !document.getElementById("case-strip").hidden, null, { timeout: 10000 });
+    check("…with Word documents in the folder, in PDF+: Word in the strip", await caseWin.evaluate(() => [...document.querySelectorAll("#case-strip button")].map((b) => b.textContent.trim())), ["Word"]);
+    await caseWin.evaluate(async () => {
+      const beta = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Beta");
+      await beta.removeEntry("Ruling draft.docx");
+      delete window.pdfplusNative;
+      window.dispatchEvent(new Event("focus"));
+    });
+    await caseWin.waitForFunction(() => document.getElementById("case-strip").hidden, null, { timeout: 10000 });
+    check("…and gone with them", true, true);
     check("…Home still on screen here, no tab opened in its window", [await shell.evaluate(() => document.getElementById("dropzone").hidden), await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length)], [false, 0]);
 
     console.log("8. back at Home: the folder opened is one row, as both");

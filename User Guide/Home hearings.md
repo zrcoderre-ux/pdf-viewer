@@ -173,9 +173,10 @@ eCourt case page does. A motion to strike set with a demurrer is worked up with
 it, as on the case page. If you split a day's motions onto rows of their own,
 each row shows its own motion.
 
-Hover a chip for its filed date as well and when it was last checked. The
-extension checks whenever you open the case in eCourt (the eCourt button) or
-open that day's agenda, and Home picks it up within seconds. A dash means the
+Hover a chip for its filed date as well and when it was last checked. You do
+not need to open the case: the extension's hourly refresh (below) keeps every
+upcoming hearing up to date, and opening the case in eCourt or its day's agenda
+updates it at once too; Home picks it up within seconds. A dash means the
 extension has not looked at that hearing yet. The summary line counts hearings
 with a paper not filed.
 

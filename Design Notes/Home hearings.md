@@ -788,3 +788,23 @@ finished run is shown over one failed days ago. A run still saying running
 row (`runState`'s `stale`), with the hover saying to continue or cancel it in
 the extension. `test-claude-runs.mjs`; `test-hearing-sheet.mjs` 14g (a failed
 and a days-old running run in the file, not counted).
+
+### The case's buttons in the strip; the whole-folder ask removed (2026-11-20)
+
+The owner: "Let's add the home page case buttons ecourt claude run word to the
+header when the case folder is open" … "Both pdf mode and text mode". While
+the tab in front is a case folder's reader (`activeCaseDir`), the tab strip
+carries `#case-strip` after its spacer: eCourt (the hearing's link, or one
+filled in), Claude run (`claudeButton`, the workflow menu) and Word
+(`wordButton`), each only where it has something to open, as on the case's
+hearing row. `updateCaseStrip` reads the folder (`readListing`), finds its
+hearing in the sheet (`hearingForPlace`: the next, else the latest) and runs
+on every `updateChrome` and window focus. The strip is outside the reader, so
+it stands in text and PDF mode alike. `test-case-folders.mjs` 7.
+
+And: "remove the open full case folder precaution, it triggers way to often".
+The reader's ask (text-reader.js `askBeforeFolder`: after a session that went
+down holding a whole folder, the next file came alone with its key and an
+offer to "Read the whole folder") is gone; the whole folder comes every time,
+an older build's stored flag is cleared, and the note saying what the last
+session stopped in stays. `test-folder-save.mjs`.
