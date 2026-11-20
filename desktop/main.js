@@ -540,9 +540,12 @@ function trackWindow(win) {
 // the app alone): MAXIMIZED, as a document is read full screen. Made hidden
 // and maximized before it is shown, so the 1280 x 860 window is never seen
 // first; that size is what it restores to. A window the app opens itself
-// (New window, a tab pulled out of the strip) keeps the size and place it is
-// opened at (setWindowOpenHandler), and a window already open is left at the
-// size it was given when a file arrives in it (deliverFiles).
+// (New window, a tab pulled out of the strip, a case's own window) opens
+// maximized the same way (setWindowOpenHandler, did-create-window; the owner,
+// 2026-11-20: "when it opens a new window, it should be a full sized
+// window"), restoring to the size and place it was opened at. A window
+// already open is left at the size it was given when a file arrives in it
+// (deliverFiles).
 function createWindow() {
   const win = new BrowserWindow(windowOptions({ show: false }));
   win.maximize(); // …which shows it, maximized, but does not focus it:
@@ -561,14 +564,19 @@ function guardContents(contents) {
 
   contents.setWindowOpenHandler(({ url }) => {
     // Another window of the app: allowed, as a window like the first, with
-    // its opener kept (the tab handoff talks to it by postMessage).
+    // its opener kept (the tab handoff talks to it by postMessage). Made
+    // hidden, and maximized before it is shown (did-create-window).
     if (isAppUrl(url) || url.startsWith(`blob:${ORIGIN}/`)) {
-      return { action: "allow", overrideBrowserWindowOptions: windowOptions() };
+      return { action: "allow", overrideBrowserWindowOptions: windowOptions({ show: false }) };
     }
     openExternal(url, BrowserWindow.fromWebContents(contents)).catch(() => {});
     return { action: "deny" };
   });
-  contents.on("did-create-window", (win) => trackWindow(win));
+  contents.on("did-create-window", (win) => {
+    trackWindow(win);
+    win.maximize();
+    win.show();
+  });
 
   // No page ever leaves the app: a link followed in place goes to the browser.
   const stay = (e, url) => {

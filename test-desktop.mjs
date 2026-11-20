@@ -589,6 +589,15 @@ try {
     const there = await until(async () => { const l = await tabLabels(win2); return l.length === 1 && l; });
     truthy("the new window has the document", there && /Opening Brief/.test(there[0]));
     check("…and it left this one", await until(async () => (await tabLabels(win)).length === 2), true);
+    // The owner (2026-11-20): "when it opens a new window, it should be a full
+    // sized window". Maximized as the first window is (a window manager needed).
+    const last = ({ BrowserWindow }) => { const ws = BrowserWindow.getAllWindows(); const w = ws.find((x) => /Opening Brief/.test(x.getTitle())) || ws[ws.length - 1]; return [w.isMaximized(), w.isVisible()]; };
+    if (process.platform !== "linux" || !process.env.PDFPLUS_UNDER_XVFB || process.env.PDFPLUS_WM) {
+      check("…opened maximized and visible", await until(async () => { const v = await app.evaluate(last); return v[0] && v[1] && v; }), [true, true]);
+    } else {
+      console.log("  SKIP  …opened maximized: xvfb-run has no window manager to maximize it");
+      check("…opened visible", (await app.evaluate(last))[1], true);
+    }
     const moved = await activeFrame(win2);
     truthy("…drawn there", await until(() => moved.evaluate(() => window.__pdfViewerPageCount?.() === 1)));
     const before = fs.readFileSync(brief);

@@ -179,8 +179,12 @@ for any other a message box, then `tryAgain` (the dialog again) or `deny`.
 The window PDF+ opens at its start (a PDF Windows handed over, or the app on
 its own) opens MAXIMIZED: made hidden, maximized, then shown, so the 1280 x
 860 it restores to is never seen first (`createWindow`). A window the app opens
-itself keeps the size and place it is opened at, and a file arriving in a
-window already open leaves it at the size it was given. On Linux it is the
+itself (New window, a tab pulled out of the strip, a case's own window) opens
+maximized the same way (`setWindowOpenHandler` makes it hidden,
+`did-create-window` maximizes and shows it), restoring to the size and place
+it was opened at; the owner (2026-11-20): "when it opens a new window, it
+should be a full sized window". A file arriving in a window already open
+leaves it at the size it was given. On Linux it is the
 window manager that maximizes, and `xvfb-run` starts none: `test-desktop.mjs`
 starts openbox on the display where it is installed (CI installs it) and
 passes over that one check where it is not.
