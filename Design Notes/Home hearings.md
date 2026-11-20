@@ -758,3 +758,30 @@ download status/pdf linker status, run status." The Claude column now stands
 after the folder's status (`statusCol.after(runCell(…))` in renderHearings):
 Mot/Opp/Rep, then where the case folder stands and what PDF-Linker did in
 it, then the Claude run. `test-hearing-sheet.mjs` 14g checks the order.
+
+### Show previous (2026-11-20)
+
+The owner: "Add a button for showing previous motions next to the off
+calendar button." `#hearings-past` stands right after `#hearings-all`, hidden
+where the sheet has no hearing in the last `PAST_DAYS` (60). Pressed
+(`hearingsPast`), `hearingItems` appends those hearings, newest first, after
+the upcoming ones (off-calendar ones only with Show off calendar, as for the
+upcoming), and `renderHearings` sets them under a `.hearing-past-head` heading;
+each is matched to its folder and drawn as any other row. `all` and `open`
+stay the upcoming ones, so the summary, calendar sync and the E-Court list
+are as before. `test-hearing-sheet.mjs` 11b.
+
+### "Claude runs going" counts only runs moving now (2026-11-20)
+
+The owner: "It says 16 Claude runs going when actually none are going." The
+count took every run the extension had not finished or canceled (`isGoing`:
+running, queued, held, paused, failed), and since the extension now sends each
+case's most recent run, old failed and stalled ones came with them.
+`isGoingNow` (claude-runs.js) counts a run as going only where it is running,
+queued or held for a usage reset AND has moved within `STALE_MS` (12 hours);
+the summary uses it, and `runsForHearing` ranks by it, so a case's newer
+finished run is shown over one failed days ago. A run still saying running
+(or queued, or held) but not moved in that time reads "Stalled since …" on its
+row (`runState`'s `stale`), with the hover saying to continue or cancel it in
+the extension. `test-claude-runs.mjs`; `test-hearing-sheet.mjs` 14g (a failed
+and a days-old running run in the file, not counted).

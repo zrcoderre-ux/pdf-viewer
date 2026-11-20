@@ -55,15 +55,30 @@ export function parseClaudeRuns(text) {
 export const isGoing = (r) => !!r && GOING.has(r.status);
 
 /**
- * The runs of a hearing's case: by case number where both say one, else
- * where the run's name holds the case folder's name. Going first, newest move
- * first.
+ * Whether a run is going NOW (the owner, 2026-11-20: "It says 16 Claude runs
+ * going when actually none are going"): running, queued or held for a usage
+ * reset, and moved within STALE_MS. A run failed or paused waits on the owner
+ * and is not going; one the extension has not moved in half a day (its
+ * window closed, Chrome quit) is not either, whatever it still says.
  */
-export function runsForHearing(hg, runs, folderName = "") {
+export const STALE_MS = 12 * 3600 * 1000;
+const MOVING = new Set(["running", "pending", "waiting"]);
+export function isGoingNow(r, now = Date.now()) {
+  return !!r && MOVING.has(r.status) && now - (Number(r.at) || 0) < STALE_MS;
+}
+
+/**
+ * The runs of a hearing's case: by case number where both say one, else
+ * where the run's name holds the case folder's name. The one going now first
+ * (isGoingNow), then the newest move.
+ */
+export function runsForHearing(hg, runs, folderName = "", now = Date.now()) {
   const num = String((hg && hg.caseNumber) || "").toUpperCase();
   const folder = String(folderName || "").trim().toLowerCase();
   const mine = (runs || []).filter((r) => (num && r.caseNumber ? r.caseNumber === num : !!folder && folder.length >= 4 && r.name.toLowerCase().includes(folder)));
-  return mine.sort((a, b) => (isGoing(b) - isGoing(a)) || b.at - a.at);
+  // The run going now first, else the most recent (a run failed or left
+  // days ago does not outrank a newer one).
+  return mine.sort((a, b) => (isGoingNow(b, now) - isGoingNow(a, now)) || b.at - a.at);
 }
 
 /**
@@ -116,7 +131,8 @@ export function runLine(r, written, now = Date.now()) {
   const at = currentLabel(r);
   const total = r.total || (r.steps || []).length;
   let line;
-  if (st.tone === "quiet") line = `No word since ${clockText(written, now)}`;
+  if (st.stale) line = `Stalled since ${clockText(r.at, now)}`;
+  else if (st.tone === "quiet") line = `No word since ${clockText(written, now)}`;
   else if (r.status === "running") line = at ? `Running step ${at}` : "Running";
   else if (r.status === "done") line = r.finishedAt ? `Finished ${clockText(r.finishedAt, now)}` : "Finished";
   else if (r.status === "error") line = at ? `Failed at step ${at}` : "Failed";
@@ -135,6 +151,11 @@ export function runLine(r, written, now = Date.now()) {
 export function runState(r, written, now = Date.now()) {
   const steps = r.total ? `${Math.max(1, Math.min(r.step || 1, r.total))}/${r.total}` : "";
   const progress = r.progress || "";
+  // Still "running", "queued" or "held", but not moved in STALE_MS: it is
+  // not going, whatever it says (isGoingNow).
+  if (MOVING.has(r.status) && r.at && now - r.at >= STALE_MS) {
+    return { tone: "quiet", short: "Stalled", stale: true, text: progress, title: `This run has not moved since ${clockText(r.at, now)}, though the Claude extension still lists it as ${r.status === "waiting" ? "held" : r.status === "pending" ? "queued" : "running"}. Open it in the extension's Options to continue or cancel it. ${progress}` };
+  }
   if (r.status === "running") {
     if (written && now - written > QUIET_MS) {
       return { tone: "quiet", short: "No word", text: progress, title: `The Claude extension last said this run was going ${minutesAgo(written, now)}: is Chrome open? ${progress}` };

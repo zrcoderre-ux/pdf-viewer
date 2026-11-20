@@ -38,6 +38,12 @@ Press ✓ again (Not done) to take the green off.
 **Show off calendar** brings those back, with **On calendar** to take the red
 off.
 
+**Show previous**, beside it, adds the hearings of the last 60 days under the
+upcoming ones, newest first, under a "Previous hearings" heading, each with its
+case folder, briefing and buttons as before. Off-calendar ones among them show
+only with Show off calendar too. Press it again (**Hide previous**) to put them
+away. The counts at the top stay about what is ahead.
+
 If the workbook is open in Excel, Windows won't let anything else write to it.
 Home still shows the change, says it is waiting, and writes it into the sheet
 as soon as Excel closes the workbook. It doesn't overwrite what you saved in
@@ -242,8 +248,12 @@ Home is getting its runs, and if not, the one command that fixes it.
 
 Hover the column for the run's history, a line per step with its chat and how
 long it took, as in the extension's Options. Click it to open the chat the run
-last worked in. The summary line counts the runs going ("2 Claude runs going";
-hover it for each one, including runs whose case isn't on the list).
+last worked in. The summary line counts the runs going now ("2 Claude runs
+going": running, queued or held for a usage reset, and moved in the last 12
+hours; hover it for each one, including runs whose case isn't on the list). A
+run that failed or that you paused isn't counted, and one still listed as
+running that hasn't moved in half a day reads **Stalled since …** on its row:
+continue or cancel it in the Claude extension's Options.
 
 The extension updates the file whenever a run changes, and every five minutes
 while one is going. If a run says running but nothing has come from the

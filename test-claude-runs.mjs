@@ -5,7 +5,7 @@
 //
 // Run: node test-claude-runs.mjs   (from the repo root). Every name is invented.
 
-import { parseClaudeRuns, runsForHearing, runState, runLine, stepLines, durationText, isGoing, QUIET_MS, CLAUDE_RUNS_FILE, stepFraction } from "./viewer/claude-runs.js";
+import { parseClaudeRuns, runsForHearing, runState, runLine, stepLines, durationText, isGoing, QUIET_MS, CLAUDE_RUNS_FILE, stepFraction, isGoingNow, STALE_MS } from "./viewer/claude-runs.js";
 
 let fails = 0, passes = 0;
 function check(label, got, want) {
@@ -58,6 +58,13 @@ check("held: why", runLine(b, got.written, NOW).line, "Held: usage limit");
 check("failed: where", runLine({ ...a, status: "error", steps: [{ label: "1", state: "done" }, { label: "2", state: "failed" }] }, got.written, NOW).line, "Failed at step 2");
 check("gone quiet: since when", runLine(a, NOW - QUIET_MS - 60000, NOW).line.startsWith("No word since "), true);
 check("the history, a line a step", stepLines(a), ["1 · Chat A — done, 4m 12s", "2 · Chat B — running now", "3 · Chat A — to come"]);
+// The owner (2026-11-20): "It says 16 Claude runs going when actually none are going".
+check("going now: running, queued or held, and moved lately; not failed, paused, done, or left for days", [
+  isGoingNow({ status: "running", at: NOW - 60000 }, NOW), isGoingNow({ status: "waiting", at: NOW - 3600000 }, NOW), isGoingNow({ status: "pending", at: NOW - 60000 }, NOW),
+  isGoingNow({ status: "error", at: NOW }, NOW), isGoingNow({ status: "paused", at: NOW }, NOW), isGoingNow({ status: "done", at: NOW }, NOW),
+  isGoingNow({ status: "running", at: NOW - STALE_MS - 1 }, NOW)], [true, true, true, false, false, false, false]);
+check("…one left days ago reads as stalled, not running", runLine({ status: "running", at: NOW - 2 * 86400000, step: 2, total: 3, steps: [] }, NOW, NOW).tone, "quiet");
+check("…and a case's newer finished run outranks its run failed days ago", runsForHearing({ caseNumber: "25STCV12345" }, [{ id: "old", caseNumber: "25STCV12345", status: "error", at: NOW - 5 * 86400000, name: "x" }, { id: "new", caseNumber: "25STCV12345", status: "done", at: NOW - 86400000, name: "y" }], "", NOW).map((r) => r.id), ["new", "old"]);
 check("durations", [durationText(38000), durationText(252000), durationText(3900000)], ["38s", "4m 12s", "1h 05m"]);
 
 console.log(`\n${passes} passed, ${fails} failed`);

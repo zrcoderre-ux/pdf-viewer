@@ -651,6 +651,25 @@ async function browserPart() {
     await shell.waitForFunction(() => document.querySelectorAll("#case-list .case-item").length === 1, null, { timeout: 10000 });
     check("the Case folders list unchanged", await caseNames(), ["Case Zeta"]);
 
+    console.log("11b. Show previous: the hearings already past");
+    // The owner (2026-11-20): "Add a button for showing previous motions next to the off calendar button".
+    check("beside Show off calendar, counting the past ones", await shell.evaluate(() => { const b = document.getElementById("hearings-past"); return [b.hidden, b.textContent, b.previousElementSibling && b.previousElementSibling.id]; }), [false, "Show previous (1)", "hearings-all"]);
+    check("…none shown until pressed", await shell.$$eval("#hearing-list .hearing-past-head", (x) => x.length), 0);
+    await shell.click("#hearings-past");
+    await shell.waitForFunction(() => !!document.querySelector("#hearing-list .hearing-past-head"), null, { timeout: 10000 });
+    check("pressed: under the upcoming ones, a heading, then the past hearing", await shell.evaluate(() => {
+      const kids = [...document.getElementById("hearing-list").children];
+      const at = kids.findIndex((k) => k.classList.contains("hearing-past-head"));
+      const after = kids.slice(at + 1).filter((k) => k.classList.contains("hearing-row")).map((k) => k.querySelector(".ci-num").textContent);
+      const before = kids.slice(0, at).filter((k) => k.classList.contains("hearing-row")).length;
+      return [before > 0, after];
+    }), [true, ["21STCV01111"]]);
+    check("…and the button says Hide", await shell.textContent("#hearings-past"), "Hide previous");
+    check("…the summary still counts only what is ahead", /to work up/.test(await shell.textContent("#hearings-summary")) && !/5 to work up/.test(await shell.textContent("#hearings-summary")), true);
+    await shell.click("#hearings-past");
+    await shell.waitForFunction(() => !document.querySelector("#hearing-list .hearing-past-head"), null, { timeout: 10000 });
+    check("pressed again: gone", await shell.textContent("#hearings-past"), "Show previous (1)");
+
     console.log("12. every folder on a hearing: no Case folders list");
     await shell.evaluate(async () => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
@@ -953,6 +972,8 @@ async function browserPart() {
         steps: [{ label: "1", chat: "Chat A", state: "done", ms: 252000 }, { label: "2", chat: "Chat B", state: "here" }, { label: "3", chat: "Chat A", state: "todo" }] },
       { id: "r0", name: "25STCV12345 ACME — earlier", caseNumber: "25STCV12345", status: "done", progress: "Finished all 3 steps", step: 3, total: 3, at: Date.now() - 7200000, finishedAt: Date.now() - 7200000 },
       { id: "r2", name: "Somebody Else v. Nobody", template: "Bench memo", caseNumber: "", status: "waiting", held: "usage limit", progress: "Step 1 of 4", step: 1, total: 4, at: Date.now() - 600000 },
+      { id: "r3", name: "Old v. Failed", caseNumber: "", status: "error", error: "no reply", progress: "Step 2 of 4", step: 2, total: 4, at: Date.now() - 3 * 86400000 },
+      { id: "r4", name: "Left v. Behind", caseNumber: "", status: "running", progress: "Step 1 of 2", step: 1, total: 2, at: Date.now() - 4 * 86400000 },
     ] });
     await shell.waitForFunction(() => document.getElementById("hearing-list").classList.contains("has-runs"), null, { timeout: 15000 });
     const runCellOf = acmeRowB.locator(".ci-run");
@@ -965,7 +986,7 @@ async function browserPart() {
     await shell.setViewportSize({ width: 2560, height: 1300 }); await shell.waitForTimeout(400);
     check("other rows keep the column empty, so it lines up", await shell.$$eval("#hearing-list .ci-run", (xs) => [xs.filter((x) => x.classList.contains("has")).length, new Set(xs.map((x) => Math.round(x.getBoundingClientRect().left))).size]), [1, 1]);
     await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
-    check("the summary counts the runs going, the one on no hearing too", await shell.textContent("#hearings-summary .hs-claude"), "2 Claude runs going");
+    check("the summary counts the runs going, the one on no hearing too; not one failed, nor one left days ago", await shell.textContent("#hearings-summary .hs-claude"), "2 Claude runs going");
     await shell.keyboard.press("Escape");
     const opened1 = await shell.evaluate(() => window.__opened.length);
     await runCellOf.click();

@@ -1856,6 +1856,11 @@ const DOWNLOADS_INDEX_MS = 60000; // Downloads' own names are read again this of
 let hearingLib = null;
 let sheetSeen = null;   // { key, hearings, sheets, readAt }
 let hearingsAll = false; // "Show off calendar"
+// "Show previous" (the owner, 2026-11-20: "Add a button for showing previous
+// motions next to the off calendar button"): the hearings of the last
+// PAST_DAYS, under the upcoming ones, newest first.
+let hearingsPast = false;
+const PAST_DAYS = 60;
 let hearingsShown = "";
 let downloadsIndexSeen = null; // { at, name, places }
 
@@ -2210,7 +2215,7 @@ function runCell(hg, placeName, runs, now) {
   const cell = document.createElement("span");
   cell.className = "ci-run";
   if (!runs || !runsLib) return cell;
-  const mine = runsLib.runsForHearing(hg, runs.runs, placeName);
+  const mine = runsLib.runsForHearing(hg, runs.runs, placeName, now);
   if (!mine.length) return cell;
   const r = mine[0];
   const { tone, line } = runsLib.runLine(r, runs.written, now);
@@ -2455,7 +2460,7 @@ async function isInDownloads(dl, h) {
   try { const p = await dl.resolve(h); return Array.isArray(p) && p.length > 0; } catch { return false; }
 }
 async function hearingItems(rows, sheet, dl, dlState, now) {
-  const empty = { items: [], all: [], open: [], shownAll: [], downloaded: 0, matched: new Set() };
+  const empty = { items: [], all: [], open: [], shownAll: [], downloaded: 0, pastCount: 0, matched: new Set() };
   if (!sheet.hearings.length) return empty;
   // Where each case may stand: the folders listed (opened here, today's in
   // Downloads), then everything else in Downloads, by name.
@@ -2478,7 +2483,12 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
   // owner: "There should be a checkmark next to it on the home screen
   // indicating it is done"); one off calendar only with Show off calendar.
   const shownAll = hearingsAll ? all : all.filter((h) => h.mark !== "off");
-  const list = shownAll.slice(0, HEARING_ROWS_MAX);
+  // The hearings already past, newest first, for Show previous.
+  const today0 = new Date(now).setHours(0, 0, 0, 0);
+  const pastAll = sheet.hearings.filter((h) => h.date && h.date < today0 && h.date >= today0 - PAST_DAYS * 86400000)
+    .sort((a, b) => b.date - a.date || a.row - b.row);
+  const pastShown = hearingsAll ? pastAll : pastAll.filter((h) => h.mark !== "off");
+  const list = shownAll.slice(0, HEARING_ROWS_MAX).concat(hearingsPast ? pastShown.slice(0, HEARING_ROWS_MAX) : []);
   const items = [];
   const owner = new Map();
   const links = await hearingLinks();
@@ -2518,7 +2528,7 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
     const p = it ? it.place : hearingLib.findPlace(h, places);
     return p && (p.kind === "folder" || p.kind === "opened");
   }).length;
-  return { items, all, open, shownAll, downloaded, matched: new Set(owner.keys()) };
+  return { items, all, open, shownAll, downloaded, pastCount: pastShown.length, matched: new Set(owner.keys()) };
 }
 
 const LOCKED_STATUS = { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" };
@@ -2534,7 +2544,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const folderSt = (r) => (r.locked ? LOCKED_STATUS : caseLib.statusText(r.status, now));
   // Not redrawn under a note being written; it is once the note is closed.
   if (noteEditing && listEl.contains(document.activeElement)) return;
-  const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, dlState, downloaded, all.length, open.length,
+  const sig = [sheet.state, sheet.name, sheet.error ? 1 : 0, sheet.readAt, hearingsAll, hearingsPast, hv.pastCount, dlState, downloaded, all.length, open.length,
     (calLog || []).map((e) => e.id + (e.undone ? "u" : "") + (e.cleared ? "c" : "") + (e.resolved ? "r" : "")).join(","), calState.waiting, calState.why, calState.refused.length,
     hv.runs ? hv.runs.key : "", Math.floor(now / 120000),
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
@@ -2561,6 +2571,12 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const marked = offCount;
   allBtn.hidden = !offCount;
   allBtn.textContent = hearingsAll ? "Hide off calendar" : `Show off calendar (${offCount})`;
+  const pastBtn = document.getElementById("hearings-past");
+  if (pastBtn) {
+    pastBtn.hidden = !hv.pastCount;
+    pastBtn.textContent = hearingsPast ? "Hide previous" : `Show previous (${hv.pastCount})`;
+    pastBtn.title = `The hearings of the last ${PAST_DAYS} days, under the upcoming ones${hearingsAll ? "" : " (off calendar ones with Show off calendar)"}`;
+  }
 
   const notDl = open.length - downloaded;
   sumEl.hidden = !open.length && !doneCount;
@@ -2574,7 +2590,9 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const unbriefed = open.filter((h) => briefingMissing(h, hv.briefing)).length;
     if (unbriefed) add(`${unbriefed} with briefing not filed`, "hs-warn");
     // The Claude runs going, the ones on no hearing of the list included.
-    const going = hv.runs && runsLib ? hv.runs.runs.filter(runsLib.isGoing) : [];
+    // Only runs moving now (isGoingNow): not a failed or paused one, nor one
+    // left days ago still saying "running".
+    const going = hv.runs && runsLib ? hv.runs.runs.filter((r) => runsLib.isGoingNow(r, now)) : [];
     if (going.length) {
       const sp = document.createElement("span");
       sp.className = "hs-claude";
@@ -2649,7 +2667,17 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   listEl.classList.toggle("has-runs", !!(hv.runs && runsLib && items.some(({ hg, place }) => runsLib.runsForHearing(hg, hv.runs.runs, place ? place.name : "").length)));
   listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 72 + (chipMost - 1) * 4 : 24) + "px");
   let lastDay = null;
+  const today0 = new Date(now).setHours(0, 0, 0, 0);
+  let pastHead = false;
   for (const { hg, place, r, controls, inDl } of items) {
+    // The previous hearings (Show previous) under a heading of their own.
+    if (!pastHead && hg.date && hg.date < today0) {
+      pastHead = true;
+      const ph = document.createElement("div");
+      ph.className = "hearing-past-head";
+      ph.textContent = `Previous hearings · the last ${PAST_DAYS} days, newest first`;
+      listEl.appendChild(ph);
+    }
     const dayKey = hg.date || hg.dateText;
     if (dayKey !== lastDay) {
       lastDay = dayKey;
@@ -2887,6 +2915,11 @@ document.getElementById("hearings-link")?.addEventListener("click", async () => 
 });
 document.getElementById("hearings-all")?.addEventListener("click", () => {
   hearingsAll = !hearingsAll;
+  hearingsShown = "";
+  renderCaseFolders();
+});
+document.getElementById("hearings-past")?.addEventListener("click", () => {
+  hearingsPast = !hearingsPast;
   hearingsShown = "";
   renderCaseFolders();
 });
