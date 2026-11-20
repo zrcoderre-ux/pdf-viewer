@@ -189,6 +189,16 @@ window manager that maximizes, and `xvfb-run` starts none: `test-desktop.mjs`
 starts openbox on the display where it is installed (CI installs it) and
 passes over that one check where it is not.
 
+An eCourt case page (an `https://civil.lacourt.org/ecourt/…` link: Home's
+eCourt button, the open case's strip) opens in a Chrome window of its own:
+`openExternal` starts Chrome with `--new-window` (`openInNewChromeWindow`,
+Chrome found under Program Files or the user's Local AppData), which a running
+Chrome takes into its last-used profile, E-Court Suite's (the owner,
+2026-11-20: "clicking e-court should open it in its own window, rather than a
+new tab in the current window"). Refresh from eCourt's page (the site's root
+with a hash) stays a tab, since it closes itself; with no Chrome found, the
+link opens as any other.
+
 New window and a tab pulled out of the strip use `window.open` with the
 opener kept; `setWindowOpenHandler` allows app URLs as a window like the
 first. Electron shows no dialog for `beforeunload`: the close is simply

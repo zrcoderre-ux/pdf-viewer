@@ -186,6 +186,32 @@ const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.
 // It carries a folder token and a nonce, and PDF-Linker runs only on the
 // request file the reader writes beside it, so it goes without asking.
 const APP_SCHEMES = ["pdf-linker:"];
+// An eCourt case page opens in a Chrome window of its own (the owner,
+// 2026-11-20: "clicking e-court should open it in its own window, rather than
+// a new tab in the current window"): Chrome started with --new-window, which
+// a running Chrome takes into its last-used profile (E-Court Suite's).
+// Refresh from eCourt's page (a hash on the site's root) stays a tab: it
+// closes itself when done. No Chrome found: opened as any link.
+const NEW_WINDOW_LINK = (u) => u.protocol === "https:" && /^civil\.lacourt\.org$/i.test(u.hostname) && /^\/ecourt\//i.test(u.pathname);
+function chromePath() {
+  if (process.platform !== "win32") return "";
+  const bases = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean);
+  for (const b of bases) {
+    const p = path.join(b, "Google", "Chrome", "Application", "chrome.exe");
+    try { if (fs.existsSync(p)) return p; } catch { /* next */ }
+  }
+  return "";
+}
+function openInNewChromeWindow(href) {
+  const exe = chromePath();
+  if (!exe) return false;
+  try {
+    const child = require("node:child_process").spawn(exe, ["--new-window", href], { detached: true, stdio: "ignore", windowsHide: false });
+    child.on("error", () => { shell.openExternal(href).catch(() => {}); });
+    child.unref();
+    return true;
+  } catch { return false; }
+}
 
 // Content-Security-Policy for every page: scripts only from the app (plus
 // WebAssembly, for OCR), nothing fetched from anywhere else. The network is
@@ -487,6 +513,7 @@ async function openExternal(raw, win) {
     const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
     if (response !== 0) return false;
   }
+  if (NEW_WINDOW_LINK(u) && openInNewChromeWindow(u.href)) return true;
   await shell.openExternal(u.href);
   return true;
 }
