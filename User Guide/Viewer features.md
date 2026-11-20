@@ -193,7 +193,9 @@ In addition to citation linking, the viewer supports:
   Saving a rotation, Organize pages and deleting pages keep the document's
   bookmarks; a bookmark to a page you delete is removed with it.
 The **☀ / 🌙** button in the top bar toggles between dark (default) and light
-themes; the choice is remembered. The **document name** menu renames the file,
+themes; the choice is remembered. Home has the same button at the top right,
+beside its settings; either one switches Home and every open tab and window at
+once. The **document name** menu renames the file,
 sets how it is named, shows its properties, and (for a web PDF) opens the
 original in Chrome's built-in viewer, skipping the linker. For a web PDF,
 **Download** saves the original with a smart filename (see below).

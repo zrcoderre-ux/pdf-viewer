@@ -12,7 +12,7 @@
 import { makeZip } from "./viewer/zip.js";
 import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import { readHearings, setHearingNote, splitNoteLead, dateToSerial, serialToDate, parseBriefingFile } from "./viewer/hearing-sheet.js";
-import { planCalendar, addCalendarRows, removeCalendarRow, sameCase, changeKey, shiftRef, shiftRows, shiftBlocker, sheetLayout, changeText, dayAt } from "./viewer/calendar-sync.js";
+import { planCalendar, addCalendarRows, removeCalendarRow, sameCase, changeKey, shiftRef, shiftRows, shiftBlocker, sheetLayout, changeText, dayAt, sheetHearingsList, SHEET_HEARINGS_FILE } from "./viewer/calendar-sync.js";
 
 let fails = 0, passes = 0;
 function check(label, got, want) {
@@ -92,7 +92,7 @@ const cal = {
   gone: [{ day: "2026-11-20", caseId: "12", caseText: "25STCV00002 DOE v. ROE", reason: "moved", status: "Not Held - Continued - Court's Motion", newDay: "2026-12-18" }],
 };
 let plan = planCalendar({ hearings, calendar: cal, now: NOW });
-check("adds: the new case on the 20th, and the 25th", plan.adds.map((a) => [a.day, a.caseText]), [["2026-11-20", "25STCV00009 NEW v. CASE"], ["2026-11-25", "25STCV00010 LATER v. DAY"]]);
+check("adds: the new case on the 20th, the 25th, and the moved one under its new day", plan.adds.map((a) => [a.day, a.caseText, a.movedFrom || ""]), [["2026-11-20", "25STCV00009 NEW v. CASE", ""], ["2026-11-25", "25STCV00010 LATER v. DAY", ""], ["2026-12-18", "25STCV00002 DOE v. ROE", "2026-11-20"]]);
 check("off: the continued one", plan.offs.map((o) => [o.day, o.hg.caseNumber, o.reason, o.newDay]), [["2026-11-20", "25STCV00002", "moved", "2026-12-18"]]);
 check("held: gone from the 23rd with no word why", plan.held.map((o) => [o.day, o.hg.caseNumber, o.reason]), [["2026-11-23", "24STCV00003", "unknown"]]);
 check("the days looked at: from today, read", plan.days, ["2026-11-20", "2026-11-23", "2026-11-25"]);
@@ -100,6 +100,31 @@ plan = planCalendar({ hearings, calendar: cal, now: NOW, log: [{ key: "2026-11-2
 check("nothing done twice: added, marked off, kept", [plan.adds.length, plan.offs.length, plan.held.length], [1, 0, 0]);
 check("a marked row is left alone", planCalendar({ hearings: hearings.map((h) => (h.row === 9 ? { ...h, mark: "done" } : h)), calendar: cal, now: NOW }).held.length, 0);
 check("no calendar, no plan", planCalendar({ hearings, calendar: null }).adds.length, 0);
+// The owner (2026-11-20): "Let's also add detection for when the hearing date
+// has moved". E-Court checks the sheet's own hearings on each case's Hearings
+// tab, so `gone` also covers days it did not read.
+{
+  const far = (await readHearings(await book(headingRows.replace("25STCV00002 DOE v. ROE", "25STCV00002 DOE v. ROE"), { links: headingLinks }), NOW)).hearings
+    .map((h) => (h.caseNumber === "24STCV00003" ? { ...h, date: day(2027, 1, 6) } : h));
+  const calFar = { days: cal.days, gone: [
+    { day: "2027-01-06", caseId: "13", caseText: "24STCV00003 ROE v. INITECH", reason: "moved", status: "Not Held - Continued - Stipulation", newDay: "2027-02-10", from: "sheet" },
+  ] };
+  const pf = planCalendar({ hearings: far, calendar: calFar, now: NOW });
+  check("a hearing past the ten court days, moved: its row marked", pf.offs.map((o) => [o.day, o.hg.caseNumber, o.reason, o.newDay]), [["2027-01-06", "24STCV00003", "moved", "2027-02-10"]]);
+  check("…and written under its new day at once", pf.adds.filter((a) => a.movedFrom).map((a) => [a.day, a.movedFrom, a.key]), [["2027-02-10", "2027-01-06", "2027-02-10|id:13"]]);
+  const already = far.concat([{ ...far.find((h) => h.caseNumber === "24STCV00003"), date: day(2027, 2, 10), row: 40 }]);
+  check("…not where the sheet already has the case that day", planCalendar({ hearings: already, calendar: calFar, now: NOW }).adds.filter((a) => a.movedFrom).length, 0);
+  check("…nor twice", planCalendar({ hearings: far, calendar: calFar, now: NOW, log: [{ key: "2027-02-10|id:13", kind: "added" }] }).adds.filter((a) => a.movedFrom).length, 0);
+  const calOff = { days: cal.days, gone: [{ day: "2027-01-06", caseId: "13", caseText: "24STCV00003 ROE v. INITECH", reason: "off", status: "Vacated", from: "sheet" }] };
+  check("one taken off calendar past the ten days: marked off, nothing added", (() => { const p = planCalendar({ hearings: far, calendar: calOff, now: NOW }); return [p.offs.map((o) => o.reason), p.adds.filter((a) => a.movedFrom).length]; })(), [["off"], 0]);
+  const calUnk = { days: cal.days, gone: [{ day: "2027-01-06", caseId: "13", caseText: "24STCV00003 ROE v. INITECH", reason: "unknown", from: "sheet" }] };
+  check("…and one the Hearings tab does not explain: left alone", planCalendar({ hearings: far, calendar: calUnk, now: NOW }).offs.length, 0);
+  const doe = far.find((h) => h.caseNumber === "25STCV00002");
+  check("the list Home hands E-Court: unmarked (ACME's row is done), from today, with a case id, once a case and day", sheetHearingsList(far.concat([{ ...doe }, { ...doe, mark: "off", date: day(2026, 12, 1) }, { ...doe, date: day(2026, 11, 2) }, { ...doe, url: "", caseNumber: "X", date: day(2026, 12, 2) }]), NOW).map((h) => [h.day, h.caseId, h.caseNumber]),
+    [["2026-11-20", "12", "25STCV00002"], ["2027-01-06", "13", "24STCV00003"]]);
+  check("…a link filled in counts", sheetHearingsList([{ ...doe, url: "", ecourtUrl: URL(77) }], NOW).map((h) => h.caseId), ["77"]);
+  check("…its file's name", SHEET_HEARINGS_FILE, "PDF+ Hearings Sheet.json");
+}
 check("the file's calendar passes through", parseBriefingFile(JSON.stringify({ entries: [], calendar: cal })).calendar.days.length, 5);
 
 console.log("3. the layout read off the sheet");
@@ -151,7 +176,7 @@ after = await readHearings(res.bytes, NOW);
 check("before the 23rd's date row, with its own and the gap after", after.hearings.map((h) => [h.row, new Date(h.date).getDate()]), [[3, 20], [5, 20], [9, 21], [13, 23]]);
 
 console.log("8. Undo of an add");
-res = await addCalendarRows(bytes, planCalendar({ hearings, calendar: cal, now: NOW }).adds, NOW);
+res = await addCalendarRows(bytes, planCalendar({ hearings, calendar: cal, now: NOW }).adds.slice(0, 2), NOW);
 let undone = await removeCalendarRow(res.bytes, res.placed[0], NOW);
 after = await readHearings(undone, NOW);
 check("the 20th's added case gone, the blank above it too", after.hearings.map((h) => [h.row, h.caseNumber]), [[3, "25STCV00001"], [5, "25STCV00002"], [9, "24STCV00003"], [13, "25STCV00010"]]);
@@ -211,7 +236,9 @@ check("and edited", (await readHearings(await setHearingNote(noted, (await readH
 
 console.log("11. the words of a change");
 check("added", changeText({ kind: "added", day: "2026-11-25", caseText: "26STCV00010 LATER v. DAY" }).text, "Added 26STCV00010 LATER v. DAY, Wed, Nov 25");
-check("off, continued", changeText({ kind: "off", day: "2026-11-20", caseText: "DOE v. ROE", reason: "moved", newDay: "2026-12-18" }).text, "Off calendar Fri, Nov 20: DOE v. ROE (continued to Fri, Dec 18)");
+check("off, moved", changeText({ kind: "off", day: "2026-11-20", caseText: "DOE v. ROE", reason: "moved", newDay: "2026-12-18" }).text, "Moved Fri, Nov 20 → Fri, Dec 18: DOE v. ROE");
+check("off, taken off", changeText({ kind: "off", day: "2026-11-20", caseText: "DOE v. ROE", reason: "off" }).text, "Off calendar Fri, Nov 20: DOE v. ROE (taken off calendar)");
+check("added under its new day", changeText({ kind: "added", day: "2026-12-18", movedFrom: "2026-11-20", caseText: "DOE v. ROE" }).text, "Moved DOE v. ROE: Fri, Nov 20 → Fri, Dec 18");
 check("held", changeText({ kind: "held", day: "2026-11-23", caseText: "ROE v. INITECH" }).text, "Check ROE v. INITECH, Mon, Nov 23: not on that day's agenda");
 check("dayAt", dayAt("2026-11-20"), day(2026, 11, 20));
 

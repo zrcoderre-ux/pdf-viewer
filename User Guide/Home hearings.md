@@ -18,7 +18,7 @@ The sheet needs a header row with these columns, in any order:
 |---|---|
 | **Date** | The hearing date. A row left blank takes the date of the row above. |
 | **Motion Type** | Shown under the case name. |
-| **Case Name** | The case. Its hyperlink to eCourt is the **eCourt** button. |
+| **Case Name** | The case. Its hyperlink to eCourt is the **eCourt** button; a row with no link borrows one from another row of the same case, or from the calendar E-Court Suite reads (the next ten court days). |
 | **Date Submitted** | Shown as "Submitted 11/12". |
 
 Fill a row (or its case name cell) **green** when it is done, and **red** when
@@ -108,9 +108,11 @@ stays selected while Home refreshes.
 use it, the case keeps its place in line for 24 hours, through any re-run, so
 you don't have to press it again; ▲ ▼ ✕ change it at any time.
 
-PDF-Linker's status is a small dot: green finished, amber something to answer
-or a run that looks stopped, blue (pulsing) running, grey not run yet. Click
-the dot to read it in full ("Finished 2:40 PM"), and again to close it.
+PDF-Linker's status is spelled out at the right of the row ("Finished 2:40
+PM", "Running — ETA ~4.10PM"): green finished, amber something to answer or a
+run that looks stopped, blue (pulsing) running, grey not run yet. One too long
+for its column ends in "…"; hover over it to read it whole. A case name too
+long for the row is cut short the same way, so nothing is pushed off the edge.
 
 ## Case folders not on the hearings list
 
@@ -143,7 +145,8 @@ PDF-Linker launcher is updated to its new place.
 ## Opposition and reply status
 
 With E-Court Suite 3.49.29 or later, each hearing shows small **Mot**, **Opp**
-and **Rep** chips, coloured as the eCourt case page colours them:
+and **Rep** chips, each with its due date underneath ("Due 11/14"), coloured
+as the eCourt case page colours them:
 
 - green ✓ filed on time;
 - red ! filed late, red ✗ not filed;
@@ -152,7 +155,7 @@ and **Rep** chips, coloured as the eCourt case page colours them:
 - plain: not due yet; dashed ?: nothing on file yet, but eCourt may not have
   posted it.
 
-Hover a chip for its due and filed dates and when it was last checked. The
+Hover a chip for its filed date as well and when it was last checked. The
 extension checks whenever you open the case in eCourt (the eCourt button) or
 open that day's agenda, and Home picks it up within seconds. A dash means the
 extension has not looked at that hearing yet. The summary line counts hearings
@@ -183,8 +186,15 @@ and Home writes them into your hearings sheet:
   styles copied from your sheet), with the case name linked to eCourt.
 - **Taken off or continued**: when a case leaves its day's agenda and its
   Hearings tab says why (vacated, taken off calendar, continued to …), its
-  Motion Type and Case Name cells turn red, as Off calendar does. A continued
-  hearing is added under its new day once that day is within the ten.
+  Motion Type and Case Name cells turn red, as Off calendar does.
+- **Moved**: every upcoming hearing on your sheet, however far out, is also
+  checked on its case's Hearings tab (Home writes the list to
+  `PDF+ Hearings Sheet.json` in Downloads for the extension; up to 60 cases an
+  hour, so a long sheet is covered over a few hours). A hearing continued or
+  rescheduled turns red on its old day, which then reads **Moved to Jan 14**
+  on Home, and is written under its new day at once, where its row reads
+  **Moved from Dec 2**. One taken off calendar turns red. The case needs its
+  eCourt link (on the row, or one Home found for it) to be checked.
 - **Gone with no word why**: nothing changes in the sheet. Home lists it as
   "Check …" with **Off calendar** and **Keep** buttons.
 

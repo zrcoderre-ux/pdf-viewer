@@ -22,6 +22,7 @@ import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
   hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  fillEcourtLinks, ecourtUrlOf,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -248,12 +249,43 @@ check("two motions that day: the one its Motion Type names", [briefingFor({ case
 check("…another day, or no case number: none", [briefingFor({ caseNumber: "25STCV12345", date: day(2026, 11, 21) }, entries), briefingFor({ caseNumber: "", date: day(2026, 11, 20) }, entries)], [null, null]);
 const chips = briefingChips(entries[0]);
 check("chips as the case page colours them", chips.map((c) => [c.label, c.state, c.mark]), [["Mot", "filed", "✓"], ["Opp", "late", "!"], ["Rep", "missing", "✗"]]);
+check("…each with its due date to show under it", chips.map((c) => c.due), ["Due 11/1", "Due 11/1", "Due 11/1"]);
+check("…none where the file gives none; an OSC has none", [briefingChips({ kind: "motion", motion: slot("filed", "", { due: null }) })[0].due, briefingChips(entries[2])[0].due], ["", undefined]);
 check("…each one's hover says what and when", [chips[1].title, chips[2].title], ["Opposition: filed late, due 11/1, filed 11/2", "Reply: not filed, due 11/1"]);
 check("not posted yet is unsure, not missing", briefingChips({ kind: "motion", reply: slot("pending", "Not Posted Yet") }).map((c) => [c.state, c.mark]), [["unposted", "?"]]);
 check("timely only if served personally", briefingChips({ kind: "motion", motion: slot("personal") })[0].state, "personal");
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
 check("the file's name", BRIEFING_FILE, "E-Court Briefing Status.json");
+
+console.log("1c. an eCourt link for a hearing the sheet gives none");
+{
+  // The owner (2026-11-20): "I'm noticing some hearings missing ecourt buttons".
+  const hs = [
+    { caseNumber: "25STCV12345", url: "https://civil.lacourt.org/ecourt/ecms/case?id=111" },
+    { caseNumber: "25stcv12345", url: "" },
+    { caseNumber: "24STCV00777", url: "" },
+    { caseNumber: "26STCV09999", url: "" },
+    { caseNumber: "22STCV05555", url: "" },
+    { caseNumber: "", url: "" },
+  ];
+  const cal = { days: [{ day: "2026-11-23", rows: [
+    { caseText: "24STCV00777 Doe v. Globex", url: "https://civil.lacourt.org/ecourt/ecms/case?id=222" },
+    { caseText: "26STCV09999 Jane Doe v. Initech", caseNumber: "26STCV09999", caseId: "333", url: "" },
+    { caseText: "22STCV05555 Vance v. Stark", url: "chrome-extension://x/case?id=5" },
+  ] }] };
+  check("filled: another row of the case, then the calendar's link or its case id", fillEcourtLinks(hs, cal), 3);
+  check("…each from where it says", hs.map((h) => [ecourtUrlOf(h), h.ecourtFrom || ""]), [
+    ["https://civil.lacourt.org/ecourt/ecms/case?id=111", ""],
+    ["https://civil.lacourt.org/ecourt/ecms/case?id=111", "sheet"],
+    ["https://civil.lacourt.org/ecourt/ecms/case?id=222", "ecourt"],
+    ["https://civil.lacourt.org/ecourt/ecms/case?id=333", "ecourt"],
+    ["", ""],
+    ["", ""],
+  ]);
+  check("…the sheet's own link left as it is", [hs[1].url, hs[2].url], ["", ""]);
+  check("no calendar: only another row of the case", [fillEcourtLinks(hs, null), ecourtUrlOf(hs[2])], [1, ""]);
+}
 const rAt = new Date(2026, 10, 18, 9, 5).getTime();
 check("the last check, off the file", parseBriefingFile(JSON.stringify({ entries: [], refresh: { at: rAt, state: "done", cases: 12, how: "hourly" } })).refresh.cases, 12);
 check("…none in an older file", parseBriefingFile(JSON.stringify({ entries: [] })).refresh, null);
@@ -422,15 +454,32 @@ async function browserPart() {
     check("…a folder opened elsewhere, by its Register of Actions", got[2].where, "Motion to Compel · Initech compel");
     check("grouped under their days", await shell.$$eval("#hearing-list .hearing-day", (d) => d.length), 3);
     check("the summary", await shell.textContent("#hearings-summary"), "4 to work up2 downloaded2 not downloaded1 done");
-    // The owner: "The finished time takes up too much space ... expand to give that detail when pressed".
+    // The owner (2026-11-20): "there is now more room for the pdf linker
+    // status, so lets make them full size again. Also you can cut off any case
+    // name that runs too long to avoid anything being pushed off the edge."
     const acmePill = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE")) .ci-status');
-    check("PDF-Linker's status is a dot; where the case stands keeps its words", await shell.$$eval("#hearing-list .ci-status", (ps) => ps.map((p) => p.classList.contains("compact"))), [true, false, true, true, false]);
-    check("…the dot is small", (await acmePill.boundingBox()).width <= 24, true);
-    await acmePill.click();
-    check("a press opens it to its words", [await acmePill.evaluate((p) => p.classList.contains("expanded")), (await acmePill.boundingBox()).width > 60], [true, true]);
-    check("…and opens nothing else", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 0);
-    await acmePill.click();
-    check("a second press closes it", await acmePill.evaluate((p) => p.classList.contains("expanded")), false);
+    check("PDF-Linker's status in its words, whole", await acmePill.evaluate((p) => [/^Finished /.test(p.textContent), p.scrollWidth <= p.clientWidth, p.getBoundingClientRect().width > 60]), [true, true, true]);
+    // Whether every row fits its width, and, with one row's name made very
+    // long (set and measured at once, before any redraw), that the name is cut
+    // short with an ellipsis and its status still whole.
+    const fits = () => shell.evaluate((longName) => {
+      const fit = () => [...document.querySelectorAll("#hearing-list .hearing-row")].every((r) => {
+        const box = r.getBoundingClientRect();
+        return [...r.querySelectorAll(".hearing-item > *")].every((c) => { const b = c.getBoundingClientRect(); return b.width === 0 || b.right <= box.right + 0.5; });
+      });
+      const before = fit();
+      const row = [...document.querySelectorAll("#hearing-list .hearing-row")].find((r) => /25STCV12345 ACME/.test(r.textContent));
+      const name = row.querySelector(".ci-case"), pill = row.querySelector(".ci-status");
+      const was = name.textContent;
+      name.textContent = longName;
+      const out = { before, cut: name.scrollWidth > name.clientWidth, ellipsis: getComputedStyle(name).textOverflow, after: fit(), pillWhole: pill.scrollWidth <= pill.clientWidth };
+      name.textContent = was;
+      return out;
+    }, "A VERY LONG CASE NAME FOR A CONSOLIDATED MATTER WITH MANY PARTIES AND CROSS-COMPLAINANTS AND INTERVENORS, LLC vs EVERY OTHER PARTY TO IT");
+    const fit = await fits();
+    check("every row fits its width", fit.before, true);
+    check("a case name too long: cut short, with an ellipsis", [fit.cut, fit.ellipsis], [true, "ellipsis"]);
+    check("…and nothing pushed off the edge, the status still whole", [fit.after, fit.pillWhole], [true, true]);
     const buttons = async () => {
       const out = [];
       const n = await shell.locator("#hearing-list .hearing-row").count();
@@ -659,7 +708,7 @@ async function browserPart() {
     const acmeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
     const doeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777 Doe"))');
     const janeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("26STCV09999 Jane Doe"))');
-    const chipsOf = (row) => row.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => [c.textContent, c.className.replace("ci-chip st-", "")]));
+    const chipsOf = (row) => row.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => [c.querySelector(".cc-label").textContent, c.className.replace("ci-chip st-", "").replace(" has-due", "")]));
     await putBriefing([
       { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("missing", "Not Filed"), at: Date.now() },
       { caseNumber: "24STCV00777", day: iso(inDays(2)), motionType: "MSJ", key: "b", kind: "motion", motion: st("filed"), opp: st("pending", "Not Posted Yet"), reply: null, at: Date.now() },
@@ -667,6 +716,13 @@ async function browserPart() {
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-chip").length >= 5, null, { timeout: 15000 });
     check("each hearing's Motion, Opposition and Reply, as the case page colours them", await chipsOf(acmeRowB), [["Mot ✓", "filed"], ["Opp ✓", "filed"], ["Rep ✗", "missing"]]);
     check("…an opposition not posted yet is unsure, not missing", await chipsOf(doeRowB), [["Mot ✓", "filed"], ["Opp ?", "unposted"]]);
+    // The owner (2026-11-20): "expand the Motion Opposition Reply labels to include due dates underneath".
+    const dueWant = await shell.evaluate((ms) => { const d = new Date(ms); return `Due ${d.getMonth() + 1}/${d.getDate()}`; }, inDays(-2));
+    check("…each with its due date underneath", await acmeRowB.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => {
+      const a = c.querySelector(".cc-label").getBoundingClientRect(), b = c.querySelector(".cc-due").getBoundingClientRect();
+      return [c.querySelector(".cc-due").textContent, b.top >= a.bottom - 1, c.scrollWidth <= c.clientWidth];
+    })), [[dueWant, true, true], [dueWant, true, true], [dueWant, true, true]]);
+    check("…and the chips whole in their column", await shell.$$eval("#hearing-list .ci-brief", (bs) => bs.every((b) => b.scrollWidth <= b.clientWidth + 0.5)), true);
     check("…a hearing the extension has not reported: a dash that says how to get it", [await janeRowB.locator(".ci-brief").textContent(), /open the case in eCourt/.test(await janeRowB.locator(".ci-brief").getAttribute("title"))], ["—", true]);
     await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(300);
     check("…the briefing in one column down the list, whatever the status beside it", await shell.$$eval("#hearing-list .ci-brief", (bs) => new Set(bs.map((b) => Math.round(b.getBoundingClientRect().left))).size), 1);
@@ -676,7 +732,7 @@ async function browserPart() {
     await putBriefing([
       { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("filed"), at: Date.now() },
     ]);
-    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .ci-chip")].some((c) => c.textContent === "Rep ✓"), null, { timeout: 15000 });
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .ci-chip .cc-label")].some((c) => c.textContent === "Rep ✓"), null, { timeout: 15000 });
     check("updated: the file written again, the row says so on the next look", await chipsOf(acmeRowB), [["Mot ✓", "filed"], ["Opp ✓", "filed"], ["Rep ✓", "filed"]]);
     check("…and the count goes", /briefing not filed/.test(await shell.textContent("#hearings-summary")), false);
 
@@ -735,7 +791,7 @@ async function browserPart() {
         { motion: "MSJ", caseText: "24STCV00777 Doe v. Globex", caseId: "222", url: "https://civil.lacourt.org/ecourt/ecms/case?id=222" }] },
       { day: iso(inDays(3)), state: "ok", rows: [
         { motion: "Motion to Compel", caseText: "26STCV09999 Jane Doe v. Initech", caseId: "333", url: "https://civil.lacourt.org/ecourt/ecms/case?id=333" },
-        { motion: "Motion to Strike", caseText: "23STCV04444 Roe v. Umbrella", caseNumber: "23STCV04444" },
+        { motion: "Motion to Strike", caseText: "23STCV04444 Roe v. Umbrella", caseNumber: "23STCV04444", caseId: "444" },
         { motion: "Motion to Quash Service of Summons", caseText: "26STCV07070 NEW v. ARRIVAL", caseId: "777", url: NEWURL }] },
       { day: iso(inDays(4)), state: "failed" },
       { day: iso(inDays(5)), state: "ok", rows: [] }],
@@ -750,6 +806,17 @@ async function browserPart() {
     check("each change listed at the top of Hearings", await shell.$$eval("#calendar-changes .cal-item .cal-text", (x) => x.map((t) => t.textContent.replace(/,.*$/, "").replace(/ \(.*$/, "").replace(/:.*$/, ""))).then((l) => l.sort()), ["Added 26STCV07070 NEW v. ARRIVAL", "Off calendar " + new Date(inDays(5)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).split(",")[0]].sort());
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("NEW v. ARRIVAL")), null, { timeout: 15000 });
     check("…and the new hearing is on the list", true, true);
+    // A row of the sheet with no link of its own gets eCourt's from the calendar read.
+    // Roe v. Umbrella's row has no link in the sheet; the calendar read has its case id.
+    check("the fixture's Roe v. Umbrella row has no link of its own", rowsNow.find((h) => h.caseName === "23STCV04444 Roe v. Umbrella").url, "");
+    const fillRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("23STCV04444"))');
+    await fillRow.locator(".ci-where").click();
+    await fillRow.locator(".hearing-tools").waitFor({ timeout: 5000 });
+    check("a hearing the sheet does not link still has its eCourt button", await fillRow.locator(".hearing-tools .ci-ecourt").count(), 1);
+    check("…which says where its link came from", /E-Court Suite read from eCourt's calendar/.test(await fillRow.locator(".hearing-tools .ci-ecourt").getAttribute("title")), true);
+    await fillRow.locator(".hearing-tools .ci-ecourt").click();
+    check("…and opens the case's eCourt page", (await shell.evaluate(() => window.__opened)).slice(-1)[0], "https://civil.lacourt.org/ecourt/ecms/case?id=444");
+    await shell.keyboard.press("Escape");
     check("a case folder still in Downloads is marked so", await acmeRowB.evaluate((r) => [r.classList.contains("in-downloads"), !!r.querySelector(".ci-dl-chip")]), [true, true]);
     check("…one not in Downloads is not", await janeRowB.evaluate((r) => r.classList.contains("in-downloads")), false);
     // Undo: the row taken back out, and not added again on the next look.
@@ -763,6 +830,37 @@ async function browserPart() {
     await shell.locator("#calendar-changes .cal-item.k-off button", { hasText: "Undo" }).click();
     for (let k = 0; k < 100 && (await sheetRows()).find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark; k++) await new Promise((r) => setTimeout(r, 100));
     check("Undo of an off calendar takes the red off", (await sheetRows()).find((h) => h.caseName === "22STCV05555 Vance v. Stark").mark, "");
+    // The owner (2026-11-20): "Let's also add detection for when the hearing
+    // date has moved". Home hands E-Court the sheet's hearings; E-Court says one
+    // moved, on a day it did not read.
+    const listed = await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      try { return JSON.parse(await (await (await dl.getFileHandle("PDF+ Hearings Sheet.json")).getFile()).text()).hearings; } catch { return null; }
+    });
+    check("Home hands E-Court the sheet's hearings to check", !!listed && listed.some((h) => h.caseId === "333" && h.caseNumber === "26STCV09999"), true);
+    const farDay = iso(inDays(40));
+    await putCalendar({ at: Date.now(), windowDays: 10, days: [], gone: [
+      { day: iso(inDays(3)), caseId: "333", caseNumber: "26STCV09999", caseText: "26STCV09999 Jane Doe v. Initech", motion: "Motion to Compel", reason: "moved", status: "Not Held - Continued - Stipulation", newDay: farDay, from: "sheet" }] });
+    for (let k = 0; k < 150 && !(await sheetRows()).some((h) => h.caseNumber === "26STCV09999" && iso(h.date) === farDay); k++) await new Promise((r) => setTimeout(r, 100));
+    rowsNow = await sheetRows();
+    const janeOld = rowsNow.find((h) => h.caseNumber === "26STCV09999" && iso(h.date) === iso(inDays(3)));
+    const janeNew = rowsNow.find((h) => h.caseNumber === "26STCV09999" && iso(h.date) === farDay);
+    check("a hearing moved past the ten days: its old row marked red", janeOld && janeOld.mark, "off");
+    check("…and written under its new day, linked", janeNew ? [janeNew.motion, janeNew.url] : null, ["Motion to Compel", "https://civil.lacourt.org/ecourt/ecms/case?id=333"]);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#calendar-changes .cal-item .cal-text")].some((t) => /^Moved /.test(t.textContent)), null, { timeout: 15000 });
+    check("…listed as a move", await shell.$$eval("#calendar-changes .cal-item .cal-text", (x) => x.filter((t) => /^Moved /.test(t.textContent)).length), 2);
+    await shell.evaluate(() => { const b = [...document.querySelectorAll("#hearing-list-toggle, #hearings-show-off, button")].find((x) => /^Show off calendar$/.test(x.textContent.trim())); if (b) b.click(); });
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .ci-status")].some((p) => /^Moved to /.test(p.textContent)), null, { timeout: 15000 });
+    check("the old row says where it went", await shell.$$eval("#hearing-list .ci-status", (ps) => ps.filter((p) => /^Moved to /.test(p.textContent)).length), 1);
+    check("…the new one where it came from", await shell.$$eval("#hearing-list .ci-where", (ws) => ws.some((w) => /Moved from /.test(w.textContent))), true);
+    await shell.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Hide off calendar$/.test(x.textContent.trim())); if (b) b.click(); });
+    for (const kind of ["added", "off"]) {
+      const undo = shell.locator(`#calendar-changes .cal-item.k-${kind}:not(.undone) button`, { hasText: "Undo" }).first();
+      if (await undo.count()) await undo.click();
+      await shell.waitForTimeout(800);
+    }
+    rowsNow = await sheetRows();
+    check("…both undone: the new row out, the red off", [rowsNow.some((h) => h.caseNumber === "26STCV09999" && iso(h.date) === farDay), rowsNow.find((h) => h.caseNumber === "26STCV09999").mark], [false, ""]);
     await putCalendar(null);
 
     console.log("14g. Claude workflow runs, from the Claude extension's file: a column on the case's row");

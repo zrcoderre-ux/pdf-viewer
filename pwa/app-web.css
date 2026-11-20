@@ -21,6 +21,9 @@
   --c-accent: #5b9bff;
   --c-accent-strong: #3b82f6;
   --c-accent-soft: rgba(91, 155, 255, 0.14);
+  --c-day-band: #262f3e;
+  --c-day-text: #bccbe2;
+  --c-day-rule: #364257;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -38,6 +41,9 @@
   --c-accent: #2563eb;
   --c-accent-strong: #1d4ed8;
   --c-accent-soft: rgba(37, 99, 235, 0.09);
+  --c-day-band: #e3e8f0;
+  --c-day-text: #2a3a55;
+  --c-day-rule: #cdd5e1;
 }
 
 * { box-sizing: border-box; }
@@ -384,15 +390,8 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .case-item .ci-status.tone-ok { color: #16a34a; background: rgba(34, 197, 94, 0.12); }
 .case-item .ci-status.tone-warn { color: #d97706; background: rgba(234, 179, 8, 0.14); }
 @keyframes case-pulse { 50% { opacity: 0.3; } }
-/* PDF-Linker's status as a dot, opened to its words on a press (compactStatus). */
 .case-item .ci-status[hidden] { display: none; }
-.case-item .ci-status.compact { cursor: pointer; }
-.case-item .ci-status.compact:not(.expanded) { box-sizing: content-box; width: 9px; height: 9px; max-width: none; padding: 0; border: 7px solid transparent; border-radius: 50%; background: currentColor; background-clip: content-box; font-size: 0; margin-right: 2px; }
-.case-item .ci-status.compact:not(.expanded)::before { display: none; }
-.case-item .ci-status.compact.tone-idle:not(.expanded) { color: var(--c-text-3); opacity: 0.7; }
-.case-item .ci-status.compact.tone-run:not(.expanded) { animation: case-pulse 1.4s ease-in-out infinite; }
-.case-item .ci-status.compact:not(.expanded):hover { box-shadow: 0 0 0 3px var(--c-accent-soft) inset; }
-@media (prefers-reduced-motion: reduce) { .case-item .ci-status.tone-run::before, .case-item .ci-status.compact.tone-run { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .case-item .ci-status.tone-run::before { animation: none; } }
 .case-empty { margin: 0; padding: 12px 14px; color: var(--c-text-3); font-size: 12.5px; }
 /* Home's Hearings list (app-web.js, "Home: hearings"). */
 .ci-ecourt { flex: none; margin-right: 14px; padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 999px; background: transparent; color: var(--c-text-3); font-size: 12px; cursor: pointer; white-space: nowrap; }
@@ -623,17 +622,21 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .case-empty-go { margin-left: 6px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--c-accent-strong); background: var(--c-accent-strong); color: #fff; font-size: var(--fs-meta); cursor: pointer; }
 .case-empty-go:hover { filter: brightness(1.08); }
 
-/* Date headers: a label and a rule, no band. */
+/* Date headers: a band of their own colour, as the date rows of the hearings
+   sheet are (the owner, 2026-11-20: "it might make the hearings home page
+   more readable if we broke up the colors a bit more, for example, on my
+   calendar sheet the date rows were a different color"). */
 .home-app .hearing-day {
-  background: transparent;
-  padding: 18px 16px 7px;
+  background: var(--c-day-band);
+  padding: 8px 16px;
   font-size: var(--fs-label);
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0.07em;
-  color: var(--c-text-2);
-  border-bottom: 1px solid var(--c-border);
+  color: var(--c-day-text);
+  border-top: 1px solid var(--c-day-rule);
+  border-bottom: 1px solid var(--c-day-rule);
 }
-.home-app .hearing-day:first-child { padding-top: 12px; }
+.home-app .hearing-day:first-child { border-top: none; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 
 /* The case number in its own column; the details under the name. */
 .home-app .hearing-item .ri-name { display: flex; align-items: baseline; min-width: 0; overflow: hidden; }
@@ -691,10 +694,17 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .ci-chip.st-late, .ci-chip.st-missing { color: #dc2626; border-color: rgba(220, 38, 38, 0.4); background: rgba(239, 68, 68, 0.09); }
 .ci-chip.st-personal { color: #d97706; border-color: rgba(217, 119, 6, 0.4); background: rgba(234, 179, 8, 0.1); }
 .ci-chip.st-unposted { border-style: dashed; }
+/* Its due date under the label ("Due 11/14"), smaller and in the text colour. */
+.ci-chip.has-due { flex-direction: column; align-items: center; min-width: 66px; box-sizing: border-box; padding: 2px 6px 3px; line-height: 1.2; }
+.ci-chip .cc-due { font-size: 10.5px; font-weight: 500; color: var(--c-text-2); font-variant-numeric: tabular-nums; }
 @media (max-width: 1300px) { .home-app .ci-brief { width: auto; min-width: 0; } }
-.home-app .ci-status-col { flex: none; width: 132px; display: inline-flex; justify-content: flex-start; }
-.home-app .ci-status-col .ci-status { max-width: 100%; }
-@media (max-width: 1300px) { .home-app .ci-status-col { width: auto; } }
+/* PDF-Linker's status in its words again (the owner, 2026-11-20: "Since the
+   reorganization, there is now more room for the pdf linker status, so lets
+   make them full size again"), in a column wide enough for "Finished 11:42 AM
+   · LEAKS.xlsx to answer"; a longer one ends in "…", whole on hover. */
+.home-app .ci-status-col { flex: none; width: 290px; display: inline-flex; align-items: center; justify-content: flex-start; min-width: 0; overflow: hidden; }
+.home-app .ci-status-col .ci-status { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+@media (max-width: 1300px) { .home-app .ci-status-col { width: 230px; } }
 .home-app .hearings-summary .hs-refresh { color: var(--c-text-3); }
 .home-app .hearings-summary .hs-refresh.tone-warn { color: #d97706; }
 .home-app .hearings-summary .hs-refresh.tone-run { color: var(--c-accent); }

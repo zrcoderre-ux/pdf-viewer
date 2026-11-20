@@ -287,7 +287,8 @@ room".
   its words on a press and closed on a second, kept open across redraws
   (`statusOpen`). Where the case stands (Not downloaded, Zip in Downloads),
   Off calendar and Click to allow keep their words: they are what the row is
-  read for.
+  read for. REVERSED 2026-11-20 ("The status in its words again", below): the
+  status is spelled out again and `compactStatus` is gone.
 - **Several folders at once.** The owner: "Can you make it so that I can
   select multiple folders to add at once? I can't add my entire OneDrive
   folder, because it holds system files." The folder dialog picks one folder,
@@ -588,3 +589,69 @@ before. `folder-place.js` is in desktop/package.json's `files`.
 Tests: `test-folder-place.mjs` (node, over a temporary tree);
 `test-hearing-sheet.mjs` part 14e.
 
+## The status in its words again; long names cut short (2026-11-20)
+
+The owner: "Since the reorganization, there is now more room for the pdf
+linker status, so lets make them full size again. Also you can cut off any
+case name that runs too long to avoid anything being pushed off the edge."
+With the buttons moved under the selected case, the row has the room the dot
+was saving. PDF-Linker's status is its words again, on hearing rows and in
+Case folders (`compactStatus`, `statusOpen` and the `.compact` styles
+removed), with the status itself as the pill's hover. The status column
+(`.ci-status-col`) is 290px (230px at 1300px and under), wide enough for
+"Finished 11:42 AM · LEAKS.xlsx to answer"; a longer one ends in "…", and the
+column clips, so nothing past it moves. A case name that runs long is cut by
+`.ci-case`'s ellipsis. `test-hearing-sheet.mjs` (section 8) sets one row's
+name very long and checks that it ends in an ellipsis, that every row's cells
+stay inside it, and that the status beside it is still whole.
+
+### Due dates under Mot, Opp and Rep (2026-11-20)
+
+The owner: "Also expand the Motion Opposition Reply labels to include due
+dates underneath." `briefingChips` gives each slot `due` ("Due 11/14", from
+the slot's `due` in the briefing file; "" without one, none on an OSC chip),
+and `briefingCell` writes the chip as two lines, `.cc-label` over `.cc-due`.
+Where any chip of the hearing has a date, every chip of it takes the second
+line (a blank one where it has none), so the chips stay one height. A chip is
+66px wide (`--brief-w` counts 66 a chip), wide enough for "Due 12/31". The
+filed date stays in the hover. `test-hearing-sheet.mjs` checks the dates (part
+1 and section 14c) and that each sits under its label inside the chip.
+
+### Date headers as a band (2026-11-20)
+
+The owner: "it might make the hearings home page more readable if we broke up
+the colors a bit more, for example, on my calendar sheet the date rows were a
+different color" ... "It's just an example. I want a color that makes sense
+with this theme." Each date header (`.hearing-day`) is a band of its own: a
+slate drawn from the theme's neutrals with a little of its blue
+(`--c-day-band`, `--c-day-text`, `--c-day-rule`, one set per theme), ruled
+above and below. It was first the accent's own blue, which in the light theme
+read too close to the selected row's tint; the slate keeps the two apart. Not
+the sheet's colour: the sheet was only the example.
+
+### Light and dark from Home (2026-11-20)
+
+The owner: "How do I switch between light and dark mode?" ... "yes, add it to
+home". Home's bar has its own ☀/🌙 (`#home-theme`, `applyHomeTheme` in
+app-web.js), left of the settings button. It writes the same
+`pdfViewerTheme` the viewer's and the text reader's toggles write, and every
+page now follows a change made in another (a `storage` listener in
+app-web.js, viewer.js and text-reader.js; before, a viewer tab took a new
+theme only when it next loaded). `test-ocr-button.mjs` (7) switches from Home
+and from a PDF tab and checks both follow.
+
+### An eCourt link for a row the sheet does not link (2026-11-20)
+
+The owner: "I'm noticing some hearings missing ecourt buttons." The button
+came only from the row's own link (a hyperlink on any cell of the row, or a
+HYPERLINK formula), so a row typed in or pasted as plain text had none.
+`fillEcourtLinks` (hearing-sheet.js), run each look once the briefing file is
+read, gives every hearing with no web link of its own and a case number a
+`ecourtUrl`: first another row of the sheet with the same case number that is
+linked (`ecourtFrom: "sheet"`), then the calendar E-Court Suite read (the
+next ten court days): its row's link where it is an lacourt.org address, else
+`ECOURT_CASE_URL` + its case id (`"ecourt"`). `url` itself stays the sheet's,
+since the calendar sync matches rows by the case id in it. Every place the
+button is drawn or opened reads `ecourtUrlOf`, and its hover says where the
+link came from. A row beyond the calendar's ten court days, whose case is on
+no other linked row, still has none.

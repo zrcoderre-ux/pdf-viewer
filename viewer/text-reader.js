@@ -2039,6 +2039,12 @@ themeToggle.addEventListener("click", () => {
   try { localStorage.setItem("pdfViewerTheme", currentTheme); } catch { /* ok */ }
   applyTheme(currentTheme);
 });
+// Switched elsewhere (Home's ☀/🌙, a PDF tab, another window): follow it at once.
+window.addEventListener("storage", (e) => {
+  if (e.key !== "pdfViewerTheme") return;
+  currentTheme = e.newValue === "light" ? "light" : "dark";
+  applyTheme(currentTheme);
+});
 
 // ── provider / repo / TOA (the viewer's own settings) ─────────────────────────
 const toaPanel = createToaPanel({

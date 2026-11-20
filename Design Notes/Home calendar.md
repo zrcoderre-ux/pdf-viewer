@@ -96,3 +96,42 @@ arrives, the sheet gains the row and the red, the list, Undo, not added again).
 Not run here: E-Court Suite's hourly read in real Chrome against eCourt, and
 Excel opening a workbook PDF+ wrote rows into (the parts are the ones Excel
 itself writes: inline strings, styles by index, hyperlink rels).
+
+## Moves found on the sheet's own hearings (2026-11-20)
+
+The owner: "Let's also add detection for when the hearing date has moved."
+A move was found only for a hearing E-Court had seen on a day's agenda (in
+the ten court days) that later left it, and its new day was added only once
+it came within the ten. Rows from before E-Court kept track, moves to a later
+date, and hearings set past the ten were missed.
+
+- **Home hands E-Court the sheet.** Each look, `writeSheetHearings` writes
+  `sheetHearingsList` (calendar-sync.js: every unmarked hearing from today on
+  with a case id, from its link or `ecourtUrl`, one per case and day) to
+  `SHEET_HEARINGS_FILE`, "PDF+ Hearings Sheet.json" in Downloads, only where
+  the list changed. E-Court's native host reads it (`readSheetHearings`) into
+  the service worker before each refresh run.
+- **E-Court checks each on its Hearings tab** (refresh/run.js, `hearingCheck`
+  in lib/case-status.js): skipped where that run's agenda shows it on its day;
+  else "scheduled" where a hearing of its kind is still Scheduled that day,
+  else `hearingGone`'s off / moved + new day / unknown. Off or moved joins
+  the calendar's `gone` with `from: "sheet"`. At most 60 Hearings tabs a run,
+  the longest unchecked first (`lacSheetChecked`).
+- **planCalendar** now also reads a `gone` entry for a day E-Court did not
+  read (past the ten, or unread): the sheet's unmarked row of that case and
+  day is marked off. And every move with a new day is written under it at once
+  (`movedFrom` on the add), wherever the sheet has no row of the case that day
+  and the new day is not one E-Court read (that day's agenda adds it). "unknown"
+  past the ten changes nothing: there is no agenda to contradict the sheet.
+- **Home says it.** The change list words a move "Moved Dec 2 → Jan 14: …";
+  the old row's pill reads "Moved to Jan 14" (not Off calendar) and the new
+  row's second line "Moved from Dec 2" (`movedOf`, from the calendar log by
+  `changeKey`). Undo works on each as before.
+
+Tests: `test-calendar-sync.mjs` part 2 (past the ten: marked, added once, not
+where the case is already that day, off, unknown, the list) and
+`test-hearing-sheet.mjs` 14f (the list file written, a move 40 days out
+written into the sheet, both rows labelled, both undone). E-Court's
+`hearingCheck` was checked in node against Hearings-tab rows (moved with a new
+day, vacated, still scheduled, none that day). Not run here: the refresh in
+real Chrome against eCourt.

@@ -1362,6 +1362,11 @@ async function renderCaseFoldersNow() {
   const sheet = await loadSheet();
   const hv = await hearingItems(rows, sheet, dl, dlState, now);
   hv.briefing = dlState === "ok" && sheet.hearings.length ? await readBriefing(dl) : { entries: [], at: 0, none: true };
+  // A hearing the sheet gives no link: one from another row of its case, or
+  // the calendar E-Court Suite read (fillEcourtLinks), for its eCourt button.
+  hearingLib.fillEcourtLinks(sheet.hearings, hv.briefing && !hv.briefing.none ? hv.briefing.calendar : null);
+  // The hearings for E-Court Suite to check on each case's Hearings tab (moved, off).
+  if (dlState === "ok" && sheet.state === "ok") { try { await writeSheetHearings(dl, sheet.hearings, now); } catch (e) { console.warn("sheet hearings", e); } }
   // The Claude extension's workflow runs (viewer/claude-runs.js).
   hv.runs = dlState === "ok" ? await readClaudeRuns(dl) : null;
   // The calendar E-Court Suite read, written into the sheet; a change made
@@ -1410,7 +1415,7 @@ async function renderCaseFoldersNow() {
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank || 0, prioTotal, r.status ? r.status.state : "", caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : "", r.hearing ? r.hearing.url : ""].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank || 0, prioTotal, r.status ? r.status.state : "", caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : "", r.hearing ? hearingLib.ecourtUrlOf(r.hearing) : ""].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1436,7 +1441,7 @@ async function renderCaseFoldersNow() {
     const pill = b.querySelector(".ci-status");
     pill.textContent = st.text;
     pill.classList.add("tone-" + st.tone);
-    if (!r.locked) compactStatus(pill, "f:" + r.name);
+    pill.title = st.text;
     b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "")
       + (sheet.state !== "none" ? `\nNo hearing on the list matched it (case numbers it carries: ${listingNumbers(r.listing).concat(hearingLib.caseNumbersIn(r.name)).filter((x, i, a) => a.indexOf(x) === i).join(", ") || "none"}).` : "");
     b.addEventListener("click", async () => {
@@ -1447,7 +1452,7 @@ async function renderCaseFoldersNow() {
     });
     row.appendChild(b);
     caseDraggable(row, r);
-    if (r.hearing && hearingLib.isWebLink(r.hearing.url)) row.appendChild(ecourtButton(r.hearing));
+    if (r.hearing && hearingLib.ecourtUrlOf(r.hearing)) row.appendChild(ecourtButton(r.hearing));
     for (const x of folderControls(r, line)) row.appendChild(x);
     listEl.appendChild(row);
   }
@@ -1465,29 +1470,6 @@ function iconise(b, name, label, extra = "") {
   b.setAttribute("aria-label", label);
   if (!b.title) b.title = label;
   return b;
-}
-
-/**
- * PDF-Linker's status as a dot (the owner, 2026-11-18: "The finished time
- * takes up too much space. It should be much smaller and expand to give that
- * detail when pressed"): its tone's colour, pulsing for a run going; a press
- * opens it to its words and a second closes it. Its press is its own, so it
- * opens nothing else; which are open is kept across redraws.
- */
-const statusOpen = new Set();
-function compactStatus(pill, key) {
-  pill.classList.add("compact");
-  pill.classList.toggle("expanded", statusOpen.has(key));
-  pill.setAttribute("role", "button");
-  pill.setAttribute("aria-expanded", statusOpen.has(key) ? "true" : "false");
-  pill.addEventListener("click", (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const on = !pill.classList.contains("expanded");
-    pill.classList.toggle("expanded", on);
-    pill.setAttribute("aria-expanded", on ? "true" : "false");
-    if (on) statusOpen.add(key); else statusOpen.delete(key);
-  });
 }
 
 /**
@@ -1562,10 +1544,23 @@ function briefingCell(hg, briefing, now) {
   }
   const asOf = `As of ${caseLib.whenText(entry.at, now)}, from E-Court Suite. Open the case in eCourt to bring it up to date.`;
   if (now - entry.at > BRIEFING_STALE_MS) cell.classList.add("stale");
-  for (const ch of hearingLib.briefingChips(entry)) {
+  const chips = hearingLib.briefingChips(entry);
+  // Each chip's due date on a line under it, where any chip has one; a chip
+  // without keeps the line blank, so the chips stay one height.
+  const dueLine = chips.some((c) => c.due);
+  for (const ch of chips) {
     const chip = document.createElement("span");
-    chip.className = "ci-chip st-" + ch.state;
-    chip.textContent = ch.label + (ch.mark ? " " + ch.mark : "");
+    chip.className = "ci-chip st-" + ch.state + (dueLine ? " has-due" : "");
+    const top = document.createElement("span");
+    top.className = "cc-label";
+    top.textContent = ch.label + (ch.mark ? " " + ch.mark : "");
+    chip.appendChild(top);
+    if (dueLine) {
+      const due = document.createElement("span");
+      due.className = "cc-due";
+      due.textContent = ch.due || "\u00a0";
+      chip.appendChild(due);
+    }
     chip.title = ch.title + "\n" + asOf;
     cell.appendChild(chip);
   }
@@ -1969,6 +1964,49 @@ async function writeSheetBytes(h, bytes) {
     return (x && x.message) || String(x);
   }
 }
+/**
+ * The hearings on the sheet, for E-Court Suite (the owner, 2026-11-20: "Let's
+ * also add detection for when the hearing date has moved"): written to
+ * Downloads as SHEET_HEARINGS_FILE where the list changed; its hourly refresh
+ * checks each on its case's Hearings tab and says, in the briefing file's
+ * calendar, which moved (and to when) or went off calendar, however far out.
+ */
+let sheetHearingsSaid = null;
+async function writeSheetHearings(dl, hearings, now) {
+  if (!calLib) calLib = await import("./viewer/calendar-sync.js");
+  const list = calLib.sheetHearingsList(hearings, now);
+  const body = JSON.stringify(list);
+  if (sheetHearingsSaid === body) return;
+  if (!(await permitted(dl, "readwrite", false))) return;
+  if (sheetHearingsSaid === null) {
+    // First look this session: the file as it stands may already say it.
+    try {
+      const was = JSON.parse(await (await (await dl.getFileHandle(calLib.SHEET_HEARINGS_FILE)).getFile()).text());
+      if (was && JSON.stringify(was.hearings) === body) { sheetHearingsSaid = body; return; }
+    } catch { /* none yet */ }
+  }
+  const w = await (await dl.getFileHandle(calLib.SHEET_HEARINGS_FILE, { create: true })).createWritable();
+  await w.write(JSON.stringify({ version: 1, written: now, hearings: list }, null, 1));
+  await w.close();
+  sheetHearingsSaid = body;
+}
+
+/**
+ * What the calendar log says of a hearing's row: a move it was marked off for
+ * ({ to }) or written under ({ from }), else null.
+ */
+function movedOf(hg) {
+  if (!calLib || !calLog || !hg || !hg.date) return null;
+  const key = calLib.changeKey(calLib.isoOf(hg.date), hg);
+  for (let i = calLog.length - 1; i >= 0; i--) {
+    const e = calLog[i];
+    if (!e || e.key !== key || e.undone) continue;
+    if (e.kind === "off" && e.reason === "moved" && hg.mark === "off") return { to: e.newDay || "", status: e.status || "" };
+    if (e.kind === "added" && e.movedFrom) return { from: e.movedFrom };
+  }
+  return null;
+}
+
 /** Bring the sheet up to the calendar: whether it changed the sheet. */
 async function syncCalendar(sheet, briefing, now) {
   if (calBusy || !briefing || briefing.none || !briefing.calendar || sheet.state !== "ok" || !sheetSeen) return false;
@@ -2005,7 +2043,7 @@ async function syncCalendar(sheet, briefing, now) {
     const lines = [];
     for (const p of res.placed) {
       const a = plan.adds.find((x) => x.key === p.key);
-      const e = { id: `${p.key}|added|${now}`, key: p.key, kind: "added", at: now, day: a.day, caseText: a.caseText, motion: a.motion, sheet: p.sheet, row: p.row, caseName: p.caseName, date: p.date };
+      const e = { id: `${p.key}|added|${now}`, key: p.key, kind: "added", at: now, day: a.day, caseText: a.caseText, motion: a.motion, movedFrom: a.movedFrom || "", sheet: p.sheet, row: p.row, caseName: p.caseName, date: p.date };
       log.push(e);
       lines.push(calLib.changeText(e).text);
     }
@@ -2284,14 +2322,15 @@ function hearingWhen(hg, now) {
 function ecourtButton(hg) {
   const b = document.createElement("button");
   b.className = "ci-ecourt";
-  b.title = `eCourt: open ${hg.caseNumber || hg.caseName} (the hearings sheet's link)`;
+  b.title = `eCourt: open ${hg.caseNumber || hg.caseName} (${hearingLib.isWebLink(hg.url) ? "the hearings sheet's link" : hg.ecourtFrom === "sheet" ? "the link on another row of this case in the hearings sheet" : "the link E-Court Suite read from eCourt's calendar; this row of the hearings sheet has none"})`;
   iconise(b, "external", "eCourt");
   b.addEventListener("click", (e) => { e.stopPropagation(); openEcourt(hg); });
   return b;
 }
 function openEcourt(hg) {
-  if (!hearingLib.isWebLink(hg.url)) return;
-  window.open(hg.url, "_blank", "noopener");
+  const url = hearingLib.ecourtUrlOf(hg);
+  if (!url) return;
+  window.open(url, "_blank", "noopener");
 }
 
 /**
@@ -2391,7 +2430,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     hv.runs ? hv.runs.key : "", Math.floor(now / 120000),
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
     Math.floor(now / 600000), canAskClaude() ? "claude" : "",
-    ...items.map(({ hg, place, r, controls, inDl }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hg.url, hg.submitted, hg.submittedText,
+    ...items.map(({ hg, place, r, controls, inDl }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hearingLib.ecourtUrlOf(hg), hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
   if (sig === hearingsShown) return;
@@ -2496,7 +2535,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   listEl.classList.toggle("has-brief", chipMost > 0 || !!dashes);
   listEl.classList.toggle("has-claude", canAskClaude());
   listEl.classList.toggle("has-runs", !!(hv.runs && runsLib && items.some(({ hg, place }) => runsLib.runsForHearing(hg, hv.runs.runs, place ? place.name : "").length)));
-  listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 58 + (chipMost - 1) * 4 : 24) + "px");
+  listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 66 + (chipMost - 1) * 4 : 24) + "px");
   let lastDay = null;
   for (const { hg, place, r, controls, inDl } of items) {
     const dayKey = hg.date || hg.dateText;
@@ -2609,6 +2648,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const where = [];
     if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
+    const moved = movedOf(hg);
+    if (moved && moved.from) where.push("Moved from " + hearingLib.shortDate(calLib.dayAt(moved.from), now));
     if (hg.submitted || hg.submittedText) where.push("Submitted " + (hg.submitted ? hearingLib.shortDate(hg.submitted, now) : hg.submittedText));
     if (folder) where.push(place.name + (r && r.inTree ? ` (in ${r.chain.length > 1 ? r.chain[r.chain.length - 2] : r.root.name})` : ""));
     if (st && st.sub) where.push(st.sub);
@@ -2616,7 +2657,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const pill = document.createElement("span");
     pill.className = "ci-status";
     statusCol.appendChild(pill);
-    const said = hg.mark === "off" ? { text: "Off calendar", tone: "off", title: "Marked red in the sheet: off calendar, or nothing to work up." }
+    const said = hg.mark === "off" && moved && moved.to !== undefined ? { text: moved.to ? `Moved to ${hearingLib.shortDate(calLib.dayAt(moved.to), now)}` : "Moved", tone: "off", title: `The case's Hearings tab says “${moved.status || "continued"}”${moved.to ? `; the hearing is written into the sheet under ${new Date(calLib.dayAt(moved.to)).toLocaleDateString()}` : ""}. Marked red in the sheet.` }
+        : hg.mark === "off" ? { text: "Off calendar", tone: "off", title: "Marked red in the sheet: off calendar, or nothing to work up." }
         : st || hearingLib.placeText(place);
     pill.textContent = said.text;
     pill.classList.add("tone-" + said.tone);
@@ -2624,7 +2666,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     // case folder is done, remove the not downloaded button").
     if (hg.mark === "done" && !st) pill.hidden = true;
     if (hg.waiting) pill.classList.add("waiting");
-    if (st && said === st && !r.locked) compactStatus(pill, "f:" + r.name);
+    pill.title = said.text;
     const placeSaid = hearingLib.placeText(place);
     b.title = (folder ? `Click for this case's buttons; double-click to open ${place.name}, the whole case folder.` : "Click for this case's buttons, Find its folder among them; double-click to look for it at once.")
       + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`
@@ -2671,7 +2713,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       open.title = folder ? `Open ${place.name}, the whole case folder, in a window of its own (or double-click the case)` : "Pick this case's folder (moved somewhere Home does not look?); Home keeps it as this hearing's";
       open.addEventListener("click", (e) => { e.stopPropagation(); openIt(); });
       bar.appendChild(open);
-      add(hearingLib.isWebLink(hg.url) ? ecourtButton(hg) : null);
+      add(hearingLib.ecourtUrlOf(hg) ? ecourtButton(hg) : null);
       const editable = sheet.state === "ok" || sheet.state === "error";
       if (editable) { add(doneButton(hg)); add(calendarButton(hg)); }
       add(r && !r.locked && canAskClaude() ? claudeButton(hg, r) : null);
@@ -3707,9 +3749,33 @@ window.addEventListener("message", (e) => {
   rememberFolder(e.data.dir).then(() => relay({ type: "folder" }));
 });
 
-// The theme follows the viewer's toggle (same-origin storage events).
+// Light or dark: Home's own ☀/🌙 (the owner, 2026-11-20: "How do I switch
+// between light and dark mode?" ... "yes, add it to home"), the same choice as
+// the viewer's toggle (localStorage "pdfViewerTheme"), so either one switches
+// Home, every tab and every window (same-origin storage events).
+const homeThemeBtn = document.getElementById("home-theme");
+function applyHomeTheme(theme) {
+  const light = theme === "light";
+  document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+  if (homeThemeBtn) {
+    homeThemeBtn.innerHTML = icon(light ? "moon" : "sun", { size: 17 });
+    homeThemeBtn.title = light ? "Switch to dark mode" : "Switch to light mode";
+  }
+}
+let homeTheme = "dark";
+try { if (localStorage.getItem("pdfViewerTheme") === "light") homeTheme = "light"; } catch { /* ok */ }
+applyHomeTheme(homeTheme);
+homeThemeBtn?.addEventListener("click", () => {
+  homeTheme = homeTheme === "light" ? "dark" : "light";
+  applyHomeTheme(homeTheme);
+  try { localStorage.setItem("pdfViewerTheme", homeTheme); } catch { /* ok */ }
+  // A tab's page hears a storage event only from another document: Home is
+  // one, so every viewer and reader tab hears this one.
+});
 window.addEventListener("storage", (e) => {
-  if (e.key === "pdfViewerTheme") document.documentElement.setAttribute("data-theme", e.newValue === "light" ? "light" : "dark");
+  if (e.key !== "pdfViewerTheme") return;
+  homeTheme = e.newValue === "light" ? "light" : "dark";
+  applyHomeTheme(homeTheme);
 });
 
 // Unsaved work: a tab says so with a dot, and closing the window asks first.

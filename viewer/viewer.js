@@ -6593,10 +6593,10 @@ function applyTheme(theme) {
     themeToggleEl.title = light ? "Switch to dark mode" : "Switch to light mode";
   }
 }
+// Reflect whatever the pre-paint <head> script already applied.
+let currentTheme = "dark";
+try { if (localStorage.getItem("pdfViewerTheme") === "light") currentTheme = "light"; } catch { /* ok */ }
 if (themeToggleEl) {
-  // Reflect whatever the pre-paint <head> script already applied.
-  let currentTheme = "dark";
-  try { if (localStorage.getItem("pdfViewerTheme") === "light") currentTheme = "light"; } catch { /* ok */ }
   applyTheme(currentTheme);
   themeToggleEl.addEventListener("click", () => {
     currentTheme = currentTheme === "light" ? "dark" : "light";
@@ -6604,6 +6604,12 @@ if (themeToggleEl) {
     try { localStorage.setItem("pdfViewerTheme", currentTheme); } catch { /* ok */ }
   });
 }
+// Switched elsewhere (Home's ☀/🌙, another tab or window): follow it at once.
+window.addEventListener("storage", (e) => {
+  if (e.key !== "pdfViewerTheme") return;
+  currentTheme = e.newValue === "light" ? "light" : "dark";
+  applyTheme(currentTheme);
+});
 
 // ── Fill form ───────────────────────────────────────────────────────────────
 // Renders editable HTML controls over the PDF's AcroForm fields. Edits are kept

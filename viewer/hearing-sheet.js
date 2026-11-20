@@ -46,6 +46,52 @@ export function caseNumberOfUrl(url) {
   } catch { return ""; }
 }
 
+/** eCourt's case page for a case id (calendar-sync.js caseIdOfUrl reads it back). */
+export const ECOURT_CASE_URL = "https://civil.lacourt.org/ecourt/ecms/case?id=";
+
+/**
+ * A link for every hearing the sheet gives none (the owner, 2026-11-20: "I'm
+ * noticing some hearings missing ecourt buttons"): a row typed or pasted with
+ * no link has no eCourt button. Sets `ecourtUrl` (and `ecourtFrom`: "sheet",
+ * another row of the same case number that has one; "ecourt", the calendar
+ * E-Court Suite read, by its case number) on each hearing with no web link of
+ * its own; `url` stays the sheet's, as the calendar sync matches by it.
+ * Returns how many were filled.
+ */
+export function fillEcourtLinks(hearings, calendar) {
+  const key = (n) => String(n || "").trim().toUpperCase();
+  const found = new Map();
+  for (const h of hearings || []) {
+    if (h && isWebLink(h.url) && h.caseNumber && !found.has(key(h.caseNumber))) found.set(key(h.caseNumber), { url: h.url, from: "sheet" });
+  }
+  for (const d of (calendar && Array.isArray(calendar.days) ? calendar.days : [])) {
+    for (const r of (d && Array.isArray(d.rows) ? d.rows : [])) {
+      if (!r) continue;
+      const n = key(r.caseNumber || caseNumbersIn(r.caseText)[0]);
+      if (!n || found.has(n)) continue;
+      const id = /^\d+$/.test(String(r.caseId || "")) ? String(r.caseId) : "";
+      const url = isWebLink(r.url) && /lacourt\.org\//i.test(r.url) ? r.url : id ? ECOURT_CASE_URL + id : "";
+      if (url) found.set(n, { url, from: "ecourt" });
+    }
+  }
+  let n = 0;
+  for (const h of hearings || []) {
+    if (!h) continue;
+    delete h.ecourtUrl; delete h.ecourtFrom;
+    if (isWebLink(h.url) || !h.caseNumber) continue;
+    const hit = found.get(key(h.caseNumber));
+    if (hit) { h.ecourtUrl = hit.url; h.ecourtFrom = hit.from; n++; }
+  }
+  return n;
+}
+
+/** The link a hearing's eCourt button opens: the sheet's, else one filled in (fillEcourtLinks), else "". */
+export function ecourtUrlOf(h) {
+  if (!h) return "";
+  if (isWebLink(h.url)) return h.url;
+  return isWebLink(h.ecourtUrl) ? h.ecourtUrl : "";
+}
+
 /** Whether a link may be opened from Home: http(s) only. */
 export function isWebLink(url) {
   return /^https?:\/\//i.test(String(url || ""));
@@ -1012,7 +1058,7 @@ const shortDay = (ms) => {
 
 /**
  * The chips a hearing row shows for its briefing: [{ label, state, mark,
- * title }], `state` the colour ("filed" green, "late" and "missing" red,
+ * title, due }], `due` the line under the label ("Due 11/14", "" with none), `state` the colour ("filed" green, "late" and "missing" red,
  * "personal" amber, "pending" plain, "unposted" plain and marked as unsure),
  * `mark` the sign after the label (✓, ✗, !, ?, or none). An OSC is one chip.
  */
@@ -1039,7 +1085,9 @@ export function briefingChips(entry) {
       ? "nothing on file yet, but eCourt posts filings up to 2 court days late"
       : s.note === "Not Filed" ? "not filed" : STATE_WORDS[s.state] || "";
     const title = `${SLOT_NAMES[k]}: ${[said, ...parts].filter(Boolean).join(", ")}${s.manual ? " (picked by hand in E-Court Suite)" : ""}`;
-    out.push({ label, state, mark, title });
+    // The deadline under the label (the owner, 2026-11-20: "expand the Motion
+    // Opposition Reply labels to include due dates underneath").
+    out.push({ label, state, mark, title, due: s.due ? `Due ${shortDay(s.due)}` : "" });
   }
   return out;
 }

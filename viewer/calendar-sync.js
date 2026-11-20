@@ -28,7 +28,7 @@
 
 import { zipEntries, readEntry, parseSharedStrings, colIndex } from "./xlsx-read.js";
 import { replaceParts, colLetters, escapeXmlText } from "./xlsx-write.js";
-import { readHearings, parseSheetCells, parseRels, relsPartOf, attrOf, caseNumbersIn, nameWords, dateToSerial, textToDate } from "./hearing-sheet.js";
+import { readHearings, parseSheetCells, parseRels, relsPartOf, attrOf, caseNumbersIn, nameWords, dateToSerial, textToDate, isWebLink } from "./hearing-sheet.js";
 
 // ---- days and cases -----------------------------------------------------------
 
@@ -135,7 +135,58 @@ export function planCalendar({ hearings = [], calendar = null, log = [], now = D
       else out.held.push({ ...item, seen: true });
     }
   }
+  // The owner (2026-11-20): "Let's also add detection for when the hearing
+  // date has moved". E-Court checks every hearing the sheet holds on its
+  // case's Hearings tab (Home writes them: sheetHearingsList), so `gone` also
+  // says off or moved for a day it did not read (past the ten court days, or
+  // unread this run): the sheet's row of that day is marked off the same way.
+  for (const g of gone) {
+    if (!g || (g.reason !== "off" && g.reason !== "moved") || out.days.includes(g.day)) continue;
+    const at = dayAt(g.day);
+    if (!at || at < today.getTime()) continue;
+    const h = hearings.find((x) => x.date === at && !x.mark && sameCase(x, g));
+    if (!h) continue;
+    const key = changeKey(g.day, h);
+    if (done(key, "off", "kept") || out.offs.some((o) => o.key === key)) continue;
+    out.offs.push({ key, day: g.day, at, hg: h, reason: g.reason, status: String(g.status || ""), newDay: String(g.newDay || "") });
+  }
+  // A hearing moved is written under its new day at once, however far out,
+  // where the sheet has no row of its case that day; a new day E-Court read
+  // is left to its agenda (the add above), which lists it.
+  for (const o of out.offs) {
+    if (o.reason !== "moved" || !o.newDay || out.days.includes(o.newDay)) continue;
+    const at = dayAt(o.newDay);
+    if (!at || at < today.getTime()) continue;
+    if (hearings.some((x) => x.date === at && sameCase(x, o.hg))) continue;
+    const g = gone.find((x) => x && x.day === o.day && sameCase(o.hg, x)) || {};
+    const row = { caseText: o.hg.caseName || g.caseText || "", caseId: g.caseId || caseIdOfUrl(o.hg.url), caseNumber: o.hg.caseNumber || g.caseNumber || "", url: o.hg.url || g.url || "" };
+    const key = changeKey(o.newDay, row);
+    if (done(key, "added") || out.adds.some((a) => a.key === key)) continue;
+    out.adds.push({ key, day: o.newDay, at, motion: String(o.hg.motion || g.motion || ""), caseText: String(row.caseText), url: String(row.url), caseId: row.caseId, caseNumber: row.caseNumber, movedFrom: o.day });
+  }
   return out;
+}
+
+/**
+ * The hearings Home hands E-Court Suite to check on each case's Hearings tab
+ * ("PDF+ Hearings Sheet.json" in Downloads; its refresh/run.js): every
+ * unmarked hearing from today on whose case id is known (its link, or one
+ * filled in: `ecourtUrl`), one per case and day.
+ */
+export const SHEET_HEARINGS_FILE = "PDF+ Hearings Sheet.json";
+export function sheetHearingsList(hearings, now = Date.now()) {
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const out = [], seen = new Set();
+  for (const h of hearings || []) {
+    if (!h || h.mark || !h.date || h.date < today.getTime()) continue;
+    const caseId = caseIdOfUrl(h.url) || caseIdOfUrl(h.ecourtUrl);
+    if (!caseId) continue;
+    const day = isoOf(h.date);
+    if (seen.has(day + "|" + caseId)) continue;
+    seen.add(day + "|" + caseId);
+    out.push({ day, caseId, caseNumber: h.caseNumber || "", caseText: h.caseName || "", motion: h.motion || "", url: isWebLink(h.url) ? h.url : h.ecourtUrl || "" });
+  }
+  return out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0) || a.caseId.localeCompare(b.caseId));
 }
 
 // ---- the sheet's layout -----------------------------------------------------------
@@ -567,10 +618,14 @@ export async function removeCalendarRow(data, rec, now = Date.now()) {
 export function changeText(c) {
   const short = (iso) => { const at = dayAt(iso); return at ? new Date(at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : iso; };
   const who = c.caseText || (c.hg && c.hg.caseName) || "";
+  if (c.kind === "added" && c.movedFrom) return { text: `Moved ${who}: ${short(c.movedFrom)} → ${short(c.day)}`, title: `The case's Hearings tab moved its ${c.motion || "hearing"} from ${short(c.movedFrom)} to ${short(c.day)}. Written into the sheet under ${short(c.day)}; the ${short(c.movedFrom)} row is marked red.` };
   if (c.kind === "added") return { text: `Added ${who}, ${short(c.day)}`, title: `New on eCourt's agenda for ${short(c.day)}: ${c.motion || "hearing"}. Written into the sheet as Copy All would copy it.` };
+  if (c.kind === "off" && c.reason === "moved") {
+    return { text: `Moved ${short(c.day)}${c.newDay ? " → " + short(c.newDay) : ""}: ${who}`, title: `The case's Hearings tab says “${c.status || "continued"}”${c.newDay ? ` and sets it for ${short(c.newDay)}, where it is written into the sheet` : ", with no new day yet"}. The ${short(c.day)} row's Motion Type and Case Name cells are marked red.` };
+  }
   if (c.kind === "off") {
-    const why = c.reason === "moved" ? `continued${c.newDay ? " to " + short(c.newDay) : ""}` : "taken off calendar";
-    return { text: `Off calendar ${short(c.day)}: ${who} (${why})`, title: `Gone from ${short(c.day)}'s agenda; the case's Hearings tab says “${c.status || why}”. Its Motion Type and Case Name cells are marked red.${c.reason === "moved" && c.newDay ? ` It is added under ${short(c.newDay)} once that day is within the ten court days E-Court reads.` : ""}` };
+    const why = "taken off calendar";
+    return { text: `Off calendar ${short(c.day)}: ${who} (${why})`, title: `Gone from ${short(c.day)}'s agenda; the case's Hearings tab says “${c.status || why}”. Its Motion Type and Case Name cells are marked red.${c.reason === "moved" && c.newDay ? ` It is written under ${short(c.newDay)}.` : ""}` };
   }
   if (c.kind === "held") return { text: `Check ${who}, ${short(c.day)}: not on that day's agenda`, title: `It is in the sheet for ${short(c.day)}, but eCourt's agenda for that day does not list it${c.status ? `, and its Hearings tab says “${c.status}”` : ", and its Hearings tab does not say why"}. Nothing was changed: mark it off calendar, or keep it.` };
   return { text: who, title: "" };

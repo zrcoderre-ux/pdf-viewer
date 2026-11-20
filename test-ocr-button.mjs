@@ -11,7 +11,8 @@
 //   3. a scan under an INVISIBLE text layer that is garbled (private-use code
 //      points) is read, the recognizer's text replacing the garbled layer;
 //   4. a page whose garbled text is drawn VISIBLY is left as it is;
-//   5. a page of ordinary text is left as it is.
+//   5. a page of ordinary text is left as it is;
+//   7. Home's light/dark button switches an open PDF tab, and back.
 //
 // Run: node test-ocr-button.mjs   (from the repo root). Needs Playwright
 // (/opt/node-tools), Chromium (/opt/pw-browsers/chromium) and a free port in
@@ -165,6 +166,17 @@ try {
   check("a stamp's worth of text is a scrap; a page's is not", weigh.sparse, [true, false]);
   check("a picture covering the page", [weigh.cover, weigh.small], [1, true]);
   check("only the invisible text counted", weigh.inv, { chars: 2, garbled: 2 });
+  console.log("7. Home's light/dark button switches the open tabs too");
+  const themes = async () => [await page.evaluate(() => document.documentElement.getAttribute("data-theme")), await viewer().evaluate(() => document.documentElement.getAttribute("data-theme"))];
+  check("dark at first", await themes(), ["dark", "dark"]);
+  await page.evaluate(() => document.getElementById("home-theme").click());
+  await page.waitForTimeout(300);
+  check("Home's button: Home and the open PDF tab light", await themes(), ["light", "light"]);
+  check("…the button offers dark, and the choice is kept", await page.evaluate(() => [document.getElementById("home-theme").title, localStorage.getItem("pdfViewerTheme")]), ["Switch to dark mode", "light"]);
+  await viewer().evaluate(() => document.getElementById("theme-toggle").click());
+  await page.waitForTimeout(300);
+  check("the PDF tab's own toggle: both dark again", await themes(), ["dark", "dark"]);
+  check("…and Home's button offers light", await page.evaluate(() => document.getElementById("home-theme").title), "Switch to light mode");
   check("no page errors", errors, []);
 } finally {
   await browser.close();
