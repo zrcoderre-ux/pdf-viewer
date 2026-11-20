@@ -640,6 +640,8 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
   border-bottom: 1px solid var(--c-day-rule);
 }
 /* Show previous: the past hearings' own heading, under the upcoming ones. */
+.home-app .hearing-past-head.flash { animation: pastFlash 1.6s ease-out; }
+@keyframes pastFlash { 0%, 30% { background: var(--c-accent-soft); color: var(--c-accent); } 100% { background: transparent; } }
 .home-app .hearing-past-head { padding: 22px 16px 8px; font-size: var(--fs-label); font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--c-text-3); border-top: 2px solid var(--c-border-strong, var(--c-border)); }
 .home-app .hearing-day:first-child { border-top: none; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 

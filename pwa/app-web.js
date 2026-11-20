@@ -1298,12 +1298,23 @@ async function runStartFor(row) {
 }
 
 let caseRendering = false, caseAgain = false, caseShown = "", caseTimer = 0;
+let drawFailSaid = "";
 async function renderCaseFolders() {
   if (caseRendering) { caseAgain = true; return; }
   caseRendering = true;
   try {
     do { caseAgain = false; await renderCaseFoldersNow(); } while (caseAgain);
-  } catch (e) { console.warn(e); }
+  } catch (e) {
+    // Said, not only logged: a draw that fails leaves the old list standing,
+    // which reads as a button that does nothing (the owner, 2026-11-20, of
+    // Show previous: "doesn't seem to do anything").
+    console.warn(e);
+    const msg = String((e && e.message) || e);
+    if (msg !== drawFailSaid) {
+      drawFailSaid = msg;
+      shellToast(`Home could not draw its lists: ${msg}${e && e.stack ? " (" + String(e.stack).split("\n").slice(1, 2).join("").trim() + ")" : ""}`, 12000);
+    }
+  }
   finally { caseRendering = false; }
 }
 async function renderCaseFoldersNow() {
@@ -2918,10 +2929,29 @@ document.getElementById("hearings-all")?.addEventListener("click", () => {
   hearingsShown = "";
   renderCaseFolders();
 });
-document.getElementById("hearings-past")?.addEventListener("click", () => {
+document.getElementById("hearings-past")?.addEventListener("click", async () => {
   hearingsPast = !hearingsPast;
   hearingsShown = "";
   renderCaseFolders();
+  // They come under every upcoming hearing, out of sight on a long list (the
+  // owner, 2026-11-20: "Show previous doesn't seem to do anything"): brought
+  // into view, and lit for a moment; hidden again, back to the list's top.
+  const want = hearingsPast;
+  for (let i = 0; i < 100 && hearingsPast === want; i++) {
+    const head = document.querySelector("#hearing-list .hearing-past-head");
+    if (want && head) {
+      head.scrollIntoView({ behavior: "smooth", block: "start" });
+      head.classList.remove("flash");
+      void head.offsetWidth;
+      head.classList.add("flash");
+      return;
+    }
+    if (!want && !head) {
+      document.getElementById("hearings")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
 });
 
 // ---- Home: find a case's folder ---------------------------------------------

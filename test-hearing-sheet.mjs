@@ -665,6 +665,9 @@ async function browserPart() {
       return [before > 0, after];
     }), [true, ["21STCV01111"]]);
     check("…and the button says Hide", await shell.textContent("#hearings-past"), "Hide previous");
+    // The owner (2026-11-20): "Show previous doesn't seem to do anything" — they came under every upcoming hearing, out of sight.
+    await shell.waitForTimeout(900);
+    check("…brought into view, and lit", await shell.evaluate(() => { const h = document.querySelector("#hearing-list .hearing-past-head"); const b = h.getBoundingClientRect(); return [b.top >= -1 && b.top < window.innerHeight, h.classList.contains("flash")]; }), [true, true]);
     check("…the summary still counts only what is ahead", /to work up/.test(await shell.textContent("#hearings-summary")) && !/5 to work up/.test(await shell.textContent("#hearings-summary")), true);
     await shell.click("#hearings-past");
     await shell.waitForFunction(() => !document.querySelector("#hearing-list .hearing-past-head"), null, { timeout: 10000 });

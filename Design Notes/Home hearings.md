@@ -769,7 +769,10 @@ the upcoming ones (off-calendar ones only with Show off calendar, as for the
 upcoming), and `renderHearings` sets them under a `.hearing-past-head` heading;
 each is matched to its folder and drawn as any other row. `all` and `open`
 stay the upcoming ones, so the summary, calendar sync and the E-Court list
-are as before. `test-hearing-sheet.mjs` 11b.
+are as before. `test-hearing-sheet.mjs` 11b. The owner, after: "Show previous
+doesn't seem to do anything": they came under every upcoming hearing, out of
+sight on a long list. The press now scrolls the heading into view and lights
+it for a moment (`.flash`); Hide previous scrolls back to the section's top.
 
 ### "Claude runs going" counts only runs moving now (2026-11-20)
 

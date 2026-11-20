@@ -39,7 +39,7 @@ Press ✓ again (Not done) to take the green off.
 off.
 
 **Show previous**, beside it, adds the hearings of the last 60 days under the
-upcoming ones, newest first, under a "Previous hearings" heading, each with its
+upcoming ones, newest first, and scrolls down to them, under a "Previous hearings" heading, each with its
 case folder, briefing and buttons as before. Off-calendar ones among them show
 only with Show off calendar too. Press it again (**Hide previous**) to put them
 away. The counts at the top stay about what is ahead.
@@ -181,7 +181,11 @@ with a paper not filed.
 
 With E-Court Suite 3.49.30 or later the extension also checks by itself: once
 an hour on weekdays, 8 AM to 6 PM, it reads the next five court days' agendas in
-your open eCourt tab and works out every hearing on them. The summary line says
+your open eCourt tab and works out every hearing on them. From 3.49.36 it also
+works out every other upcoming hearing on your sheet, however far out (from
+each case's Hearings tab: every motion set that day), up to 80 an hour, each
+again every three hours, so you need not open each case. A hearing needs its
+eCourt link (on the row, or one Home found for it) to be checked this way. The summary line says
 when it last checked ("Briefing checked 3:05 PM") or why it could not ("eCourt
 sign-in needed", "no eCourt tab open"). **Refresh from eCourt** in the Hearings
 heading asks for a check at once: Chrome opens an eCourt tab, the extension
