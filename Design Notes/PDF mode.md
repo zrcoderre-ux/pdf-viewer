@@ -135,3 +135,11 @@ among the pages `pdfSources` matches to that PDF, opening the PDF's export
 while PDF mode was on (saved in the viewer) is dropped from `pdfCache` and
 `pdfSizes`, and `refreshPdf` reads it again. The theme is read back from
 `localStorage`, since the viewer can change it.
+
+## The case folder's name in PDF mode (2026-11-20)
+
+The owner: "I should be able to see the case folder name in pdf mode." The
+status bar that names the folder in the text is hidden in PDF mode, so the
+controls now open with it: `#pm-folder` ("📁 <folder>", the whole name on
+hover, cut with an ellipsis past 320px), set by `pmFolderShow` on entering
+PDF mode and whenever the PDF in front changes. `test-pdf-mode.mjs` (1).

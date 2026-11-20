@@ -1413,6 +1413,9 @@ body.pdf-mode #statusbar { display: none; }
 .pm-controls[hidden] { display: none; }
 #pm-pick { max-width: 42vw; }
 .pm-where { font-size: 12px; opacity: 0.8; white-space: nowrap; }
+/* The case folder's name in PDF mode (pmFolderShow). */
+.pm-folder { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; margin-right: 6px; }
+.pm-folder[hidden] { display: none; }
 .pm-edge {
   position: absolute; left: 50%; transform: translateX(-50%); z-index: 2;
   padding: 6px 14px; border-radius: 16px; font-size: 12px; pointer-events: none;

@@ -165,6 +165,8 @@ async function run() {
     check("…with the viewer's tools (the tools rail is there)", await fa.evaluate(() => !!document.querySelector("#tools-rail, .tools-rail, #rail")), true);
     check("the switcher lists the folder's PDFs", await page.evaluate(() => [...document.querySelectorAll("#pm-pick option")].map((o) => o.textContent)), ["A Decl", "B Letter"]);
     check("…and says where it is", await page.evaluate(() => document.getElementById("pm-where").textContent), "1 of 2");
+    // The owner (2026-11-20): "I should be able to see the case folder name in pdf mode".
+    check("…and the case folder's name, first in its controls", await page.evaluate(() => { const f = document.getElementById("pm-folder"); return [!f.hidden && getComputedStyle(f).display !== "none", f.textContent === "📁 " + window.__textReaderSource().dir.name]; }), [true, true]);
     check("the reader's own buttons are out of the way", await page.evaluate(() => getComputedStyle(document.getElementById("save")).display), "none");
 
     console.log("2. ‹ › step between the PDFs, each kept open");

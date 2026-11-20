@@ -26503,6 +26503,16 @@ const pmPick = $("pm-pick");
 const pmPrevBtn = $("pm-prev");
 const pmNextBtn = $("pm-next");
 const pmWhereEl = $("pm-where");
+// The case folder's name, first in PDF mode's controls (the owner,
+// 2026-11-20: "I should be able to see the case folder name in pdf mode"):
+// the status bar that names it in the text is hidden there.
+const pmFolderEl = $("pm-folder");
+function pmFolderShow() {
+  if (!pmFolderEl) return;
+  pmFolderEl.textContent = folderName ? "📁 " + folderName : "";
+  pmFolderEl.title = folderName ? `Case folder: ${folderName}` : "";
+  pmFolderEl.hidden = !folderName;
+}
 const pmFindEl = $("pm-find");
 const pmEdgeEl = $("pm-edge");
 const PM_FRAMES_MAX = 8;
@@ -26668,6 +26678,7 @@ function pmSyncBar() {
   pmPrevBtn.disabled = pmAt <= 0;
   pmNextBtn.disabled = pmAt >= pmList.length - 1;
   pmWhereEl.textContent = pmList.length ? `${pmAt + 1} of ${pmList.length}` : "";
+  pmFolderShow();
 }
 
 const pmLabel = (name) => String(name).replace(/\.pdf$/i, "");
@@ -26930,6 +26941,7 @@ async function enterPdfMode() {
   document.body.classList.add("pdf-mode");
   pmStage.hidden = false;
   pmControls.hidden = false;
+  pmFolderShow();
   pdfModeBtn.setAttribute("aria-pressed", "true");
   pdfModeBtn.textContent = "📝 Text mode";
   pdfModeBtn.title = "Back to the text, at the page the PDF is on (Ctrl+Shift+M). The PDFs stay open here, with any unsaved changes, until the folder changes";
