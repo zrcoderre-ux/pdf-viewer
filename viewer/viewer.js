@@ -5777,7 +5777,11 @@ async function destToPageNum(dest) {
     const resolved = typeof dest === "string"
       ? await pdfDoc.getDestination(dest)
       : dest;
-    if (!resolved || !resolved[0]) return null;
+    if (!resolved || resolved[0] == null) return null;
+    // A page given by NUMBER rather than by reference (some producers write
+    // [3 /XYZ …], which pdf.js hands through as it stands): 0-based, as a
+    // remote destination counts.
+    if (Number.isInteger(resolved[0])) return resolved[0] >= 0 && resolved[0] < pdfDoc.numPages ? resolved[0] + 1 : null;
     const pageIndex = await pdfDoc.getPageIndex(resolved[0]);
     return pageIndex + 1;
   } catch {

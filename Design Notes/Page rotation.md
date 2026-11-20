@@ -55,3 +55,28 @@ does it alone, in place for editable documents and as a copy for web PDFs.
 Anything that reloads the document from edited bytes must call
 `pageRotation.clear()`, or the new bytes (which already carry the angles) would
 be turned a second time.
+
+**The plan is applied INSIDE the source document** (2026-11-20; the owner:
+"before I updated, I noticed that the bookmarks in my pdf were not working
+when I clicked them, and post update the bookmarks are gone it says this
+document has no bookmarks"). `applyPagePlan` used to copy the planned pages
+into a NEW document (`PDFDocument.create` + `copyPages`), which carries each
+page and its annotations (highlights, PDF-Linker's citation links) and nothing
+of the document: its bookmarks, named destinations, form, attachments, page
+labels and metadata. So every 💾 Save with a page turned on screen, every Save
+rotation, every Organize and every deleted page wrote a file without its
+bookmarks, for good. Now the source's own pages are taken off its page tree
+and put back in the plan's order (`removePage`, `addPage`), turned where the
+plan says; a page the plan lists twice is copied (`copyPages` from the
+document itself) for its later places; and where the plan drops pages,
+`pruneOutline` takes out each bookmark whose destination (`/Dest`, or a
+`/GoTo` action's `/D`) is a dropped page, relinking `/Prev`, `/Next`,
+`/First`, `/Last` and the `/Count` (its sign kept), and points one with live
+children at its first child's page; a bookmark to a page by NAME is left. 
+`test-page-plan.mjs` pins it (rotation, reorder, deletion, a page twice, the
+refusals); against the old writer six of its thirteen checks fail.
+
+A bookmark that names its page by NUMBER rather than by reference (`[4 /XYZ
+…]`, which some producers write and pdf.js hands through as it stands) did
+nothing when clicked: `destToPageNum` asked `getPageIndex` of a number. It is
+read now as the 0-based page it counts.

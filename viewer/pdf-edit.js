@@ -71,28 +71,111 @@ export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes
 // list: an array of { srcIndex, rotate } where srcIndex is the 0-based page in
 // the source and rotate is extra clockwise rotation in degrees (0/90/180/270).
 // Pages omitted from the plan are dropped; the plan's order is the new order.
-// copyPages carries each page's annotations (e.g. our highlights) along, and a
-// page's /Rotate applies to its annotations too, so highlights stay put.
 // Extracting a subset is just a plan that lists only the wanted pages.
+//
+// The pages are rearranged INSIDE the source document, not copied into a new
+// one (the owner, 2026-11-20: "post update the bookmarks are gone it says this
+// document has no bookmarks"). A fresh document carried the pages and their
+// annotations (highlights, PDF-Linker's citation links) and nothing of the
+// document itself: its bookmarks, named destinations, form, attachments, page
+// labels and metadata were lost on every Save that wrote a rotation, every
+// Organize and every page deleted. In place, all of that stays. A page the plan
+// lists twice is copied for its later places; a bookmark that pointed at a page
+// the plan dropped goes with it (one with live children points at the first of
+// them instead), so no bookmark is left that goes nowhere.
 export async function applyPagePlan({ srcBytes, plan }) {
   if (!plan || !plan.length) throw new Error("A document must keep at least one page.");
-  const src = await PDFDocument.load(srcBytes);
-  const pageCount = src.getPageCount();
-  const out = await PDFDocument.create();
+  const doc = await PDFDocument.load(srcBytes);
+  const pageCount = doc.getPageCount();
   const indices = plan.map((p) => p.srcIndex);
   if (indices.some((i) => !Number.isInteger(i) || i < 0 || i >= pageCount)) {
     throw new Error("Page plan references a page that doesn't exist.");
   }
-  const copied = await out.copyPages(src, indices);
-  copied.forEach((pg, i) => {
-    const delta = ((plan[i].rotate || 0) % 360 + 360) % 360;
+  const pages = doc.getPages();
+  const used = new Set();
+  const order = [];
+  for (const p of plan) {
+    let pg;
+    if (used.has(p.srcIndex)) [pg] = await doc.copyPages(doc, [p.srcIndex]);
+    else { pg = pages[p.srcIndex]; used.add(p.srcIndex); }
+    order.push({ pg, rotate: p.rotate });
+  }
+  for (let i = doc.getPageCount() - 1; i >= 0; i--) doc.removePage(i);
+  for (const { pg, rotate } of order) {
+    const delta = ((rotate || 0) % 360 + 360) % 360;
     if (delta) {
       const base = pg.getRotation().angle || 0;
       pg.setRotation(degrees((base + delta) % 360));
     }
-    out.addPage(pg);
-  });
-  return out.save();
+    doc.addPage(pg);
+  }
+  if (used.size < pageCount) pruneOutline(doc, new Set(order.map((o) => o.pg.ref.toString())));
+  return doc.save();
+}
+
+/**
+ * Take out of `doc`'s bookmarks every one whose destination is a page no
+ * longer in it (`kept`: the remaining pages' refs as strings), relinking the
+ * rest; a bookmark with live children keeps its place and points at its first
+ * child's page. A destination by name, or not to a page, is left as it is.
+ */
+function pruneOutline(doc, kept) {
+  const ctx = doc.context, cat = doc.catalog;
+  const N = (n) => PDFName.of(n);
+  const look = (x) => (x instanceof PDFRef ? ctx.lookup(x) : x);
+  const outlines = look(cat.get(N("Outlines")));
+  if (!(outlines instanceof PDFDict)) return;
+  const destOf = (item) => {
+    let d = item.get(N("Dest"));
+    if (!d) {
+      const a = look(item.get(N("A")));
+      if (a instanceof PDFDict && String(a.get(N("S"))) === "/GoTo") d = a.get(N("D"));
+    }
+    return look(d);
+  };
+  const dead = (item) => {
+    const d = destOf(item);
+    return d instanceof PDFArray && d.size() > 0 && d.get(0) instanceof PDFRef && !kept.has(d.get(0).toString());
+  };
+  const prune = (parent, seen) => {
+    const keptRefs = [];
+    let ref = parent.get(N("First"));
+    while (ref instanceof PDFRef && !seen.has(ref.toString())) {
+      seen.add(ref.toString());
+      const item = look(ref);
+      const next = item.get(N("Next"));
+      if (item instanceof PDFDict) {
+        prune(item, seen);
+        if (dead(item)) {
+          const first = item.get(N("First"));
+          if (first) {
+            const d = destOf(look(first));
+            item.delete(N("A"));
+            if (d) item.set(N("Dest"), d); else item.delete(N("Dest"));
+            keptRefs.push(ref);
+          }
+        } else keptRefs.push(ref);
+      }
+      ref = next;
+    }
+    keptRefs.forEach((r, i) => {
+      const it = look(r);
+      if (i) it.set(N("Prev"), keptRefs[i - 1]); else it.delete(N("Prev"));
+      if (i < keptRefs.length - 1) it.set(N("Next"), keptRefs[i + 1]); else it.delete(N("Next"));
+    });
+    const count = parent.get(N("Count"));
+    if (keptRefs.length) {
+      parent.set(N("First"), keptRefs[0]);
+      parent.set(N("Last"), keptRefs[keptRefs.length - 1]);
+      if (count instanceof PDFNumber) parent.set(N("Count"), PDFNumber.of(count.asNumber() < 0 ? -keptRefs.length : keptRefs.length));
+    } else {
+      parent.delete(N("First"));
+      parent.delete(N("Last"));
+      parent.delete(N("Count"));
+    }
+  };
+  prune(outlines, new Set());
+  if (!outlines.get(N("First"))) cat.delete(N("Outlines"));
 }
 
 // Map a text slot in a page's *displayed* box to unrotated page coordinates for

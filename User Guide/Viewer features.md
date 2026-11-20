@@ -190,6 +190,8 @@ In addition to citation linking, the viewer supports:
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
   click, and is offered for web PDFs too (as a copy). See below.
+  Saving a rotation, Organize pages and deleting pages keep the document's
+  bookmarks; a bookmark to a page you delete is removed with it.
 The **☀ / 🌙** button in the top bar toggles between dark (default) and light
 themes; the choice is remembered. The **document name** menu renames the file,
 sets how it is named, shows its properties, and (for a web PDF) opens the
