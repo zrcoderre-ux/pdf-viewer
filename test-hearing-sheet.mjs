@@ -956,8 +956,11 @@ async function browserPart() {
     ] });
     await shell.waitForFunction(() => document.getElementById("hearing-list").classList.contains("has-runs"), null, { timeout: 15000 });
     const runCellOf = acmeRowB.locator(".ci-run");
-    check("the case's newest run: its steps as a bar, and the step it is on", [await runCellOf.locator(".cr-line").textContent(), await runCellOf.locator(".cr-seg").evaluateAll((xs) => xs.map((x) => x.className.replace("cr-seg ", "")))], ["Step 2 of 3", ["s-done", "s-here", "s-todo"]]);
+    // The owner (2026-11-20): "replace the lights with the number out of blank like a fraction" … "Also the name of the run … of the workflow".
+    check("the case's newest run: its workflow, the steps done as a fraction, and the step it is on", [await runCellOf.locator(".cr-name").textContent(), await runCellOf.locator(".cr-frac").textContent(), await runCellOf.locator(".cr-line").textContent(), await runCellOf.locator(".cr-seg").count()], ["Tentative ruling", "1/3", "Running step 2", 0]);
     check("…hover tells its history, a line a step", /1 · Chat A — done, 4m 12s\n2 · Chat B — running now\n3 · Chat A — to come/.test(await runCellOf.getAttribute("title")), true);
+    // The owner (2026-11-20): "thinking chronologically, the order should go briefing status, download status/pdf linker status, run status".
+    check("in the order things happen: briefing, the folder's status, the Claude run", await acmeRowB.evaluate((r) => ["ci-brief", "ci-status-col", "ci-run"].map((c) => Math.round(r.querySelector("." + c).getBoundingClientRect().left)).every((x, i, a) => !i || x > a[i - 1])), true);
     check("…and that an earlier run exists", /1 earlier run for this case/.test(await runCellOf.getAttribute("title")), true);
     await shell.setViewportSize({ width: 2560, height: 1300 }); await shell.waitForTimeout(400);
     check("other rows keep the column empty, so it lines up", await shell.$$eval("#hearing-list .ci-run", (xs) => [xs.filter((x) => x.classList.contains("has")).length, new Set(xs.map((x) => Math.round(x.getBoundingClientRect().left))).size]), [1, 1]);
@@ -972,7 +975,7 @@ async function browserPart() {
       { id: "r1", name: "25STCV12345 ACME — 11/20/26", caseNumber: "25STCV12345", status: "done", progress: "Finished all 3 steps", step: 3, total: 3, at: Date.now(), finishedAt: new Date().setHours(15, 10, 0, 0),
         steps: [{ label: "1", state: "done" }, { label: "2", state: "done" }, { label: "3", state: "done" }] }] });
     await shell.waitForFunction(() => /Finished/.test((document.querySelector("#hearing-list .ci-run.has .cr-line") || {}).textContent || ""), null, { timeout: 15000 });
-    check("finished: when", await runCellOf.locator(".cr-line").textContent(), "Finished 3:10 PM");
+    check("finished: when, all its steps done", [await runCellOf.locator(".cr-line").textContent(), await runCellOf.locator(".cr-frac").textContent(), await runCellOf.locator(".cr-name").count()], ["Finished 3:10 PM", "3/3", 0]);
     // The owner (2026-11-20): "It should show in the home page the status of the
     // current or most recent claude run for each case (but only if there was one)".
     const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).setHours(15, 10, 0, 0);

@@ -737,3 +737,24 @@ Workflows toolbar whether its last write reached Home or why not (Chrome
 refusing it the E-Court host until that host's install.ps1 is given its id,
 the usual cause), with Try again. `test-hearing-sheet.mjs` 14g: a run five
 days old on its case's row, with the day.
+
+### The Claude column: the workflow, and a fraction for the lights (2026-11-20)
+
+The owner: "replace the lights with the number out of blank like a fraction"
+… "Also the name of the run … of the workflow". `runCell` no longer draws a
+segment a step (`cr-bar`, `cr-seg` gone): it gives the workflow's name
+(`r.template`, `.cr-name`) over a line of the steps done out of the run's
+steps (`stepFraction` in claude-runs.js, pauses not counted; from `step` and
+`total` where the run sends no steps) in the run's colour (`.cr-frac`) and
+its status (`runLine`, whose running wording is now "Running step 2", since
+"Step 2 of 3" beside "1/3" read as two counts). The step-by-step history
+stays in the hover. `test-claude-runs.mjs` and `test-hearing-sheet.mjs` 14g
+check it.
+
+### The row's columns in the order things happen (2026-11-20)
+
+The owner: "thinking chronologically, the order should go briefing status,
+download status/pdf linker status, run status." The Claude column now stands
+after the folder's status (`statusCol.after(runCell(…))` in renderHearings):
+Mot/Opp/Rep, then where the case folder stands and what PDF-Linker did in
+it, then the Claude run. `test-hearing-sheet.mjs` 14g checks the order.

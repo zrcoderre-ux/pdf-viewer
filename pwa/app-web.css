@@ -782,17 +782,20 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 
 /* The Claude column (app-web.js, runCell): a case's newest Claude run as a
    bar of its steps and a line, beside the briefing, like Mot/Opp/Rep. */
-.home-app .ci-run { flex: none; width: 196px; display: none; flex-direction: column; justify-content: center; gap: 4px; margin-right: 10px; min-width: 0; }
+.home-app .ci-run { flex: none; width: 210px; display: none; flex-direction: column; justify-content: center; gap: 3px; margin-right: 10px; min-width: 0; }
+/* The workflow's name, then the fraction and the status on one line. */
+.ci-run .cr-name { font-size: var(--fs-label, 11.5px); color: var(--c-text-2, var(--c-text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ci-run .cr-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+/* Steps done out of the run's steps ("2/5"), in the run's colour. */
+.ci-run .cr-frac { flex: none; min-width: 34px; padding: 2px 6px; border-radius: 6px; border: 1px solid currentColor; text-align: center; font-size: var(--fs-label, 11.5px); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--c-text-2, var(--c-text)); opacity: 0.9; }
+.ci-run.tone-run .cr-frac { color: #c2410c; }
+.ci-run.tone-done .cr-frac { color: #16a34a; }
+.ci-run.tone-error .cr-frac { color: #dc2626; }
+.ci-run.tone-held .cr-frac, .ci-run.tone-paused .cr-frac, .ci-run.tone-quiet .cr-frac { color: #b45309; }
+.ci-run.tone-canceled .cr-frac { color: var(--c-muted, #8a8f98); }
+.ci-run .cr-line { flex: 1 1 auto; min-width: 0; }
 .home-app #hearing-list.has-runs .ci-run { display: inline-flex; }
 .home-app .ci-run.link { cursor: pointer; }
-.ci-run .cr-bar { display: flex; gap: 2px; height: 7px; max-width: 100%; }
-.ci-run .cr-seg { flex: 1 1 0; min-width: 4px; max-width: 26px; border-radius: 2px; background: var(--c-border-strong, rgba(127, 127, 127, 0.35)); }
-.ci-run .cr-seg.pause { flex: 0 0 4px; }
-.ci-run .cr-seg.s-done { background: #16a34a; }
-.ci-run .cr-seg.s-here { background: #d97757; animation: crPulse 1.6s ease-in-out infinite; }
-.ci-run .cr-seg.s-next { background: #d97706; }
-.ci-run .cr-seg.s-failed { background: #dc2626; }
-@keyframes crPulse { 50% { opacity: 0.35; } }
 .ci-run .cr-line { font-size: var(--fs-label, 11.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c-text-2, var(--c-text)); }
 .ci-run.tone-run .cr-line { color: #c2410c; }
 .ci-run.tone-done .cr-line { color: #16a34a; }
@@ -801,9 +804,9 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .ci-run.tone-canceled .cr-line { color: var(--c-muted, #8a8f98); }
 .home-app .hearings-summary .hs-claude { color: #c2410c; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .ci-run.tone-run .cr-line, :root:not([data-theme="light"]) .home-app .hearings-summary .hs-claude { color: #f0a080; }
-  :root:not([data-theme="light"]) .ci-run.tone-held .cr-line, :root:not([data-theme="light"]) .ci-run.tone-paused .cr-line, :root:not([data-theme="light"]) .ci-run.tone-quiet .cr-line { color: #fbbf24; }
+  :root:not([data-theme="light"]) .ci-run.tone-run .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-run .cr-line, :root:not([data-theme="light"]) .home-app .hearings-summary .hs-claude { color: #f0a080; }
+  :root:not([data-theme="light"]) .ci-run.tone-held .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-paused .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-quiet .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-held .cr-line, :root:not([data-theme="light"]) .ci-run.tone-paused .cr-line, :root:not([data-theme="light"]) .ci-run.tone-quiet .cr-line { color: #fbbf24; }
 }
-:root[data-theme="dark"] .ci-run.tone-run .cr-line, :root[data-theme="dark"] .home-app .hearings-summary .hs-claude { color: #f0a080; }
-:root[data-theme="dark"] .ci-run.tone-held .cr-line, :root[data-theme="dark"] .ci-run.tone-paused .cr-line, :root[data-theme="dark"] .ci-run.tone-quiet .cr-line { color: #fbbf24; }
+:root[data-theme="dark"] .ci-run.tone-run .cr-frac, :root[data-theme="dark"] .ci-run.tone-run .cr-line, :root[data-theme="dark"] .home-app .hearings-summary .hs-claude { color: #f0a080; }
+:root[data-theme="dark"] .ci-run.tone-held .cr-frac, :root[data-theme="dark"] .ci-run.tone-paused .cr-frac, :root[data-theme="dark"] .ci-run.tone-quiet .cr-frac, :root[data-theme="dark"] .ci-run.tone-held .cr-line, :root[data-theme="dark"] .ci-run.tone-paused .cr-line, :root[data-theme="dark"] .ci-run.tone-quiet .cr-line { color: #fbbf24; }
 @media (max-width: 1300px) { .home-app .ci-run { width: 150px; } }

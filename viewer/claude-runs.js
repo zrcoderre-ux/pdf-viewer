@@ -66,6 +66,20 @@ export function runsForHearing(hg, runs, folderName = "") {
   return mine.sort((a, b) => (isGoing(b) - isGoing(a)) || b.at - a.at);
 }
 
+/**
+ * How far a run has got as a fraction (the owner, 2026-11-20: "replace the
+ * lights with the number out of blank like a fraction"): { done, total } —
+ * the steps done out of the run's steps, pauses not counted — or null where
+ * the run says no total.
+ */
+export function stepFraction(r) {
+  const steps = ((r && r.steps) || []).filter((x) => !x.pause);
+  if (steps.length) return { done: steps.filter((x) => x.state === "done").length, total: steps.length };
+  const total = Number(r && r.total) || 0;
+  if (!total) return null;
+  return { done: r.status === "done" ? total : Math.max(0, Math.min(total, (Number(r.step) || 1) - 1)), total };
+}
+
 /** "4m 12s", "1h 05m", "38s". */
 export function durationText(ms) {
   const s = Math.round((ms || 0) / 1000);
@@ -103,7 +117,7 @@ export function runLine(r, written, now = Date.now()) {
   const total = r.total || (r.steps || []).length;
   let line;
   if (st.tone === "quiet") line = `No word since ${clockText(written, now)}`;
-  else if (r.status === "running") line = at ? `Step ${at} of ${total}` : "Running";
+  else if (r.status === "running") line = at ? `Running step ${at}` : "Running";
   else if (r.status === "done") line = r.finishedAt ? `Finished ${clockText(r.finishedAt, now)}` : "Finished";
   else if (r.status === "error") line = at ? `Failed at step ${at}` : "Failed";
   else if (r.status === "waiting") line = r.held ? `Held: ${r.held}` : "Held";

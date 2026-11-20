@@ -226,17 +226,19 @@ it. **Refresh from eCourt** in the Hearings heading reads eCourt at once.
 With your Claude extension and E-Court Suite 3.49.33 or later (and the
 extension let in to E-Court's native host, as for the Claude button below),
 each hearing shows its case's latest Claude workflow run in a **Claude**
-column beside the Mot/Opp/Rep chips:
+column at the right of the row, after the folder's status (a row reads in the
+order things happen: briefing, the case folder and PDF-Linker, the Claude run):
+
+- the workflow's name;
+- under it, the steps done out of the run's steps (**2/7**), coloured as the
+  run stands (orange running, green finished, amber held or paused, red
+  failed), and a line: **Running step 3**, **Finished 3:10 PM**, **Held:
+  usage limit**, **Paused before 4**, **Failed at step 3**, or **Queued**.
 
 It shows the run going now, or else the case's most recent one (up to 90 days
 back); a case with none shows nothing. If no run ever shows, open the Claude
 extension's Options: a line under its Workflows toolbar says whether PDF+'s
 Home is getting its runs, and if not, the one command that fixes it.
-
-- a bar with one segment per step: green done, pulsing orange running now,
-  amber next (held or paused), red failed, grey still to come;
-- under it, a line: **Step 3 of 7**, **Finished 3:10 PM**, **Held: usage
-  limit**, **Paused before 4**, **Failed at step 3**, or **Queued**.
 
 Hover the column for the run's history, a line per step with its chat and how
 long it took, as in the extension's Options. Click it to open the chat the run

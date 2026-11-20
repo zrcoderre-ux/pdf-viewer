@@ -5,7 +5,7 @@
 //
 // Run: node test-claude-runs.mjs   (from the repo root). Every name is invented.
 
-import { parseClaudeRuns, runsForHearing, runState, runLine, stepLines, durationText, isGoing, QUIET_MS, CLAUDE_RUNS_FILE } from "./viewer/claude-runs.js";
+import { parseClaudeRuns, runsForHearing, runState, runLine, stepLines, durationText, isGoing, QUIET_MS, CLAUDE_RUNS_FILE, stepFraction } from "./viewer/claude-runs.js";
 
 let fails = 0, passes = 0;
 function check(label, got, want) {
@@ -51,7 +51,8 @@ check("failed: the reason", runState({ ...a, status: "error", error: "no reply",
 
 console.log("4. the row's Claude column");
 check("its steps read, an unknown state taken as to come", got.runs[0].steps.map((x) => x.state), ["done", "here", "todo"]);
-check("running: the step it is on", runLine(a, got.written, NOW).line, "Step 2 of 3");
+check("running: the step it is on", runLine(a, got.written, NOW).line, "Running step 2");
+check("steps done as a fraction: from the steps, pauses not counted; else from step and total", [stepFraction(a), stepFraction({ steps: [{ state: "done" }, { state: "done", pause: true }, { state: "here" }] }), stepFraction({ status: "running", step: 3, total: 5, steps: [] }), stepFraction({ status: "done", step: 5, total: 5, steps: [] }), stepFraction({ steps: [] })], [{ done: 1, total: 3 }, { done: 1, total: 2 }, { done: 2, total: 5 }, { done: 5, total: 5 }, null]);
 check("finished: when", runLine({ ...c, steps: [] }, got.written, NOW).line, "Finished " + new Date(NOW - 3600000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
 check("held: why", runLine(b, got.written, NOW).line, "Held: usage limit");
 check("failed: where", runLine({ ...a, status: "error", steps: [{ label: "1", state: "done" }, { label: "2", state: "failed" }] }, got.written, NOW).line, "Failed at step 2");

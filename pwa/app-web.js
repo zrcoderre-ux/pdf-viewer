@@ -2215,24 +2215,35 @@ function runCell(hg, placeName, runs, now) {
   const r = mine[0];
   const { tone, line } = runsLib.runLine(r, runs.written, now);
   cell.classList.add("has", "tone-" + tone);
-  if (r.steps.length) {
-    const bar = document.createElement("span");
-    bar.className = "cr-bar";
-    for (const x of r.steps) {
-      const seg = document.createElement("span");
-      seg.className = `cr-seg s-${x.state}${x.pause ? " pause" : ""}`;
-      bar.appendChild(seg);
-    }
-    cell.appendChild(bar);
+  // Steps done out of the run's steps, as a fraction (the owner, 2026-11-20:
+  // "replace the lights with the number out of blank like a fraction").
+  // The workflow's name over it (the owner: "Also the name of the run … of
+  // the workflow").
+  if (r.template) {
+    const name = document.createElement("span");
+    name.className = "cr-name";
+    name.textContent = r.template;
+    cell.appendChild(name);
+  }
+  const row = document.createElement("span");
+  row.className = "cr-row";
+  const frac = runsLib.stepFraction(r);
+  if (frac) {
+    const f = document.createElement("span");
+    f.className = "cr-frac";
+    f.textContent = `${frac.done}/${frac.total}`;
+    f.setAttribute("aria-label", `${frac.done} of ${frac.total} steps done`);
+    row.appendChild(f);
   }
   const txt = document.createElement("span");
   txt.className = "cr-line";
   txt.textContent = line;
-  cell.appendChild(txt);
+  row.appendChild(txt);
+  cell.appendChild(row);
   cell.title = [`Claude run: ${r.name}${r.template ? " (" + r.template + ")" : ""}`, ...runsLib.stepLines(r),
     r.error ? `Failed: ${r.error}` : "", r.at ? `Last moved ${runsLib.clockText(r.at, now)}.` : "",
     r.url ? "Click to open its chat." : "", mine.length > 1 ? `${mine.length - 1} earlier run${mine.length > 2 ? "s" : ""} for this case.` : ""].filter(Boolean).join("\n");
-  cell.setAttribute("aria-label", `Claude run: ${line}`);
+  cell.setAttribute("aria-label", `Claude run${r.template ? " of " + r.template : ""}: ${frac ? frac.done + " of " + frac.total + " steps done, " : ""}${line}`);
   if (r.url) {
     cell.setAttribute("role", "button");
     cell.classList.add("link");
@@ -2661,8 +2672,12 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const statusCol = document.createElement("span");
     statusCol.className = "ci-status-col";
     b.querySelector(".ci-status").replaceWith(statusCol);
+    // In the order things happen (the owner, 2026-11-20: "thinking
+    // chronologically, the order should go briefing status, download
+    // status/pdf linker status, run status"): the briefing, where the case
+    // folder stands, then the Claude run.
     statusCol.before(briefingCell(hg, hv.briefing, now));
-    statusCol.before(runCell(hg, place ? place.name : "", hv.runs, now));
+    statusCol.after(runCell(hg, place ? place.name : "", hv.runs, now));
     // The case number in a column of its own, the name beside it (the
     // owner's review, 2026-11-18: number and name each line up to be read
     // down). The name is the sheet's, as written.
