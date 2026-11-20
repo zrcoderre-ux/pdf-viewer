@@ -1792,9 +1792,15 @@ async function askClaude(hg, r, wf = null) {
     return;
   }
   window.open(CLAUDE_MARKER_URL, "_blank", "noopener");
+  // No workflow list from the extension (its Claude Run Status.json never
+  // reached Downloads, or an older extension): the old way, and why there was
+  // no menu (the owner, 2026-11-20: "it is still just taking me to the
+  // options page, there is no drop down menu").
+  const noList = !wf && !((runsSeen && runsSeen.workflows) || []).length;
   shellToast(wf
     ? `The Claude extension sets up a run of ${wf.name} for ${hg.caseName} in Chrome: its papers come from ${r.name}, and the hearing date is filled in. Look it over and press Save and start this run.`
-    : `The Claude extension's Options opens in Chrome with ${hg.caseName}: choose the workflow and press Create run — its papers come from ${r.name}.`, 8000);
+    : `The Claude extension's Options opens in Chrome with ${hg.caseName}: choose the workflow and press Create run — its papers come from ${r.name}.`
+      + (noList ? ` There was no workflow menu because the Claude extension has not written its list into Downloads (${runsSeen ? "its Claude Run Status.json carries none: update the extension and reload it" : "no Claude Run Status.json there"}); the line under Options' Workflows toolbar says why.` : ""), noList ? 14000 : 8000);
 }
 
 // ---- Home: the settings menu -------------------------------------------------

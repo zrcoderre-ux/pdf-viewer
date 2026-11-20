@@ -721,3 +721,19 @@ briefing.
 
 Tests: `test-hearing-sheet.mjs` 1b2 (the matcher) and 14c (two lines, tags,
 the badge, chips whole and aligned).
+
+### Every case's last Claude run (2026-11-20)
+
+The owner: "It should show in the home page the status of the current or most
+recent claude run for each case (but only if there was one)" … "I have yet to
+see a single one". The Claude extension sent only runs going or ended in the
+last 18 hours, so a case whose run ended yesterday showed nothing; it now also
+sends each other matter's most recent run of the last 90 days. Home already
+shows the newest run of a case in its Claude column (`runCell`), words an
+older finish with its day ("Finished Nov 15, 3:10 PM": `clockText`), and keeps
+the column away where no case has one. That none ever showed points at the
+file never being written: the extension's Options now says under its
+Workflows toolbar whether its last write reached Home or why not (Chrome
+refusing it the E-Court host until that host's install.ps1 is given its id,
+the usual cause), with Try again. `test-hearing-sheet.mjs` 14g: a run five
+days old on its case's row, with the day.

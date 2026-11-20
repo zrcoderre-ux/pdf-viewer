@@ -228,6 +228,11 @@ extension let in to E-Court's native host, as for the Claude button below),
 each hearing shows its case's latest Claude workflow run in a **Claude**
 column beside the Mot/Opp/Rep chips:
 
+It shows the run going now, or else the case's most recent one (up to 90 days
+back); a case with none shows nothing. If no run ever shows, open the Claude
+extension's Options: a line under its Workflows toolbar says whether PDF+'s
+Home is getting its runs, and if not, the one command that fixes it.
+
 - a bar with one segment per step: green done, pulsing orange running now,
   amber next (held or paused), red failed, grey still to come;
 - under it, a line: **Step 3 of 7**, **Finished 3:10 PM**, **Held: usage

@@ -4,7 +4,10 @@
 //
 // PDF+ cannot reach the Claude extension, so the extension tells it: its
 // worker (src/pdfplusstatus.js there) sends each run going, or ended in the
-// last 18 hours, to the E-Court Suite's native host, which writes
+// last 18 hours, and every other matter's most recent run of the last 90 days
+// (the owner, 2026-11-20: "the status of the current or most recent claude
+// run for each case (but only if there was one)"), to the E-Court Suite's
+// native host, which writes
 // CLAUDE_RUNS_FILE into Downloads — the same road the briefing takes. Each run
 // is { id, name (the matter: the case folder's name, its date), template (the
 // workflow), caseNumber, runDate, status (pending | waiting | running | paused
