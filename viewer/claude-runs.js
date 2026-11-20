@@ -24,8 +24,8 @@ const STATUSES = new Set([...GOING, "done", "canceled"]);
 /** The file's runs: { written, runs }, or { written: 0, runs: [] } where it is not that file. */
 export function parseClaudeRuns(text) {
   let data;
-  try { data = JSON.parse(String(text || "")); } catch { return { written: 0, runs: [] }; }
-  if (!data || !Array.isArray(data.runs)) return { written: 0, runs: [] };
+  try { data = JSON.parse(String(text || "")); } catch { return { written: 0, runs: [], workflows: [] }; }
+  if (!data || !Array.isArray(data.runs)) return { written: 0, runs: [], workflows: [] };
   const runs = data.runs.filter((r) => r && typeof r.id === "string" && STATUSES.has(r.status)).map((r) => ({
     id: r.id, name: String(r.name || "Untitled run"), template: String(r.template || ""), caseNumber: String(r.caseNumber || "").toUpperCase(),
     runDate: String(r.runDate || ""), status: r.status, phase: String(r.phase || ""), progress: String(r.progress || ""),
@@ -38,7 +38,14 @@ export function parseClaudeRuns(text) {
       ms: Number.isFinite(x.ms) ? x.ms : null,
     })),
   }));
-  return { written: Number(data.written) || 0, runs };
+  // The workflows the Claude extension has, for the Claude button's menu (the
+  // owner, 2026-11-20: "change the claude run button to a drop down menu that
+  // lets me select the workflow to run"); an older extension sends none.
+  const workflows = (Array.isArray(data.workflows) ? data.workflows : [])
+    .filter((w) => w && typeof w.id === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(w.id))
+    .map((w) => ({ id: w.id, name: String(w.name || "").replace(/\s+/g, " ").trim() || "(untitled)" }))
+    .slice(0, 60);
+  return { written: Number(data.written) || 0, runs, workflows };
 }
 
 /** Whether a run is going (or stopped and waiting on the owner), not over. */

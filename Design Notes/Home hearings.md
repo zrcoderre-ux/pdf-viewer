@@ -655,3 +655,36 @@ since the calendar sync matches rows by the case id in it. Every place the
 button is drawn or opened reads `ecourtUrlOf`, and its hover says where the
 link came from. A row beyond the calendar's ten court days, whose case is on
 no other linked row, still has none.
+
+### A LEAKS badge by the name (2026-11-20)
+
+The owner: "Update the home screen to show whether there is a LEAKS SHEET in
+the folder." `folderStatus` already read LEAKS.xlsx in the folder's top level
+(`leaks`), but it reached the row only as "· LEAKS.xlsx to answer" on a
+finished or earlier run's status, and not at all while a run went. Now a red
+**LEAKS** tag (`leaksChip`, `.ci-leaks-chip`) stands in the name line of a
+hearing's row and of a Case folders row whenever `r.status.leaks`, whatever
+the run's state (a folder waiting for leave to be read shows none: its files
+are not known). `statusText` leaves the words out (the badge says it) but a
+LEAKS sheet still turns a finished status amber, and its hover still names
+it. Case folders rows now carry the same `.ci-name-line` as hearing rows.
+`test-case-folders.mjs` (2, 6) and `test-hearing-sheet.mjs` (8: the sheet put
+in and taken out of a hearing's folder) check it.
+
+### The Claude button picks the workflow (2026-11-20)
+
+The owner: "Let's change the claude run button to a drop down menu that lets
+me select the workflow to run. That way it can initiate the full thing for
+me, upload the documents and fill in the date I can just hit the save and
+start this run button." The Claude extension now lists its workflows (id and
+name only, `workflowList` in its src/pdfplusstatus.js) in Claude Run
+Status.json, which `parseClaudeRuns` reads (`workflows`, ids checked). The
+Claude button (`claudeButton`) opens a menu of them (`openMenu`, the Word
+menu's look) and "Choose in the Claude extension…" last; with no list, it goes
+straight to the old way. A pick writes `workflowId` and `workflowName` into
+Claude Run Request.json (`askClaude(hg, r, wf)`); the extension's Options
+presses that workflow's own Create run once a request (`autoCreate`), which
+makes a draft and brings the papers and date in through `afterCreate` as
+before. Starting the run stays the owner's press. `test-hearing-sheet.mjs`
+14e (the menu, the request) and `test-claude-runs.mjs` (the list read) check
+it; the extension's side is in its own tests.

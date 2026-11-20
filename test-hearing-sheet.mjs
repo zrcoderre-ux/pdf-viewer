@@ -462,6 +462,21 @@ async function browserPart() {
     // Whether every row fits its width, and, with one row's name made very
     // long (set and measured at once, before any redraw), that the name is cut
     // short with an ellipsis and its status still whole.
+    // The owner (2026-11-20): "Update the home screen to show whether there is a LEAKS SHEET in the folder".
+    const leaksIn = (on) => shell.evaluate(async (on) => {
+      const acme = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("25STCV12345 ACME");
+      if (on) { const w = await (await acme.getFileHandle("LEAKS.xlsx", { create: true })).createWritable(); await w.write("x"); await w.close(); }
+      else await acme.removeEntry("LEAKS.xlsx");
+      window.dispatchEvent(new Event("focus"));
+    }, on);
+    const badges = () => shell.$$eval("#hearing-list .hearing-row", (rs) => rs.filter((r) => r.querySelector(".ci-leaks-chip")).map((r) => r.querySelector(".ci-num").textContent));
+    check("no LEAKS sheet, no badge", await badges(), []);
+    await leaksIn(true);
+    await shell.waitForFunction(() => !!document.querySelector("#hearing-list .ci-leaks-chip"), null, { timeout: 10000 });
+    check("a LEAKS sheet in the case folder: a LEAKS badge on its hearing's row", await badges(), ["25STCV12345"]);
+    await leaksIn(false);
+    await shell.waitForFunction(() => !document.querySelector("#hearing-list .ci-leaks-chip"), null, { timeout: 10000 });
+    check("…gone with the sheet", await badges(), []);
     const fits = () => shell.evaluate((longName) => {
       const fit = () => [...document.querySelectorAll("#hearing-list .hearing-row")].every((r) => {
         const box = r.getBoundingClientRect();
@@ -771,6 +786,28 @@ async function browserPart() {
     check("the request left in Downloads: the case, its hearing, the folder and its place", [req.version, req.caseNumber, req.motion, req.hearingDate === iso(inDays(2)), req.folderName, req.folderPath], [1, "25STCV12345", "Demurrer", true, "25STCV12345 ACME", "C:\\Users\\Clerk\\Downloads\\25STCV12345 ACME"]);
     check("…the place asked of PDF+ by the folder's own file", await shell.evaluate(() => [window.__asked.root, window.__asked.chain, typeof window.__asked.launcher.size]), ["Downloads", ["25STCV12345 ACME"], "number"]);
     check("claude.ai opened with the marker only, never the case", (await shell.evaluate(() => window.__opened)).slice(opened0), ["https://claude.ai/#cum-pdfplus-run"]);
+    check("…with no workflow named where the Claude extension lists none", req.workflowId, undefined);
+    // The owner (2026-11-20): "change the claude run button to a drop down menu
+    // that lets me select the workflow to run".
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const w = await (await dl.getFileHandle("Claude Run Status.json", { create: true })).createWritable();
+      await w.write(JSON.stringify({ version: 1, written: Date.now(), runs: [], workflows: [{ id: "wf-bench", name: "Bench memo" }, { id: "wf-tent", name: "Tentative ruling" }, { id: "bad id/1", name: "Nope" }] }));
+      await w.close();
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForTimeout(1500);
+    await pick(acmeC);
+    await acmeC.locator(".ci-claude").click();
+    await shell.waitForSelector(".ci-word-menu", { timeout: 5000 });
+    check("the Claude button opens a menu of the extension's workflows, and the old way last", await shell.$$eval(".ci-word-menu .ci-word-item", (xs) => xs.map((x) => x.textContent)), ["Bench memo", "Tentative ruling", "Choose in the Claude extension…"]);
+    const openedWf = await shell.evaluate(() => window.__opened.length);
+    await shell.locator(".ci-word-menu .ci-word-item", { hasText: "Tentative ruling" }).click();
+    await shell.waitForFunction((n) => window.__opened.length > n, openedWf, { timeout: 10000 });
+    const req2 = await shell.evaluate(async () => JSON.parse(await (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getFileHandle("Claude Run Request.json")).getFile()).text()));
+    check("…the one picked goes in the request, with the case and its date", [req2.workflowId, req2.workflowName, req2.caseNumber, req2.hearingDate === iso(inDays(2))], ["wf-tent", "Tentative ruling", "25STCV12345", true]);
+    check("…and the menu closes", await shell.$$eval(".ci-word-menu", (m) => m.length), 0);
+    await shell.evaluate(async () => { await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).removeEntry("Claude Run Status.json"); window.dispatchEvent(new Event("focus")); });
     await shell.evaluate(() => { delete window.pdfplusNative; });
 
     console.log("14f. the calendar E-Court Suite read, written into the sheet, with Undo");

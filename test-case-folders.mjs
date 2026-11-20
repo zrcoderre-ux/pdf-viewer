@@ -89,7 +89,8 @@ check("the worksheet and the quarantined exports are said with it",
 console.log("2. as Home says it");
 const done = folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN), f("LEAKS.xlsx", 20 * MIN, 800)], held: 2 }, NOW);
 const doneSaid = statusText(done, NOW);
-check("finished, with what still needs a look", [doneSaid.text.startsWith("Finished "), doneSaid.text.endsWith(" · 2 held as .LEAK · LEAKS.xlsx to answer"), doneSaid.tone], [true, true, "warn"]);
+check("finished, with what still needs a look (the LEAKS sheet has its own badge)", [doneSaid.text.startsWith("Finished "), doneSaid.text.endsWith(" · 2 held as .LEAK"), doneSaid.tone], [true, true, "warn"]);
+check("…a LEAKS sheet alone still turns it amber, its words left to the badge", (({ text, tone, title }) => [/LEAKS/.test(text), tone, /LEAKS\.xlsx to answer/.test(title)])(statusText(folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN), f("LEAKS.xlsx", 20 * MIN, 800)] }, NOW), NOW)), [false, "warn", true]);
 check("a clean finish reads as one", statusText(folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN)] }, NOW), NOW).tone, "ok");
 check("a run going", statusText(folderStatus({ files: [f("ETA ~6.04PM (6 of 13).txt", 2 * MIN)] }, NOW), NOW).text, "Running — ETA ~6:04 PM (6 of 13)");
 check("not run yet", statusText(folderStatus({ files: [] }, NOW), NOW).text, "Not run yet");
@@ -313,7 +314,9 @@ async function browserPart() {
     let got = await rows();
     check("the case folders only, the run going first", got.map((r) => r.name), ["Case Alpha", "Case Beta"]);
     check("the run going, with its ETA", got[0].status, "Running — ETA ~6:04 PM (6 of 13)");
-    check("the finished run, with what is left to answer", [got[1].status.startsWith("Finished "), got[1].status.endsWith("1 held as .LEAK · LEAKS.xlsx to answer")], [true, true]);
+    check("the finished run, with what is left to answer", [got[1].status.startsWith("Finished "), got[1].status.endsWith("1 held as .LEAK")], [true, true]);
+    // The owner (2026-11-20): "Update the home screen to show whether there is a LEAKS SHEET in the folder".
+    check("…a LEAKS badge by the name of the folder with LEAKS.xlsx, and only there", await shell.$$eval("#case-list .case-item", (bs) => bs.map((b) => [b.querySelector(".ri-name").textContent, b.querySelector(".ci-leaks-chip") ? b.querySelector(".ci-leaks-chip").textContent : ""])), [["Case Alpha", ""], ["Case Beta", "LEAKS"]]);
     check("…both found in Downloads today", got.map((r) => r.where), ["In Downloads today", "In Downloads today"]);
     check("the link now changes Downloads", await shell.textContent("#case-downloads"), "Change Downloads folder…");
 

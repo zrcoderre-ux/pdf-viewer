@@ -114,6 +114,11 @@ run that looks stopped, blue (pulsing) running, grey not run yet. One too long
 for its column ends in "…"; hover over it to read it whole. A case name too
 long for the row is cut short the same way, so nothing is pushed off the edge.
 
+A red **LEAKS** tag by the case name means the case folder has a LEAKS.xlsx:
+PDF-Linker flagged values for you to answer in its Fix? column. It shows on
+the hearing's row and in Case folders, during a run too, and goes once
+PDF-Linker removes the sheet (when no row needs a look).
+
 ## Case folders not on the hearings list
 
 Above the hearings, Home lists only the case folders that match no hearing on
@@ -234,11 +239,15 @@ Chrome open?).
 ## Setting up a Claude workflow run
 
 In PDF+, each hearing whose case folder Home found has a **Claude** button.
-Press it and your Claude extension's Options opens in Chrome on Workflows, with
-the case named. Press **Create run** on the workflow you want: the run opens
-with the hearing date as its run date and the case folder's papers added, exactly
-as if you had picked the folder with Choose folder… (only its Text Files go up,
-the key is attached, a folder marked LEAKS never uploads, a PDF asks first).
+Press it for a menu of your Claude extension's workflows and pick the one to
+run: the extension opens in Chrome and sets the run up by itself, with the
+hearing date as its run date and the case folder's papers added, exactly as if
+you had picked the folder with Choose folder… (only its Text Files go up, the
+key is attached, a folder marked LEAKS never uploads, a PDF asks first). Look
+it over and press **Save and start this run**. **Choose in the Claude
+extension…**, last on the menu, opens its Workflows with the case named for
+you to press Create run yourself; it is also what the button does when the
+extension has not yet listed its workflows (an older version of it).
 
 PDF+ works out where the folder is on your computer by itself: from the path
 its PDF-Linker launcher records, from where it sits in Downloads or a folder on

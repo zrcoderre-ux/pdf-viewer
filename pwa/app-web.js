@@ -1435,8 +1435,9 @@ async function renderCaseFoldersNow() {
     row.className = "case-row";
     const b = document.createElement("button");
     b.className = "recent-item case-item";
-    b.innerHTML = `<span class="ri-icon">${icon("folder", { size: 18 })}</span><span class="ci-main"><span class="ri-name"></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    b.innerHTML = `<span class="ri-icon">${icon("folder", { size: 18 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
     b.querySelector(".ri-name").textContent = r.name;
+    if (!r.locked && r.status && r.status.leaks) b.querySelector(".ci-name-line").appendChild(leaksChip());
     b.querySelector(".ci-where").textContent = where;
     const pill = b.querySelector(".ci-status");
     pill.textContent = st.text;
@@ -1456,6 +1457,20 @@ async function renderCaseFoldersNow() {
     for (const x of folderControls(r, line)) row.appendChild(x);
     listEl.appendChild(row);
   }
+}
+
+/**
+ * The badge a case folder with a LEAKS sheet carries by its name (the owner,
+ * 2026-11-20: "Update the home screen to show whether there is a LEAKS SHEET
+ * in the folder"): LEAKS.xlsx stands in the folder until no row needs a look.
+ */
+function leaksChip() {
+  const chip = document.createElement("span");
+  chip.className = "ci-leaks-chip";
+  chip.textContent = "LEAKS";
+  chip.setAttribute("aria-label", "LEAKS sheet in the folder");
+  chip.title = "LEAKS.xlsx is in this case folder: PDF-Linker flagged values for you to answer in its Fix? column. It goes once no row needs a look.";
+  return chip;
 }
 
 /**
@@ -1633,15 +1648,65 @@ const CLAUDE_MARKER_URL = "https://claude.ai/#cum-pdfplus-run";
 function canAskClaude() {
   return !!(window.pdfplusNative && typeof window.pdfplusNative.folderPath === "function");
 }
+/**
+ * The Claude button: a menu of the Claude extension's workflows (the owner,
+ * 2026-11-20: "change the claude run button to a drop down menu that lets me
+ * select the workflow to run. That way it can initiate the full thing for me,
+ * upload the documents and fill in the date I can just hit the save and start
+ * this run button"). The one picked goes in the request (workflowId), and the
+ * extension presses its Create run itself: the run is made as a draft, the
+ * case folder's papers come in through Choose folder…'s checks and the hearing
+ * date is filled; starting it is still the owner's press. "Choose in the
+ * Claude extension…" is the old way. The list comes from Claude Run
+ * Status.json (claude-runs.js); with none there (an older extension), the
+ * button goes straight to the old way.
+ */
 function claudeButton(hg, r) {
   const b = document.createElement("button");
   b.className = "ci-claude";
-  b.title = `Claude: set up a workflow run for ${hg.caseName}, its hearing date and its case folder's papers, in the Claude extension's Options (choose the workflow and press Create run there)`;
+  b.title = `Claude: pick a workflow, and a run of it is set up for ${hg.caseName} in the Claude extension, with its hearing date and its case folder's papers; you press Save and start this run there`;
   iconise(b, "message", "Claude run");
-  b.addEventListener("click", (e) => { e.stopPropagation(); askClaude(hg, r); });
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const wfs = (runsSeen && runsSeen.workflows) || [];
+    if (!wfs.length) { askClaude(hg, r); return; }
+    if (b.classList.contains("open")) { closeWordMenus(); return; }
+    openMenu(b, [
+      ...wfs.map((w) => ({ text: w.name, title: `Set up a run of ${w.name} for ${hg.caseName}: its papers and hearing date go in, and you press Save and start this run`, pick: () => askClaude(hg, r, w) })),
+      { text: "Choose in the Claude extension…", title: "Open the Claude extension's workflows with this case, and choose there", cls: "ci-word-all", pick: () => askClaude(hg, r) },
+    ]);
+  });
+  b.setAttribute("aria-haspopup", "menu");
   return b;
 }
-async function askClaude(hg, r) {
+/** A menu under `btn` (the Word menu's look): [{ text, title, cls, pick }]. */
+function openMenu(btn, items) {
+  closeWordMenus();
+  const menu = document.createElement("div");
+  menu.className = "ci-word-menu";
+  menu.setAttribute("role", "menu");
+  for (const it of items) {
+    const x = document.createElement("button");
+    x.className = "ci-word-item" + (it.cls ? " " + it.cls : "");
+    x.setAttribute("role", "menuitem");
+    x.textContent = it.text;
+    if (it.title) x.title = it.title;
+    x.addEventListener("click", (e) => { e.stopPropagation(); closeWordMenus(); it.pick(); });
+    menu.appendChild(x);
+  }
+  document.body.appendChild(menu);
+  const at = btn.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(at.left, window.innerWidth - w - 8)) + "px";
+  menu.style.top = (at.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, at.top - 4 - h) : at.bottom + 4) + "px";
+  btn.classList.add("open");
+  setTimeout(() => {
+    document.addEventListener("click", closeWordMenus, { once: true });
+    window.addEventListener("resize", closeWordMenus, { once: true });
+    document.addEventListener("scroll", closeWordMenus, { once: true, capture: true });
+  }, 0);
+}
+async function askClaude(hg, r, wf = null) {
   const native = window.pdfplusNative;
   if (!canAskClaude()) { shellToast("A Claude run is set up from PDF+, the desktop app: a browser cannot say where a folder is.", 6000); return; }
   const dl = await downloadsDir();
@@ -1693,6 +1758,7 @@ async function askClaude(hg, r) {
     hearingDate: hg.date ? iso(hg.date) : "",
     folderName: r.name,
     folderPath,
+    ...(wf ? { workflowId: wf.id, workflowName: wf.name } : {}),
   };
   try {
     const w = await (await dl.getFileHandle(CLAUDE_REQUEST_FILE, { create: true })).createWritable();
@@ -1703,7 +1769,9 @@ async function askClaude(hg, r) {
     return;
   }
   window.open(CLAUDE_MARKER_URL, "_blank", "noopener");
-  shellToast(`The Claude extension's Options opens in Chrome with ${hg.caseName}: choose the workflow and press Create run — its papers come from ${r.name}.`, 7000);
+  shellToast(wf
+    ? `The Claude extension sets up a run of ${wf.name} for ${hg.caseName} in Chrome: its papers come from ${r.name}, and the hearing date is filled in. Look it over and press Save and start this run.`
+    : `The Claude extension's Options opens in Chrome with ${hg.caseName}: choose the workflow and press Create run — its papers come from ${r.name}.`, 8000);
 }
 
 // ---- Home: the settings menu -------------------------------------------------
@@ -2645,6 +2713,9 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       b.querySelector(".ci-name-line").appendChild(chip);
     }
 
+    // A LEAKS sheet in the case folder: PDF-Linker flagged values to answer.
+    if (r && !r.locked && r.status && r.status.leaks) b.querySelector(".ci-name-line").appendChild(leaksChip());
+
     const where = [];
     if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
@@ -3279,7 +3350,7 @@ function wordButton(r) {
 }
 function closeWordMenus() {
   for (const m of document.querySelectorAll(".ci-word-menu")) m.remove();
-  for (const b of document.querySelectorAll(".ci-word-btn.open")) b.classList.remove("open");
+  for (const b of document.querySelectorAll(".ci-word-btn.open, .ci-claude.open")) b.classList.remove("open");
 }
 // The list stands on the page, under the button, so the case list's own box
 // does not clip it; a scroll or a resize closes it rather than leave it adrift.

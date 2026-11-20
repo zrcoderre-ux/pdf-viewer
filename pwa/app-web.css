@@ -421,6 +421,9 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 /* A case folder still in Downloads: a stripe down the row and a chip by the name. */
 .hearing-row.in-downloads { box-shadow: inset 5px 0 0 #f59e0b; background: rgba(245, 158, 11, 0.08); }
 .ci-dl-chip { flex: none; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 8px; border-radius: 50%; background: #f59e0b; color: #2a1800; }
+/* A LEAKS sheet in the folder: a red tag by the name (leaksChip). */
+.ci-leaks-chip { flex: none; align-self: center; display: inline-flex; align-items: center; height: 18px; margin-left: 8px; padding: 0 6px; border-radius: 4px; background: rgba(220, 38, 38, 0.12); border: 1px solid rgba(220, 38, 38, 0.45); color: #dc2626; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; cursor: default; }
+:root:not([data-theme="light"]) .ci-leaks-chip { color: #f87171; background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.45); }
 .hearing-row.draggable .ri-icon { cursor: grab; }
 /* Calendar changes, at the top of Hearings. */
 .calendar-changes { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--c-border); border-left: 4px solid var(--c-accent); border-radius: 8px; background: var(--c-accent-soft); font-size: 12.5px; }

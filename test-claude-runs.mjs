@@ -31,6 +31,9 @@ check("its name", CLAUDE_RUNS_FILE, "Claude Run Status.json");
 check("the runs it can say, an unknown status left out", got.runs.map((r) => r.id), ["a", "b", "c"]);
 check("only a claude.ai address is kept to open", got.runs.map((r) => r.url), ["https://claude.ai/chat/aaa", "", ""]);
 check("not the file: nothing", parseClaudeRuns("{nope").runs, []);
+// The owner (2026-11-20): "change the claude run button to a drop down menu that lets me select the workflow to run".
+check("the workflows for the Claude button's menu, a bad id left out", parseClaudeRuns(JSON.stringify({ runs: [], workflows: [{ id: "w1", name: " Bench  memo " }, { id: "a/b", name: "x" }, { name: "no id" }, { id: "w2" }] })).workflows, [{ id: "w1", name: "Bench memo" }, { id: "w2", name: "(untitled)" }]);
+check("…none from an older extension", parseClaudeRuns(JSON.stringify({ runs: [] })).workflows, []);
 check("going", got.runs.map(isGoing), [true, true, false]);
 
 console.log("2. a hearing's runs");

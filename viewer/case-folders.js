@@ -305,8 +305,11 @@ export function runningSub(st, now) {
 export function statusText(st, now) {
   const extras = [];
   if (st.held) extras.push(`${st.held} held as .LEAK`);
-  if (st.leaks) extras.push("LEAKS.xlsx to answer");
+  // LEAKS.xlsx has a badge of its own on the row (app-web.js, leaksChip; the
+  // owner, 2026-11-20: "show whether there is a LEAKS SHEET in the folder"),
+  // so the status's words leave it out; it still turns the status amber.
   const tail = extras.length ? " · " + extras.join(" · ") : "";
+  if (st.leaks) extras.push("LEAKS.xlsx to answer");
   switch (st.state) {
     case "starting":
       if (st.how === "takeover") {
