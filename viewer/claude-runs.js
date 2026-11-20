@@ -72,10 +72,16 @@ export function isGoingNow(r, now = Date.now()) {
  * where the run's name holds the case folder's name. The one going now first
  * (isGoingNow), then the newest move.
  */
+// A case's run older than this is for an earlier motion of it, not the one on
+// the row (the owner, 2026-11-20: "limit them to those from the last week.
+// Otherwise it usually refers to an earlier motion in that case"); a run going
+// now is shown whatever its age.
+export const RECENT_MS = 7 * 24 * 3600 * 1000;
 export function runsForHearing(hg, runs, folderName = "", now = Date.now()) {
   const num = String((hg && hg.caseNumber) || "").toUpperCase();
   const folder = String(folderName || "").trim().toLowerCase();
-  const mine = (runs || []).filter((r) => (num && r.caseNumber ? r.caseNumber === num : !!folder && folder.length >= 4 && r.name.toLowerCase().includes(folder)));
+  const recent = (r) => isGoingNow(r, now) || now - (Number(r.finishedAt) || Number(r.at) || 0) <= RECENT_MS;
+  const mine = (runs || []).filter((r) => recent(r) && (num && r.caseNumber ? r.caseNumber === num : !!folder && folder.length >= 4 && r.name.toLowerCase().includes(folder)));
   // The run going now first, else the most recent (a run failed or left
   // days ago does not outrank a newer one).
   return mine.sort((a, b) => (isGoingNow(b, now) - isGoingNow(a, now)) || b.at - a.at);

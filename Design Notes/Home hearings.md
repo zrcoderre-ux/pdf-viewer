@@ -808,3 +808,12 @@ down holding a whole folder, the next file came alone with its key and an
 offer to "Read the whole folder") is gone; the whole folder comes every time,
 an older build's stored flag is cleared, and the note saying what the last
 session stopped in stays. `test-folder-save.mjs`.
+
+### A case's Claude runs: the last week only (2026-11-20)
+
+The owner: "For Claude runs, limit them to those from the last week.
+Otherwise it usually refers to an earlier motion in that case."
+`runsForHearing` (claude-runs.js) keeps a case's run only where it is going
+now (`isGoingNow`) or finished, or last moved, within `RECENT_MS` (7 days).
+The extension still sends 90 days; the summary's count is unchanged (it only
+counts runs going now). `test-claude-runs.mjs`.

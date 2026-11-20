@@ -246,8 +246,9 @@ order things happen: briefing, the case folder and PDF-Linker, the Claude run):
   failed), and a line: **Running step 3**, **Finished 3:10 PM**, **Held:
   usage limit**, **Paused before 4**, **Failed at step 3**, or **Queued**.
 
-It shows the run going now, or else the case's most recent one (up to 90 days
-back); a case with none shows nothing. If no run ever shows, open the Claude
+It shows the run going now, or else the case's most recent one from the last
+week (an older run is usually for an earlier motion in the case); a case with
+none shows nothing. If no run ever shows, open the Claude
 extension's Options: a line under its Workflows toolbar says whether PDF+'s
 Home is getting its runs, and if not, the one command that fixes it.
 

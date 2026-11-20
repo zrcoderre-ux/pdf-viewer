@@ -5,7 +5,7 @@
 //
 // Run: node test-claude-runs.mjs   (from the repo root). Every name is invented.
 
-import { parseClaudeRuns, runsForHearing, runState, runLine, stepLines, durationText, isGoing, QUIET_MS, CLAUDE_RUNS_FILE, stepFraction, isGoingNow, STALE_MS } from "./viewer/claude-runs.js";
+import { parseClaudeRuns, runsForHearing, runState, runLine, stepLines, durationText, isGoing, QUIET_MS, CLAUDE_RUNS_FILE, stepFraction, isGoingNow, STALE_MS, RECENT_MS } from "./viewer/claude-runs.js";
 
 let fails = 0, passes = 0;
 function check(label, got, want) {
@@ -65,6 +65,12 @@ check("going now: running, queued or held, and moved lately; not failed, paused,
   isGoingNow({ status: "running", at: NOW - STALE_MS - 1 }, NOW)], [true, true, true, false, false, false, false]);
 check("…one left days ago reads as stalled, not running", runLine({ status: "running", at: NOW - 2 * 86400000, step: 2, total: 3, steps: [] }, NOW, NOW).tone, "quiet");
 check("…and a case's newer finished run outranks its run failed days ago", runsForHearing({ caseNumber: "25STCV12345" }, [{ id: "old", caseNumber: "25STCV12345", status: "error", at: NOW - 5 * 86400000, name: "x" }, { id: "new", caseNumber: "25STCV12345", status: "done", at: NOW - 86400000, name: "y" }], "", NOW).map((r) => r.id), ["new", "old"]);
+// The owner (2026-11-20): "limit them to those from the last week. Otherwise it usually refers to an earlier motion in that case".
+check("a case's runs of the last week only; one going now whatever its age", runsForHearing({ caseNumber: "25STCV12345" }, [
+  { id: "old", caseNumber: "25STCV12345", status: "done", at: NOW - RECENT_MS - 86400000, finishedAt: NOW - RECENT_MS - 86400000, name: "x" },
+  { id: "week", caseNumber: "25STCV12345", status: "done", at: NOW - 3 * 86400000, finishedAt: NOW - 3 * 86400000, name: "y" },
+  { id: "going", caseNumber: "25STCV12345", status: "running", at: NOW - 60000, startedAt: NOW - 20 * 86400000, name: "z" }], "", NOW).map((r) => r.id), ["going", "week"]);
+check("…none in the week: nothing shown", runsForHearing({ caseNumber: "25STCV12345" }, [{ id: "old", caseNumber: "25STCV12345", status: "done", at: NOW - 10 * 86400000, finishedAt: NOW - 10 * 86400000, name: "x" }], "", NOW).length, 0);
 check("durations", [durationText(38000), durationText(252000), durationText(3900000)], ["38s", "4m 12s", "1h 05m"]);
 
 console.log(`\n${passes} passed, ${fails} failed`);
