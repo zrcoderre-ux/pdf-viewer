@@ -197,7 +197,12 @@ Chrome takes into its last-used profile, E-Court Suite's (the owner,
 2026-11-20: "clicking e-court should open it in its own window, rather than a
 new tab in the current window"). Refresh from eCourt's page (the site's root
 with a hash) stays a tab, since it closes itself; with no Chrome found, the
-link opens as any other.
+link opens as any other. A Claude chat (`https://claude.ai/chat/…`, and
+`/cowork/…`, `/project/…`: Home's Claude column, the chat a case's run last
+worked in) opens the same way (the owner, 2026-11-21: "Do the same thing for
+the claude runs that you did for ecourt. New window"); the Claude button's
+marker page (claude.ai's root with a hash) stays a tab, since the Claude
+extension closes it.
 
 New window and a tab pulled out of the strip use `window.open` with the
 opener kept; `setWindowOpenHandler` allows app URLs as a window like the

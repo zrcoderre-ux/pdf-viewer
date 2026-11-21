@@ -192,7 +192,13 @@ const APP_SCHEMES = ["pdf-linker:"];
 // a running Chrome takes into its last-used profile (E-Court Suite's).
 // Refresh from eCourt's page (a hash on the site's root) stays a tab: it
 // closes itself when done. No Chrome found: opened as any link.
-const NEW_WINDOW_LINK = (u) => u.protocol === "https:" && /^civil\.lacourt\.org$/i.test(u.hostname) && /^\/ecourt\//i.test(u.pathname);
+// And a Claude chat (Home's Claude column: the chat a case's run last worked
+// in) the same way (the owner, 2026-11-21: "Do the same thing for the claude
+// runs that you did for ecourt. New window"); the Claude button's bare
+// marker page (claude.ai/#…) stays a tab, which the Claude extension closes.
+const NEW_WINDOW_LINK = (u) => u.protocol === "https:" && (
+  (/^civil\.lacourt\.org$/i.test(u.hostname) && /^\/ecourt\//i.test(u.pathname))
+  || (/^claude\.ai$/i.test(u.hostname) && /^\/(chat|cowork|project)\//i.test(u.pathname)));
 function chromePath() {
   if (process.platform !== "win32") return "";
   const bases = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean);
