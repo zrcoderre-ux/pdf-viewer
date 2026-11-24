@@ -968,6 +968,7 @@ window.addEventListener("afterprint", () => {
     if (titleBeforePrint.had) { try { window.top.document.title = titleBeforePrint.top; } catch { /* gone */ } }
     titleBeforePrint = null;
   }
+  paintWindowTitle(); // …and anything that moved while it printed (a document scrolled into, a folder read)
 });
 
 // ── screenshot ───────────────────────────────────────────────────────────────
@@ -1056,6 +1057,7 @@ async function shareThisTab() {
 // (shotPut, while a screenshot is being taken: how the screen goes back, is
 // declared with the small helpers, which read it: see toast.)
 let shotLeftOut = 0; // …and how many PDF pages it left out whole (pdfNamesOn), for the toast
+let shotPictures = 0; // …and how many pictures, filled fields and notes on them it covered (pictureBlocks)
 let shotWithheld = new Set(); // …and the names it covered with WITHHELD (egressSwaps), for the toast
 let shotFlagged = new Set();  // …and the flagged values it covered (flaggedSwaps), folded, for the toast
 
@@ -1296,7 +1298,7 @@ function shotRawFlags(sec, edits) {
  * sweep reads them (keyBoxesForPage). A page with no text — a scan — has
  * nothing to read, and keeps its names. Measuring only; coverPdfNames paints.
  */
-function pdfNamesOn(sheet) {
+function pdfNameCovers(sheet) {
   const layer = sheet.querySelector(".textLayer");
   const spans = layer ? layer.querySelectorAll("span") : [];
   if (!spans.length) return null;
@@ -1311,7 +1313,7 @@ function pdfNamesOn(sheet) {
   // into the PNG as they stood, the name readable (70 to 127 red pixels of
   // it) under "the names in their pseudonyms". Words read off a layer that
   // is not over its picture cannot vouch that the picture has no names.
-  if (!layerOnSheet(sheet, layer)) return { sheet, names: [], whole: true };
+  if (!layerOnSheet(sheet, layer)) return { sheet, names: [], whole: true, why: "its words do not stand over it" };
   const measured = RD.measureSpans(layer);
   // Each span's turn on screen first (sidewaysOn writes it on `measured`):
   // the join reads a span at a slant along its own line (RD.spanFrame), where
@@ -1339,7 +1341,7 @@ function pdfNamesOn(sheet) {
   // found; the toast counts it, and the export's page is the one to show.
   if (sideways
       && (read.length || (() => { const t = measured.map((m) => m.text).join("\n"); return withFlagged(keyed ? egressSwaps(t) : [], t).length; })())) {
-    return { sheet, names: [], whole: true };
+    return { sheet, names: [], whole: true, why: "its words run sideways, where a name cannot be found whole" };
   }
   let swaps = read.map((s) => ({ ...s, parts: [RD.spanRangeFor(map, s.start, s.end)], keys: RD.charKeys(map, s.start, s.end) }));
   // …and a name wrapped down a column of the page as it is LAID OUT, which the
@@ -1397,6 +1399,101 @@ function pdfNamesOn(sheet) {
   return out.length ? { sheet, names: out } : null;
 }
 /**
+ * Where a PDF page's real names stand, each with the fake to paint over it,
+ * and what on the page can carry a name that cannot be read: answers
+ * { sheet, names, blocks } to be painted (coverPdfNames), { sheet, whole }
+ * for a sheet left out of the picture whole, or null for nothing to cover.
+ *
+ * NOTHING ON THE SHEET GOES INTO THE PICTURE UNVOUCHED FOR. The names were
+ * read off the page's text layer and nothing else (pdfNameCovers), and four
+ * kinds of sheet put a real name into the PNG under a toast saying the names
+ * were in their pseudonyms (the owner: "Screenshot isn't properly obscuring
+ * the real values in the pdf like it should"):
+ *
+ *   - a scan, or any picture on a page (a letterhead, an exhibit, a stamp):
+ *     the text layer has no words for it, or an OCR layer's, which may have
+ *     read the name wrong. Every picture is covered (`blocks`), the whole
+ *     page for a scan (RD.pictureRegions);
+ *   - a filled form field or a FreeText note: pdf.js draws its appearance
+ *     into the bitmap and not into the text layer. Each one drawing a letter
+ *     or a digit is covered;
+ *   - type drawn as shapes under an OCR layer: the layer may have read the
+ *     name wrong, and the shapes say it right. Left out whole;
+ *   - a bitmap whose words were not laid yet, or not all of them: the quick
+ *     preview a page shows while it is drawn (paintWarm), a page drawn while
+ *     its text layer was still being laid, a page too big to lay out
+ *     (sayHugePage), a layer that failed, an inline page switched to another
+ *     page and not drawn again. Left out whole: words not yet read cannot
+ *     vouch that the page has no names.
+ */
+function pdfNamesOn(sheet) {
+  const el = sheet.parentElement;
+  const canvas = sheet.querySelector("canvas");
+  if (!el || !canvas || !(canvas.width > 0 && canvas.height > 0)) return null; // nothing drawn on it
+  const whole = (why) => ({ sheet, names: [], whole: true, why });
+  if (!el.dataset.rendered || el.dataset.textFor !== el.dataset.rendered || !el.__drawnPage || !el.__vp) return whole("its words were still being read");
+  const pics = sheet.__shotPics;
+  if (!pics || pics.page !== el.__drawnPage || !pics.regions) return whole("what it draws could not be read");
+  if (pics.regions.hiddenOutside) return whole("its words are drawn as shapes under an OCR layer, which may have read a name wrong");
+  const got = pdfNameCovers(sheet);
+  if (got && got.whole) return got;
+  const blocks = pictureBlocks(sheet, el.__vp, pics.regions);
+  const inside = (r) => blocks.some((b) => r.x >= b.x - 1 && r.y >= b.y - 1 && r.x + r.w <= b.x + b.w + 1 && r.y + r.h <= b.y + b.h + 1);
+  const names = got ? got.names.filter((n) => !n.rects.every(inside)) : [];
+  if (!names.length && !blocks.length) return null;
+  return { sheet, names, blocks };
+}
+/** The pictures and the annotations drawing words (RD.pictureRegions), in the sheet's own pixels, a pixel past each all round. */
+function pictureBlocks(sheet, vp, regions) {
+  const canvas = sheet.querySelector("canvas");
+  const base = sheet.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+  const k = vp.width > 0 ? cr.width / vp.width : 1;
+  const ox = cr.left - base.left, oy = cr.top - base.top;
+  const W = cr.width, H = cr.height;
+  let out = [];
+  for (const r of [...regions.images, ...regions.annots.map((a) => a.rect)]) {
+    const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r);
+    const x = Math.max(0, Math.min(x1, x2) * k - 1), y = Math.max(0, Math.min(y1, y2) * k - 1);
+    const xe = Math.min(W, Math.max(x1, x2) * k + 1), ye = Math.min(H, Math.max(y1, y2) * k + 1);
+    if (xe - x > 0.5 && ye - y > 0.5) out.push({ x: ox + x, y: oy + y, w: xe - x, h: ye - y });
+  }
+  // A page of a thousand little masks (a JBIG2 scan drawn glyph by glyph) is one cover round them all.
+  if (out.length > 200) {
+    const x = Math.min(...out.map((b) => b.x)), y = Math.min(...out.map((b) => b.y));
+    out = [{ x, y, w: Math.max(...out.map((b) => b.x + b.w)) - x, h: Math.max(...out.map((b) => b.y + b.h)) - y }];
+  }
+  return out;
+}
+/**
+ * What each PDF sheet in the picture draws (RD.pictureRegions), read before
+ * the fakes go up, since its operator list is a round trip to pdf.js's worker
+ * and the fakes are laid in one go (fakesForShot). Kept on the sheet with the
+ * page it was read of; a sheet whose reading failed or took too long has
+ * none, and pdfNamesOn leaves it out of the picture whole.
+ */
+const shotPicsMemo = new WeakMap(); // page proxy -> its regions
+async function shotPdfPrep() {
+  const sheets = [...document.querySelectorAll(".pdf-sheet")].filter((s) => nearWindow(s.getBoundingClientRect(), 0));
+  await Promise.all(sheets.map(async (sheet) => {
+    sheet.__shotPics = null;
+    const el = sheet.parentElement;
+    const page = el && el.__drawnPage;
+    if (!page) return;
+    let regions = shotPicsMemo.get(page);
+    if (!regions) {
+      try {
+        const ops = await Promise.race([
+          opListOf(el.__pdfOf && el.__pdfOf.info, page),
+          new Promise((_, no) => setTimeout(() => no(new Error("the page's drawing took too long to read")), 4000)),
+        ]);
+        regions = RD.pictureRegions(ops, pdfjsLib.OPS);
+        shotPicsMemo.set(page, regions);
+      } catch { return; }
+    }
+    sheet.__shotPics = { page, regions };
+  }));
+}
+/**
  * The family most of a PDF page's text is set in (pdfsync.pdfFace, off the
  * page's rows and the fonts read for them), or "" where it is not known. The
  * text layer's own spans carry only "serif" or "sans-serif", and a cover in
@@ -1419,13 +1516,24 @@ function sheetFace(sheet) {
  * A sheet whose names could not be placed (`whole`) is white from edge to
  * edge, and says why, so the picture does not pass for a page with no names.
  */
-function coverPdfNames({ sheet, names, whole = false }) {
+function coverPdfNames({ sheet, names, whole = false, why = "", blocks = [] }) {
   const box = document.createElement("div");
   box.className = "shot-covers";
   if (whole) {
     const c = document.createElement("div");
     c.className = "shot-cover whole";
-    c.textContent = "This PDF page is left out of the picture: its names could not be placed on it to be covered.";
+    c.textContent = `This PDF page is left out of the picture: its names could not be placed on it to be covered${why ? ` (${why})` : ""}.`;
+    box.appendChild(c);
+  }
+  // A picture, a filled field or a note: words in it cannot be read, so it is covered whole (pictureBlocks).
+  for (const b of blocks) {
+    const c = document.createElement("div");
+    c.className = "shot-cover pic";
+    c.style.left = b.x + "px";
+    c.style.top = b.y + "px";
+    c.style.width = b.w + "px";
+    c.style.height = b.h + "px";
+    if (b.w >= 140 && b.h >= 36) c.textContent = "Covered for the picture: words in it cannot be read to be faked.";
     box.appendChild(c);
   }
   for (const n of names) {
@@ -1582,6 +1690,7 @@ function fakesForShot() {
     : [];
   const covers = plans.map(coverPdfNames);
   shotLeftOut = plans.filter((p) => p.whole).length;
+  shotPictures = plans.reduce((n, p) => n + (p.blocks ? p.blocks.length : 0), 0);
   // A fake longer than its box: read every one, then write.
   const fits = [];
   for (const c of covers) for (const t of c.querySelectorAll(".shot-cover > span")) fits.push([t, t.parentElement.clientWidth / (t.offsetWidth || 1)]);
@@ -1635,6 +1744,9 @@ function shotHeldBack(popWas) {
  * open or none.
  */
 async function withFakes(take) {
+  // What the PDF sheets draw, read before anything changes on the screen (shotPdfPrep).
+  shotLeftOut = shotPictures = 0;
+  if ((fwd && fwd.rx) || flaggedMatcher()) await shotPdfPrep();
   document.body.classList.add("shot-flags");
   const back = fakesForShot();
   try {
@@ -1681,6 +1793,7 @@ $("shot-btn").addEventListener("click", async (e) => {
     const flagsSay = flagsCovered ? ` ${flagsCovered === 1 ? "The flagged name is" : `${flagsCovered} flagged names are`} covered with ${WITHHELD}.` : "";
     toast((!key ? "Screenshot saved to Downloads."
       : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}`
+        + (shotPictures ? `${shotLeftOut ? "," : " —"} ${shotPictures} picture${shotPictures === 1 ? "" : "s"} or filled field${shotPictures === 1 ? "" : "s"} on the PDF covered, since words in a picture cannot be read to be faked` : "")
         + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : ".")) + flagsSay,
       held.length ? { error: true } : undefined);
   } catch (err) {
@@ -3183,7 +3296,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // never remembered as a case folder (rememberDir), and nothing that belongs
   // to the case is written into it (textFolderOpen).
   const text = looksLikeTextFiles(h, found);
-  if (dirHandle === h) folderIsText = text;
+  if (dirHandle === h) { folderIsText = text; paintWindowTitle(); }
   if (rec && rec.role !== (text ? "text" : "case")) await dirIdFor(h, () => (text ? "text" : "case"));
   // Home's Case folders list in the app (pwa/app-web.js) lists every case
   // folder a reader tab attached, however it came to it.
@@ -3994,13 +4107,37 @@ function paintDocTitle() {
   docTitleEl.title = shownDocName(m.name) + " — " + (why ? "not renamed here: " + why : "click to rename it, and its PDF with it");
 }
 /**
+ * THE WINDOW'S TITLE NAMES THE CASE. With a case folder open the reader's
+ * title is the folder's name, whichever of its documents is being read; the
+ * owner (2026-11-24): "PDF+ displays Complaint.txt as the document regardless
+ * of which document in the case folder it is actually on. I would prefer it
+ * to display the case folder name. This includes in the thumbnail that I get
+ * when I hover over the PDF+ icon in the tool bar." The app's tab, its window
+ * and Windows' taskbar preview all take this title (pwa/app-web.js
+ * watchTitle, desktop/main.js trackWindow). The document being read is still
+ * named in the reader's own title line (paintDocTitle) and the status bar. A
+ * Text Files folder is not the case folder, and its name says nothing, so a
+ * document read from one, or alone, titles the window itself. A print is
+ * titled by the file all the same (printTitle).
+ */
+function windowTitleName() {
+  if (dirHandle && folderName && !textFolderOpen()) return folderName;
+  const m = reelCurrent();
+  const open = (m && m.name) || fileName;
+  return open ? shownDocName(open) : "";
+}
+function paintWindowTitle() {
+  if (titleBeforePrint) return; // a print is under way: its title stands until it ends
+  const t = windowTitleName();
+  if (t) document.title = t + " — Text Reader";
+}
+/**
  * Every place a document's name is shown, painted again: the key has come or
  * changed, or Show fakes has been turned (shownDocName). Nothing is rebuilt.
  */
 function paintDocNames() {
   const m = reelCurrent();
-  const open = (m && m.name) || fileName;
-  if (open) document.title = shownDocName(open) + " — Text Reader";
+  paintWindowTitle();
   renderReelState();
   for (const li of docsList.children) {
     const t = li.firstChild;
@@ -4713,7 +4850,7 @@ function openText(text, name, handle, built, { stash = null, d = null, base = nu
   clearHistory();
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
-  document.title = shownDocName(name) + " — Text Reader";
+  paintWindowTitle();
   docSeq++;      // …whose own reading of what stands in its clear has yet to be made
   leakStep = -1; // a new document, a new walk through what stands in its clear
   answered = 0;
@@ -4908,6 +5045,7 @@ async function letGoOfFolder({ forget = true } = {}) {
   folderDocs = [];
   folderPdfs = [];
   flagsFor = null;
+  paintWindowTitle();
   // The document stays, on its own, under the key that stays: its spots are
   // kept as a lone document's from here, as they were, and it saves as one
   // (saveDocument) — whether it stays because the reel was one document or
@@ -20848,7 +20986,7 @@ function reelSyncCurrent() {
   fileName = now.name;
   fileHandle = now.handle;
   spots = now.spots;
-  document.title = shownDocName(now.name) + " — Text Reader";
+  paintWindowTitle();
   renderSpots();
   markDocList();
   renderReelState();
@@ -23098,6 +23236,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
   finally { if (el.__task === task) el.__task = null; }
   if (el.dataset.want !== want) return;
   el.dataset.rendered = want;
+  el.__drawnPage = page; // the page this bitmap is of (the screenshot reads what it draws: shotPdfPrep)
   delete el.dataset.preview;
   el.classList.add("ready");
   noteDrawn(el);
@@ -23111,6 +23250,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
   if (layer) {
     if (el.__text) { try { el.__text.cancel(); } catch { /* done */ } el.__text = null; }
     layer.innerHTML = "";
+    delete el.dataset.textFor; // …until this drawing's words are all laid (the screenshot asks: pdfNamesOn)
     layer.style.setProperty("--scale-factor", String(cssScale));
     layer.style.setProperty("--total-scale-factor", String(cssScale));
     try {
@@ -23122,7 +23262,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
       await tl.render();
       repairTextLayer(tl, tc.items);
       if (el.__text === tl) el.__text = null;
-      if (el.dataset.want === want) { blankLineNumbers(layer); bindSelection(layer); }
+      if (el.dataset.want === want) { blankLineNumbers(layer); bindSelection(layer); el.dataset.textFor = want; }
     } catch (e) { if (!(e && e.name === "AbortException")) console.warn(e); }
   }
 }
@@ -23483,6 +23623,8 @@ function releaseCanvas(el) {
   if (red) red.innerHTML = "";
   el.__vp = null;
   delete el.dataset.rendered;
+  delete el.dataset.textFor;
+  el.__drawnPage = null;
   delete el.dataset.preview;
   delete el.dataset.warm;
   el.classList.remove("ready");

@@ -304,7 +304,11 @@ in the text layer the screenshot reads, so it is not covered: the `ftext` and
 `widg` fixtures put 260 red pixels of "Nadia Quillfeather" into the PNG under
 "the names in their pseudonyms" (on this branch before and after these
 changes). Covering it needs the annotations' own text read and placed, not
-written.
+written. Since 2026-11-24 the screenshot covers every annotation whose
+appearance draws a letter, a digit or a picture by its rect, and every
+picture on the page, off the page's operator list (`pictureRegions`; Design
+Notes/Text reader.md, "…and what the PDF draws that its text layer does not
+say"). The Redact tools still box neither.
 
 ## Checking a redaction against the export (`text-reader.js`)
 

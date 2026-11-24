@@ -437,7 +437,7 @@ async function run() {
     await q.waitForTimeout(1500);
     check("the walk in the short document", (await rv()).nb, "Pellmont Motors 1 of 1");
     await q.evaluate(() => document.getElementById("nb-next").click());
-    await q.waitForFunction(() => /B Depo/.test(document.title), null, { timeout: 30000 });
+    await q.waitForFunction(() => /B Depo/.test(document.getElementById("doc-title").textContent), null, { timeout: 30000 });
     await q.waitForFunction((n) => document.getElementById("nb-count").textContent === `1 of ${n}`, NAMED.length, { timeout: 30000 }).catch(() => {});
     await q.waitForTimeout(2500);
     check("…› into the long one: on its first name, every one counted, not the pages built first", [(await rv()).nb, await mark()], [`Corwin Ashdale 1 of ${NAMED.length}`, { text: "Corwin Ashdale", page: NAMED[0], onScreen: true }]);

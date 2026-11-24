@@ -202,9 +202,18 @@ const CASES_RE = new RegExp(
   "g"
 );
 
+// The Style Manual writes "v.", but a draft or a pasted cite often drops the
+// period ("Branick v Downey Savings & Loan Assn (2006) 39 Cal.4th 235") or
+// writes "vs." -- every such cite went unlinked. The separator is lower case
+// and stands alone between spaces; a reporter tail within MAX_DIST is still
+// required, so a stray "v" in prose links nothing. The key is always written
+// with "v.", so each spelling of one case shares its key. Mirrors
+// _V_SEP in workup-search's citation_extractor.py and pdf_linker.py.
+const V_SEP = String.raw`(?:vs?\.?)`;
+
 // "Smith, supra" or "Smith v. Jones, supra"
 const SUPRA_RE = new RegExp(
-  String.raw`\b((?:(?:${NONV_PREFIX})\s+)?[A-Z][A-Za-z0-9.\-'\u2019&]+(?:\s+v\.\s+[A-Z][A-Za-z0-9.\-'\u2019&]+)?)` +
+  String.raw`\b((?:(?:${NONV_PREFIX})\s+)?[A-Z][A-Za-z0-9.\-'\u2019&]+(?:\s+${V_SEP}\s+[A-Z][A-Za-z0-9.\-'\u2019&]+)?)` +
   String.raw`,\s*supra\b`,
   "g"
 );
@@ -585,7 +594,7 @@ function normalizeCaciNum(raw) {
 }
 
 // "v." anchored — walk back from each occurrence to identify the plaintiff.
-const ANCHOR_RE = /(?<=\s)v\.(?=\s)/g;
+const ANCHOR_RE = new RegExp(String.raw`(?<=\s)${V_SEP}(?=\s)`, "g");
 
 // Bare "X v. Y" (or "X v. Y, Inc.") — second-pass linker for short-form
 // references to cases already cited in long form elsewhere in the document.
@@ -621,7 +630,7 @@ const TRAILING_JOIN_RE = new RegExp(String.raw`(?:\s+${_PARTY_JOIN})+$`);
 const _CORP_TAIL =
   String.raw`(?:,\s*(?:Inc|LLC|L\.L\.C|LLP|L\.L\.P|LP|Ltd|Corp|Co|Company)\.?)?`;
 const SHORT_FORM_RE = new RegExp(
-  String.raw`\b(${_PARTY_TOKEN}(?:\s+${_PARTY_NEXT}){0,4}${_CORP_TAIL})\s+v\.\s+` +
+  String.raw`\b(${_PARTY_TOKEN}(?:\s+${_PARTY_NEXT}){0,4}${_CORP_TAIL})\s+${V_SEP}\s+` +
   String.raw`(${_DEF_FIRST_TOKEN}(?:\s+${_PARTY_NEXT}){0,5}${_CORP_TAIL})`,
   "g"
 );
@@ -2315,7 +2324,7 @@ function looksLikeHeadingLine(text, lineStart, lineEnd) {
   // A real citation always contains either " v. " or a multi-digit reporter
   // volume followed by a reporter abbrev. If the line has either, it's not
   // a heading.
-  if (/\sv\.\s/.test(line)) return false;
+  if (/\svs?\.?\s/.test(line)) return false;
   if (/\d{1,4}\s+[A-Z]/.test(line)) return false;
   return true;
 }
