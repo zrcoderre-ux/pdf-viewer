@@ -378,7 +378,12 @@ number and day, and, where two motions are set that day, by the words of the
 Motion Type (`briefingFor`). It shows Mot, Opp and Rep chips in a column of
 their own (`briefingCell`, `briefingChips`): green ✓ filed on time, red ! filed
 late, red ✗ not filed, amber ! timely only if personally served, plain not due,
-dashed ? not posted yet. An OSC re default judgment is one Defaults chip. Each
+dashed ? not posted yet. An OSC re default judgment is one Defaults chip. A
+motion to set aside or vacate the default set in the same case as an OSC re
+default judgment (the owner, 2026-11-24) adds one red chip after the row's own,
+naming the other hearing with its date under it: "Vacate ! / Set 12/14" on the
+OSC's row, "OSC DJ ! / Set 12/4" on the motion's (`defaultConflictChip`, off
+the entry's `defaultConflict`, which E-Court Suite 3.49.43+ writes). Each
 chip's hover says due and filed dates and when the extension last looked; the
 row fades past BRIEFING_STALE_MS (12 h). A hearing the extension has not
 reported yet shows a dash whose hover says how to fetch it (the eCourt button,

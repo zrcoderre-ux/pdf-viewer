@@ -1189,14 +1189,40 @@ const shortDay = (ms) => {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 };
 
+// A motion to vacate the default set in the same case as an OSC Re: Default
+// Judgment (the owner, 2026-11-24: "There should also be an indication on both
+// E-court and home page, when there is a Moton to Set Aside/Vacate Default set
+// in the same case as the OCR Re Default Jugment"). E-Court Suite names the
+// other hearing on each one's entry (`defaultConflict`: { label, iso, caption },
+// its defaultConflictFor); the row gets one red chip for it after its own,
+// "Vacate" on the OSC's row and "OSC DJ" on the motion's, the date under it.
+function defaultConflictChip(dc) {
+  if (!dc || typeof dc !== "object" || !dc.label) return null;
+  const m = String(dc.iso || "").match(/^(\d{4})-(\d\d)-(\d\d)$/);
+  const day = m ? `${+m[2]}/${+m[3]}` : "";
+  const osc = /^OSC\b/.test(dc.label);
+  const title = (osc
+    ? "Default judgment is also set in this case"
+    : "A motion to vacate the default is pending in this case")
+    + `${day ? ` (${day})` : ""}: ${dc.caption || dc.label}. It bears on whether default judgment can be entered.`;
+  return { label: osc ? "OSC DJ" : "Vacate", state: "missing", mark: "!", title, due: day ? `Set ${day}` : "" };
+}
+
 /**
  * The chips a hearing row shows for its briefing: [{ label, state, mark,
  * title, due }], `due` the line under the label ("Due 11/14", "" with none), `state` the colour ("filed" green, "late" and "missing" red,
  * "personal" amber, "pending" plain, "unposted" plain and marked as unsure),
  * `mark` the sign after the label (✓, ✗, !, ?, or none). An OSC is one chip.
+ * A motion to vacate the default and an OSC Re: Default Judgment in the same
+ * case each add a chip naming the other (defaultConflictChip).
  */
 export function briefingChips(entry) {
   if (!entry) return [];
+  const dc = defaultConflictChip(entry.defaultConflict);
+  return dc ? ownBriefingChips(entry).concat([dc]) : ownBriefingChips(entry);
+}
+
+function ownBriefingChips(entry) {
   if (entry.kind === "osc") {
     // "note": every named defendant is in default or dismissed and only Does
     // are left, a lesser thing than a missing default, so amber, not red.
