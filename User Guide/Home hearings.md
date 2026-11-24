@@ -139,8 +139,10 @@ blue.
 
 A red **LEAKS** tag by the case name means the case folder has a LEAKS.xlsx:
 PDF-Linker flagged values for you to answer in its Fix? column. It shows on
-the hearing's row and in Case folders, during a run too, and goes once
-PDF-Linker removes the sheet (when no row needs a look).
+the hearing's row and in Case folders, and goes once PDF-Linker removes the
+sheet (when no row needs a look). While PDF-Linker is running on the case the
+tag is hidden, since the run is still rewriting the sheet; it comes back when
+the run finishes (or looks stopped) and the sheet is still there.
 
 ## Case folders not on the hearings list
 

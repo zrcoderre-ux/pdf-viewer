@@ -900,3 +900,14 @@ no time; `runCell`'s hover says "Finished <time or day, time>." in place of
 "Last moved …" for it. Every other state (running, held, paused, failed,
 stalled, canceled) reads as before. `test-claude-runs.mjs`,
 `test-hearing-sheet.mjs` 14g.
+
+### No LEAKS badge while a run is going (2026-11-24)
+
+The owner: "Hide the LEAKS warning while PDF Linker is running (so it doesn't
+catch my eye and make me think I need to do something when I don't)."
+`showsLeaks` (case-folders.js) gates `leaksChip` on hearing rows and in Case
+folders: a LEAKS.xlsx, and a state other than `running` or `starting`. A run
+that looks stopped (`stalled`) shows it again, as do finished and ran. The
+running pill never carried a LEAKS or .LEAK word, so nothing else changed.
+`test-case-folders.mjs`.
+

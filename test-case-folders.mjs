@@ -20,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  folderStatus, statusText, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
+  folderStatus, statusText, showsLeaks, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
   withRunStart, RUN_START_WAIT_MS,
   opensInPdfMode, SETTLED_MS, finishedOvernight, projectedFinish, runLooksStalled,
   PRIORITY_FILE, RANK_MAX, priorityText, parsePriority, liveRank, changeLine, ordinal, lineTitle,
@@ -91,6 +91,7 @@ const done = folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN), f("LEAKS.xls
 const doneSaid = statusText(done, NOW);
 check("finished, with what still needs a look (the LEAKS sheet has its own badge)", [/^Finished\b/.test(doneSaid.text), doneSaid.text.endsWith(" · 2 held as .LEAK"), doneSaid.tone], [true, true, "warn"]);
 check("…just \"Finished\" and what is left, the time on its hover (the owner, 2026-11-24)", [doneSaid.text, /^PDF-Linker's last run finished at \d/.test(doneSaid.title)], ["Finished · 2 held as .LEAK", true]);
+check("the LEAKS badge: not while a run is going, again once it finishes or looks stopped (the owner, 2026-11-24)", ["running", "starting", "stalled", "done", "ran"].map((state) => showsLeaks({ leaks: true, state })).concat(showsLeaks({ leaks: false, state: "done" })), [false, false, true, true, true, false]);
 check("…a LEAKS sheet alone still turns it amber, its words left to the badge", (({ text, tone, title }) => [/LEAKS/.test(text), tone, /LEAKS\.xlsx to answer/.test(title)])(statusText(folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN), f("LEAKS.xlsx", 20 * MIN, 800)] }, NOW), NOW)), [false, "warn", true]);
 check("a clean finish reads as one", statusText(folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN)] }, NOW), NOW).tone, "ok");
 check("a run going", statusText(folderStatus({ files: [f("ETA ~6.04PM (6 of 13).txt", 2 * MIN)] }, NOW), NOW).text, "Running — ETA ~6:04 PM (6 of 13)");

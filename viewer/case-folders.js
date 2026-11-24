@@ -302,6 +302,17 @@ export function runningSub(st, now) {
   return st && st.started ? `Started ${whenText(st.started, now)} · going ${durationText(now - st.started)}` : "";
 }
 
+/**
+ * Whether the row shows its LEAKS badge: a LEAKS.xlsx in the folder, and no
+ * run going (the owner, 2026-11-24: "Hide the LEAKS warning while PDF Linker
+ * is running (so it doesn't catch my eye and make me think I need to do
+ * something when I don't)"). The run rewrites the sheet, so the one standing
+ * is the last run's. A run that looks stopped shows it again.
+ */
+export function showsLeaks(st) {
+  return !!(st && st.leaks && st.state !== "running" && st.state !== "starting");
+}
+
 export function statusText(st, now) {
   const extras = [];
   if (st.held) extras.push(`${st.held} held as .LEAK`);

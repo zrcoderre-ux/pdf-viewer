@@ -1526,7 +1526,7 @@ async function renderCaseFoldersNow() {
     b.className = "recent-item case-item";
     b.innerHTML = `<span class="ri-icon">${icon("folder", { size: 18 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
     b.querySelector(".ri-name").textContent = r.name;
-    if (!r.locked && r.status && r.status.leaks) b.querySelector(".ci-name-line").appendChild(leaksChip());
+    if (!r.locked && caseLib.showsLeaks(r.status)) b.querySelector(".ci-name-line").appendChild(leaksChip());
     b.querySelector(".ci-where").textContent = where;
     const pill = b.querySelector(".ci-status");
     pill.textContent = st.text;
@@ -3022,7 +3022,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       }
     }
     // A LEAKS sheet in the case folder: PDF-Linker flagged values to answer.
-    if (r && !r.locked && r.status && r.status.leaks) b.querySelector(".ci-name-line").appendChild(leaksChip());
+    if (r && !r.locked && caseLib.showsLeaks(r.status)) b.querySelector(".ci-name-line").appendChild(leaksChip());
     // The motion as a tag on the name's line (the owner, 2026-11-24), not
     // grey under it: what is being heard reads with whose case it is.
     if (hg.motion) {
