@@ -1421,6 +1421,28 @@ face; with, the lines in Arial, placed, the heading bold at 1.5 times the
 6-point label, the typed case number and the name after its label at their
 fields' 9 points).
 
+**A layer set in word pieces, and one drawn invisibly in a named face
+(2026-11-24)** (`FT.joinPieces`, `FT.piecedLayer`; `formTypeOver`'s `page`).
+The owner's filed CIV-100 was drawn in the reader's Times, its rules out of
+line and its case number on two lines, while PDF-Linker's export of it read
+"1. [ X ] THE CLERK" and "[ X ] te" for "Note". Its pages were the scan
+traced into vector outlines under a filer's invisible ArialMT layer that set
+each word in pieces ("Re", "q", "u", "est "), each sized to its own ink. Two
+things kept it from its blank here. No piece was a label word, so `fitWords`
+found no anchors: `readPdfGridNow` now joins each word's touching pieces
+(same font, one baseline, the next starting where the last ends, never across
+the space that ends a word's last piece) before anything reads the page's
+items, on a page whose worded items are mostly two letters or fewer
+(`piecedLayer`: 0.6 of 40 or more); a word takes its middle piece's height and
+baseline, since the union of pieces sized to their ink stood a line and a
+half tall. Any other page's items are the same list. And `ocrLayerPage` asks
+for a font that names no face, which Arial does: `formTypeOver` now also
+takes a page drawn invisibly (`hiddenTextShare` at `FORM_OCR_SHARE`, the test
+`scanPage` already made) and counts all its items the OCR's. PDF-Linker joins
+the pieces the same way (`_join_ocr_word_pieces`). Tests:
+`test-form-templates.mjs` (a CIV-110 scan in pieces recognised as no form,
+and as CIV-110 page 1 joined; a word-an-item layer left as it is).
+
 ### A straight rule in the file is straight on the page (`rules.pageGrid`, `fitRuleRows`)
 
 The owner, in chat: "Where the raw text has straight lines, those lines

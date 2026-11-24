@@ -169,6 +169,42 @@ console.log("a form's next page, its id lost to the scan");
   check("…but is, after page 1, as POS-040 page 2", second && [second.tpl.form, second.tpl.n], ["POS-040", 2]);
 }
 
+// ── a layer set in word pieces ───────────────────────────────────────────────
+// The owner's filed CIV-100 (2026-11-24): a filer's invisible layer that set
+// each word in pieces — "Re", "q", "u", "est " — each sized to its own ink.
+// No piece was a label word, so the form was never recognised.
+console.log("a layer set in word pieces (FT.joinPieces)");
+{
+  const civ = await pageOf("CIV-110 Request for Dismissal.json", 1);
+  const pieced = [];
+  let k = 0;
+  for (const it of scanOf(civ)) {
+    const str = it.str + " ";
+    let at = 0;
+    while (at < str.trimEnd().length) {
+      const n = [1, 2, 1, 3][k++ % 4];
+      let piece = str.slice(at, at + n);
+      at += n;
+      if (at >= str.trimEnd().length) piece = str.slice(at - n);
+      const x = it.x + it.w * (at - n) / Math.max(1, it.str.length);
+      // Each piece sized to its own ink: its height off by up to a third.
+      const h = it.h * [1, 0.7, 1.3, 0.9][k % 4];
+      pieced.push({ str: piece, x, top: it.top + it.h - h, w: it.w * piece.trimEnd().length / Math.max(1, it.str.length), h, font: "ocr" });
+    }
+  }
+  check("the pieced page is read as one", FT.piecedLayer(pieced), true);
+  const lib = library();
+  check("…and, pieces as they are, recognised as no form", await FT.recognise(lib, pieced, { w: 612, h: 792 }), null);
+  const joined = FT.joinPieces(pieced);
+  const words = joined.map((it) => it.str.trim());
+  check("joined, its words are words again", ["ATTORNEY", "Dismissal", "NUMBER:"].every((w) => words.includes(w) || words.includes(w.replace(/E/, "F"))), true);
+  check("…a word's height its middle piece's, never the union's", joined.every((it) => it.h <= 1.31 * Math.max(...pieced.filter((p) => p.x >= it.x - 0.01 && p.x < it.x + it.w).map((p) => p.h))), true);
+  const got = await FT.recognise(lib, joined, { w: 612, h: 792 });
+  check("…and the page is recognised as CIV-110 page 1", got && [got.tpl.form, got.tpl.n], ["CIV-110", 1]);
+  const words1 = scanOf(civ);
+  check("a layer a word an item is left as it is", FT.joinPieces(words1), words1);
+}
+
 console.log("the data is PDF-Linker's blanks as they stand");
 if (!fs.existsSync(SIBLING)) console.log(`  SKIP  no PDF-Linker checkout beside this one (${SIBLING})`);
 else {
