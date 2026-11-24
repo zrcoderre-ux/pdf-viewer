@@ -1006,6 +1006,8 @@ async function browserPart() {
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("NEW v. ARRIVAL")), null, { timeout: 15000 });
     check("…and the new hearing is on the list", true, true);
     // The owner (2026-11-24): "the calendar changes should come with their own links to those cases in e-court".
+    // The owner (2026-11-24): "calendar changes should show the motion type".
+    check("each change shows its motion, under the case", await shell.$$eval("#calendar-changes .cal-item", (ps) => ps.map((p) => p.querySelector(".cal-main .cal-motion")?.textContent || "").sort()), ["Demurrer", "Motion to Quash Service of Summons"]);
     const addedLink = shell.locator("#calendar-changes .cal-item.k-added .cal-ecourt");
     check("a change carries its case's eCourt link", await addedLink.count(), 1);
     await addedLink.click();

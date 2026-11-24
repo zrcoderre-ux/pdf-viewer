@@ -2510,13 +2510,27 @@ function renderCalendarChanges(box, sheet, briefing, now) {
     txt.className = "cal-text";
     txt.textContent = said.text + (e.undone ? " — undone" : "");
     p.title = said.title;
-    p.appendChild(txt);
+    // The motion under the case, tagged as a hearing row tags it (the owner,
+    // 2026-11-24: "calendar changes should show the motion type").
+    const main = document.createElement("span");
+    main.className = "cal-main";
+    main.appendChild(txt);
+    const hgRow = rowOf(e);
+    const motion = String(e.motion || (hgRow && hgRow.motion) || "").trim();
+    if (motion) {
+      const tag = document.createElement("span");
+      tag.className = "ci-motion cal-motion";
+      tag.textContent = motion;
+      tag.title = motion;
+      main.appendChild(tag);
+    }
+    p.appendChild(main);
     const btn = (label, title, fn) => { const b = document.createElement("button"); b.className = "link-btn"; b.textContent = label; b.title = title; b.addEventListener("click", fn); p.appendChild(b); return b; };
     // Each change carries its case's eCourt link (the owner, 2026-11-24: "the
     // calendar changes should come with their own links to those cases in
     // e-court"), opened as a hearing row's eCourt button opens it: a Chrome
     // window of its own, the case's if one is open (caseWindowUrl).
-    const hg = rowOf(e);
+    const hg = hgRow;
     const link = hearingLib.ecourtUrlOf(hg) || (hearingLib.isWebLink(e.url) ? e.url : "");
     if (link) {
       const who = hg || { caseName: e.caseName || e.caseText || "", caseNumber: e.caseNumber || "" };

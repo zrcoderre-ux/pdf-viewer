@@ -435,6 +435,9 @@ body.case-dragging .tree-node:not(.leaf):not(.tree-more) { outline: 1px dashed v
 .calendar-changes .cal-clear { margin-left: auto; }
 .calendar-changes .cal-item { display: flex; align-items: baseline; gap: 10px; padding: 2px 0 2px 21px; }
 .calendar-changes .cal-item .cal-text { flex: 0 1 auto; min-width: 0; }
+.calendar-changes .cal-item .cal-main { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.calendar-changes .cal-item .cal-motion { max-width: 100%; }
+.calendar-changes .cal-item.undone .cal-motion { opacity: 0.6; }
 .calendar-changes .cal-item.k-added .cal-text::before { content: "+ "; color: #16a34a; font-weight: 700; }
 .calendar-changes .cal-item.k-off .cal-text::before { content: "− "; color: #dc2626; font-weight: 700; }
 .calendar-changes .cal-item.k-held .cal-text::before { content: "? "; color: #d97706; font-weight: 700; }

@@ -270,7 +270,7 @@ and Home writes them into your hearings sheet:
 
 Nothing changes silently. Every change is listed in **Calendar changes** at
 the top of Hearings, with **Undo**: an added row is taken back out (and not
-added again), and a red mark is taken off. Each change has an **eCourt**
+added again), and a red mark is taken off. Each change shows its motion under the case, and has an **eCourt**
 button that opens its case, in the case's Chrome window as a hearing row's
 eCourt button does. A Windows notification from PDF+
 (and one from E-Court Suite when eCourt's calendar changes) says what changed.
