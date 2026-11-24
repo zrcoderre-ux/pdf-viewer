@@ -11482,11 +11482,51 @@ function hitRangeOf(h) {
   refindSoon();
   return h.range;
 }
-/** Stand on the first hit of a document just read, the way a find does as you type. */
-function findLandHere() {
+/**
+ * Where a hit stands on screen, as the foot of what holds it: the range's own
+ * box, else (a page swapped for its PDF page, or one the reel has not built)
+ * its page's. Null where neither is laid out.
+ */
+function hitFoot(h) {
+  if (h.range) {
+    const r = h.range.startContainer && h.range.startContainer.isConnected ? h.range.getBoundingClientRect() : null;
+    if (r && r.height) return r.bottom;
+    const node = h.range.startContainer;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const sec = el && el.closest && el.closest(".tpage");
+    const sr = sec && sec.getBoundingClientRect();
+    return sr && sr.height ? sr.bottom : null;
+  }
+  const sec = h.page != null ? pagesEl.querySelector(`.tpage[data-index="${h.page}"]`) : null;
+  const sr = sec && sec.getBoundingClientRect();
+  return sr && sr.height ? sr.bottom : null;
+}
+/**
+ * The first hit at or below the top of the stage — where the reading is — so
+ * Ctrl+F starts on the page on screen, not the top of the document; past the
+ * last hit, round to the first. The hits are in reading order, so it is a
+ * binary search (a long document carries a hit a page).
+ */
+function findFromHere() {
+  const n = findHits.length;
+  if (!n) return -1;
+  const y = stageEl.getBoundingClientRect().top;
+  let lo = 0, hi = n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const b = hitFoot(findHits[mid]);
+    if (b != null && b > y) hi = mid; else lo = mid + 1;
+  }
+  return lo < n ? lo : 0;
+}
+/**
+ * Stand on the first hit at the reading (findFromHere), the way a find does as
+ * you type — or, in a document the walk has just opened (`first`), its first.
+ */
+function findLandHere({ first = false } = {}) {
   if (findStep >= 0 || !findHits.length) return false;
-  findStep = 0;
-  const r = hitRangeOf(findHits[0]);
+  findStep = first ? 0 : findFromHere();
+  const r = hitRangeOf(findHits[findStep]);
   paintFind();
   if (r) scrollRangeTo(r);
   return true;
@@ -11673,6 +11713,11 @@ function stepFind(dir = 1) {
     toast(findFolderWide() ? `“${findQuery}” is nowhere in ${folderName || "the folder"}.` : `“${findQuery}” is not in this document.`);
     return;
   }
+  if (findStep < 0) {
+    // Not stood anywhere yet: from the reading, forward or back.
+    const at = findFromHere();
+    findStep = dir < 0 ? at : at - 1;
+  }
   const next = findStep + dir;
   if ((next >= n || next < 0) && others.length) {
     jumpToFind(dir < 0 ? others[others.length - 1] : others[0]);
@@ -11700,8 +11745,9 @@ function jumpToFind(row) {
 const refindSoon = debounce(() => {
   if (findBar.hidden || !findQuery) return;
   scanFindHere();
+  const jumped = findJump;
   findJump = false;
-  findLandHere();
+  findLandHere({ first: jumped });
   renderFindBar();
   scanFindFolder();
 }, 200);
@@ -11741,7 +11787,9 @@ function showFindBar(on, { replace = false } = {}) {
   if (was !== !!on) relayout();
   // Closing the bar stops a folder replace being prepared: nothing is changed.
   if (!on && folderPass) folderPass.stop = true;
-  if (!on) { findHits = []; findStep = -1; findJump = false; clearFindMarks(); return; }
+  // The query goes with the bar, so opening it again on the same words reads
+  // the pages again, from where the reading is then.
+  if (!on) { findQuery = ""; findHits = []; findStep = -1; findJump = false; clearFindMarks(); return; }
   const input = $("fb-input");
   // Opened over a selection, that is what is being looked for.
   const sel = String(document.getSelection() || "").trim();

@@ -511,6 +511,23 @@ box itself is visually hidden and `:has(input:checked)` paints the pressed
 state. The key-offer bar now takes its own height through `--offer-h`, the way
 the LEAKS bar takes `--bar-h`, so neither covers the head of the rail.
 
+Find starts where the reading is (owner, 2026-11-24: "CTRL + F should start
+on the current page, not the top of the document"). `findLandHere` stands on
+`findFromHere()`, the first hit whose foot is below the stage's top edge (a
+binary search over the hits in reading order; a hit on a page not built, or
+one swapped for its PDF page, is placed by its page's box: `hitFoot`), and
+Enter goes on forward from there and round the end to the first page. The
+count still covers every hit. The one exception is a document the walk has
+just opened from another (`findJump`, `findLandHere({ first: true })`), which
+stands on its first hit. Closing the bar clears `findQuery`, so opening it
+again on the same words reads the pages again from where the reading then
+is (before, the hits were dropped and not read again: "none here"). The PDF
+viewer's Find (`viewer/find.js` `go`) already started at the first match on
+screen; its first Enter after typing no longer runs the search again
+(`ranFor`), which used to cost a press, and `openAt` with no match on its
+page stands on the next one after it (`fromPage`), not the document's first.
+Tests: `test-find-from-here.mjs`.
+
 Find's bar has a second row, Replace (`#fb-replace-row`, Ctrl+H). Replace
 works on the page bodies on screen. With a case folder open in full
 (`folderOpen()`), Replace all also replaces on shadow pages in every other

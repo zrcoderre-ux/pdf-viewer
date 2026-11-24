@@ -304,7 +304,12 @@ async function run() {
     check("…and said where", await p.evaluate(() => document.getElementById("fb-where").textContent), "Page 350:7");
     await p.fill("#fb-input", "line 7, Corwin");
     await p.waitForTimeout(2500);
-    check("Find through the key, a hit a page", await fbCount(), `1 of ${PAGES} here`);
+    check("Find through the key, a hit a page, starting at the page being read", await fbCount(), `350 of ${PAGES} here`);
+    await p.keyboard.press("Escape"); await p.waitForTimeout(500);
+    await goPage(1); await p.waitForTimeout(1500);
+    await p.keyboard.press("Control+f");
+    await p.waitForTimeout(2500);
+    check("…closed, and opened again at page 1: its hit", await fbCount(), `1 of ${PAGES} here`);
     for (let k = 0; k < 3; k++) { await p.keyboard.press("Enter"); await p.waitForTimeout(700); }
     check("…Enter three times: the fourth", await fbCount(), `4 of ${PAGES} here`);
     for (let k = 0; k < 4; k++) { await p.keyboard.press("Shift+Enter"); await p.waitForTimeout(700); }
