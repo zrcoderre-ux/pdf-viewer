@@ -22304,13 +22304,20 @@ function ocrLayerPage(info, items) {
   const ocr = worded.filter(isOcr);
   return ocr.length >= FORM_MIN_ITEMS && chars(ocr) >= FORM_OCR_SHARE * chars(worded);
 }
-async function formTypeOver(info, pageNo, items, sz) {
+async function formTypeOver(info, pageNo, items, sz, page = null) {
   if (!info.tplPages) info.tplPages = new Map();
   const faces = info.faces || new Map();
-  const isOcr = (it) => { const f = faces.get(it.font); return !!f && !f.face; };
+  let isOcr = (it) => { const f = faces.get(it.font); return !!f && !f.face; };
   if (!ocrLayerPage(info, items)) {
-    info.tplPages.delete(pageNo);
-    return null;
+    // …or a layer drawn INVISIBLY in a face that names itself (a filer's
+    // Arial over a traced scan, the owner's CIV-100 of 2026-11-24): all its
+    // type is the OCR's, as the render mode says.
+    const hidden = page && items.length >= FORM_MIN_ITEMS && await hiddenTextShare(info, page) >= FORM_OCR_SHARE;
+    if (!hidden) {
+      info.tplPages.delete(pageNo);
+      return null;
+    }
+    isOcr = () => true;
   }
   const seq = info.tplPages.get(pageNo - 1) || null;
   const got = await FT.recognise(formLibrary(), items, sz, { seq });
@@ -22455,16 +22462,21 @@ async function readPdfGridNow(info, pass) {
         items.push({ str: it.str, x: m[4], top: t, w: it.width || 0, h: it.height || 0, font: it.fontName || null });
       }
       info.lines[i - 1] = isFinite(top) ? top : null;
+      // A layer set in word PIECES has each word's pieces joined into one
+      // item first (FT.joinPieces): no piece is a word, so no form fitted and
+      // the rows broke words where the pieces met. Any other page's items are
+      // the same list.
+      const worded = FT.joinPieces(items);
       // A SCAN of a court form PDF-Linker holds the blank of: the blank's own
       // type in place of the OCR's (formTypeOver).
-      const typed = await formTypeOver(info, i, items, sz).catch(() => null);
+      const typed = await formTypeOver(info, i, worded, sz, page).catch(() => null);
       // …and any other scan's rows are an OCR's, laid out as such (scanPage):
       // its type in a font that names no face, or drawn invisibly over the
       // picture (text render mode 3), as every OCR layer is, whatever the font
       // it is set in calls itself.
-      (info.scans || (info.scans = []))[i - 1] = !typed && (ocrLayerPage(info, items) || (items.length >= FORM_MIN_ITEMS && await hiddenTextShare(info, page) >= FORM_OCR_SHARE));
-      info.geoms[i - 1] = PS.pleadingGeometry(typed || items, sz);
-      info.rows[i - 1] = PS.pdfRows(typed || items, sz);
+      (info.scans || (info.scans = []))[i - 1] = !typed && (ocrLayerPage(info, worded) || (worded.length >= FORM_MIN_ITEMS && await hiddenTextShare(info, page) >= FORM_OCR_SHARE));
+      info.geoms[i - 1] = PS.pleadingGeometry(typed || worded, sz);
+      info.rows[i - 1] = PS.pdfRows(typed || worded, sz);
     } catch { info.lines[i - 1] = null; }
   }
   notePass("reading the PDF's line grid", gridFrom);

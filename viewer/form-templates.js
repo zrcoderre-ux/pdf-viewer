@@ -204,6 +204,69 @@ export function itemWords(items) {
   return out;
 }
 
+// ---- a layer set in word PIECES ------------------------------------------------
+
+// A filer's OCR layer can set each word in pieces — a letter, a pair, a few
+// letters an item, each sized to its own ink — as the owner's filed CIV-100
+// (2026-11-24) did: "Request" as "Re", "q", "u", "est ". No piece is a label
+// word, so no form fitted, and the rows broke words where the pieces met.
+// pdf_linker.py joins them the same way (`_join_ocr_word_pieces`).
+const PIECE_MIN_ITEMS = 40;      // worded items a page needs to be judged
+const PIECE_SHORT_SHARE = 0.6;   // …this share of them at most PIECE_MAX_CHARS long
+const PIECE_MAX_CHARS = 2;       // letters and digits
+const PIECE_GAP = 0.15;          // of the taller piece's height: still touching
+const PIECE_OVERLAP = 0.25;      // …or reaching back over its neighbour by this much
+const alnumCount = (s) => (String(s).match(/[\p{L}\p{N}]/gu) || []).length;
+
+/** Whether a page's items are a layer set in word pieces. */
+export function piecedLayer(items) {
+  let n = 0, short = 0;
+  for (const it of items || []) {
+    const a = alnumCount(it.str || "");
+    if (!a) continue;
+    n++;
+    if (a <= PIECE_MAX_CHARS) short++;
+  }
+  return n >= PIECE_MIN_ITEMS && short >= PIECE_SHORT_SHARE * n;
+}
+
+/**
+ * `items` ({ str, x, top, w, h, font }, top-down) with the touching pieces of
+ * each word joined into one item, where the page's layer is set in pieces
+ * (`piecedLayer`); the same list, untouched, on any other page. Two pieces
+ * join only in the same font, on one baseline, where the second begins where
+ * the first ends — never across a space, which ends a word's last piece
+ * ("est "), so a word stays a word. A joined item's height and baseline are
+ * its middle piece's: each piece is sized to its own ink, and their union
+ * stood a line and a half tall.
+ */
+export function joinPieces(items) {
+  if (!piecedLayer(items)) return items;
+  const out = [], parts = [];
+  const median = (xs) => { const v = [...xs].sort((a, b) => a - b); return v[(v.length - 1) >> 1]; };
+  for (const it of items) {
+    const pv = out[out.length - 1];
+    if (pv && it.str && pv.str && pv.font === it.font && !/\s$/.test(pv.str) && !/^\s/.test(it.str) && pv.str.trim() && it.str.trim()) {
+      const h = Math.max(pv.h || 0, it.h || 0, 1);
+      const gap = it.x - (pv.x + (pv.w || 0));
+      if (Math.abs((pv.top + pv.h) - (it.top + it.h)) <= Math.max(1, 0.15 * h) && gap >= -PIECE_OVERLAP * h && gap <= PIECE_GAP * h) {
+        const right = Math.max(pv.x + (pv.w || 0), it.x + (it.w || 0));
+        out[out.length - 1] = { ...pv, str: pv.str + it.str, x: Math.min(pv.x, it.x), w: right - Math.min(pv.x, it.x) };
+        parts[parts.length - 1].push(it);
+        continue;
+      }
+    }
+    out.push(it);
+    parts.push([it]);
+  }
+  parts.forEach((g, k) => {
+    if (g.length < 2) return;
+    const base = median(g.map((p) => p.top + p.h)), h = median(g.map((p) => p.h));
+    out[k] = { ...out[k], top: base - h, h };
+  });
+  return out;
+}
+
 export const MIN_SHARE = 0.6;      // of the template's label words matched
 export const SEQ_MIN_SHARE = 0.4;  // a page expected after a recognised one
 export const MIN_MATCHED = 8;      // and at least this many, whatever the share
