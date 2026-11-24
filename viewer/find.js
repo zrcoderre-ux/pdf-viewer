@@ -154,6 +154,7 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {}, onE
   let matches = [];        // [{ pn, range }]
   let current = -1;
   let timer = 0;
+  let ranFor = null;       // the query and options `matches` was searched for
 
   function pageLayers() {
     return [...pagesEl.querySelectorAll(".page-wrapper")].map((w) => ({ pn: Number(w.dataset.pageNumber), layer: w.querySelector(".textLayer") })).filter((x) => x.layer);
@@ -232,12 +233,26 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {}, onE
     showCount();
     reveal(current);
   }
+  /**
+   * None on page `pn`: the first match after it going forward, the last before
+   * it going back, round the document's end — not its first or last.
+   */
+  function fromPage(dir, pn) {
+    if (dir < 0) {
+      for (let i = matches.length - 1; i >= 0; i--) if (matches[i].pn < pn) return i;
+      return matches.length - 1;
+    }
+    const i = matches.findIndex((m) => m.pn > pn);
+    return i < 0 ? 0 : i;
+  }
   function query() {
     const q = input.value.trim();
     return q ? { query: q, caseSensitive: caseEl.checked, wholeWord: wordEl.checked } : null;
   }
+  function searchKey() { return `${caseEl.checked ? 1 : 0}${wordEl.checked ? 1 : 0}${input.value}`; }
   function run({ keepPlace = false } = {}) {
     const q = input.value;
+    ranFor = searchKey();
     const prevPn = keepPlace && matches[current] ? matches[current].pn : null;
     matches = q.trim() ? search(q, { caseSensitive: caseEl.checked, wholeWord: wordEl.checked }) : [];
     current = -1;
@@ -279,8 +294,10 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {}, onE
     if (e.key === "Enter") {
       e.preventDefault();
       clearTimeout(timer);
-      if (!matches.length || input.dataset.q !== input.value) {
-        input.dataset.q = input.value;
+      // Typed and already searched as you typed: Enter steps on from the
+      // match it stood on. Only a search not run yet (Enter inside the
+      // typing pause, options changed) is run first.
+      if (!matches.length || ranFor !== searchKey()) {
         run();
         // Nothing in this document: on to the next one that has it.
         if (!matches.length) go(e.shiftKey ? -1 : 1);
@@ -313,21 +330,21 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {}, onE
     current: query,
     /**
      * Open on `query` and stand on a match of page `pn` — its first going
-     * forward (`dir` 1), its last going back — else the first or last of the
-     * document. What the PDF mode calls on arriving in the next PDF.
+     * forward (`dir` 1), its last going back — else the next one after that
+     * page in that direction (fromPage). What the PDF mode calls on arriving in the next PDF.
      */
     openAt(q, { caseSensitive = false, wholeWord = false } = {}, dir = 1, pn = 0) {
       bar.hidden = false;
       place();
       toggleBtn?.setAttribute("aria-pressed", "true");
       input.value = q;
-      input.dataset.q = q;
       caseEl.checked = !!caseSensitive;
       wordEl.checked = !!wholeWord;
       onOpenChange(true);
       matches = q.trim() ? search(q, { caseSensitive, wholeWord }) : [];
+      ranFor = searchKey();
       const onPage = matches.map((m, i) => (m.pn === pn ? i : -1)).filter((i) => i >= 0);
-      current = !matches.length ? -1 : onPage.length ? (dir < 0 ? onPage[onPage.length - 1] : onPage[0]) : dir < 0 ? matches.length - 1 : 0;
+      current = !matches.length ? -1 : onPage.length ? (dir < 0 ? onPage[onPage.length - 1] : onPage[0]) : fromPage(dir, pn);
       paint();
       showCount();
       if (current >= 0) reveal(current); else if (pn) scrollToPage(pn, { smooth: false });
