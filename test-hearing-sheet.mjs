@@ -488,6 +488,8 @@ async function browserPart() {
     // The owner (2026-11-24): the motion a tag on the name's line, the case folder's name on the hover.
     const folderOf = (i) => shell.$$eval("#hearing-list .hearing-item", (bs, i) => (bs[i].title.match(/^Case folder: (.*)$/m) || [])[1] || "", i);
     check("the motion a tag beside the name", await shell.$$eval("#hearing-list .hearing-item", (bs) => bs.map((b) => (b.querySelector(".ci-motion") || {}).textContent)), ["Demurrer", "MSJ", "Motion to Compel", "Motion to Strike", "Demurrer"]);
+    // The owner (2026-11-24): "Lets just standardize that for everyone": the motion on its own line under the name, whole where there is room.
+    check("…on its own line under the name, on every row, whole", await shell.$$eval("#hearing-list .hearing-item", (bs) => bs.every((b) => { const m = b.querySelector(".ci-motion"), c = b.querySelector(".ci-case"); return m.getBoundingClientRect().top >= c.getBoundingClientRect().bottom - 1 && Math.abs(m.getBoundingClientRect().left - c.getBoundingClientRect().left) < 1 && m.scrollWidth <= m.clientWidth; })), true);
     check("…and nothing under the name that the row does not need", [got[0].where, got[2].where], ["", ""]);
     check("…a folder in Downloads, by its name (on the hover)", await folderOf(0), "25STCV12345 ACME");
     check("…a folder opened elsewhere, by its Register of Actions", await folderOf(2), "Initech compel");
@@ -612,7 +614,7 @@ async function browserPart() {
       return {
         name: parseFloat(getComputedStyle(document.querySelector("#hearing-list .ci-case")).fontSize),
         // The name of a row done stands after its ✓.
-        names: new Set([...document.querySelectorAll("#hearing-list .ci-case")].filter((e) => !(e.previousElementSibling && e.previousElementSibling.classList.contains("ci-done-mark"))).map((e) => Math.round(e.getBoundingClientRect().left))).size,
+        names: new Set([...document.querySelectorAll("#hearing-list .ci-case")].filter((e) => !e.closest(".ri-name").querySelector(".ci-done-mark")).map((e) => Math.round(e.getBoundingClientRect().left))).size,
         nums: new Set(xs("#hearing-list .ci-num")).size,
         rightMargin: Math.round(window.innerWidth - hear.right),
         chips: new Set(xs("#hearing-list .ci-status-col")).size,

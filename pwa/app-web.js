@@ -2937,7 +2937,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
       tick.innerHTML = icon("check", { size: 15, stroke: 2.5 });
       tick.title = "Done: marked green in the sheet";
       tick.setAttribute("aria-label", "Done");
-      b.querySelector(".ci-case").before(tick);
+      b.querySelector(".ci-title").before(tick);
     }
     // The sticky note (the owner, 2026-11-19): on every row, outlined where
     // there is no note, filled in where there is; a click opens the note under

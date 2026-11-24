@@ -911,3 +911,17 @@ that looks stopped (`stalled`) shows it again, as do finished and ran. The
 running pill never carried a LEAKS or .LEAK word, so nothing else changed.
 `test-case-folders.mjs`.
 
+### The motion tag: always under the name, whole where it fits (2026-11-24)
+
+The owner: "many of the motion types are getting cut off when they actually
+have more room", then "for cases with longer names, the motion type gets sent
+down below the case name. Lets just standardize that for everyone." The cut
+was `.ci-motion`'s `max-width: 260px`, which shortened "Motion for Summary
+Judgment or in the Alternative Summary Adjudication" (424px) even on a 1,365px
+line; it is now `max-width: 100%`, so the tag shortens only where the name
+column itself is narrower. `.ci-title` is a column (`flex-direction: column`):
+the name, then the motion on its own line, on every row. The done ✓ moved out
+of `.ci-title` to stand before it in `.ri-name`, so it stays beside the name.
+`test-hearing-sheet.mjs` 8 checks the tag is under the name, aligned with it,
+and whole.
+

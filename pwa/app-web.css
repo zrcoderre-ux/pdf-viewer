@@ -844,10 +844,14 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .hearing-item .ci-where:empty { display: none; }
 
 /* The motion, a tag on the name's line, or under the name where the line
-   has no room for both. */
-.home-app .ci-title { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px; }
-.home-app .ci-title .ci-case { flex: 0 1 auto; }
-.ci-motion { flex: 0 1 auto; min-width: 0; max-width: 260px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--c-border); background: var(--c-accent-soft); color: var(--c-text); font-size: var(--fs-label, 11.5px); font-weight: 650; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+   has no room for both; cut short only where even its own line is too narrow
+   (the owner, 2026-11-24: "many of the motion types are getting cut off when
+   they actually have more room": a 260px cap had cut them). */
+/* The motion always on its own line under the name (the owner, 2026-11-24:
+   "Lets just standardize that for everyone"). */
+.home-app .ci-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.home-app .ci-title .ci-case { flex: none; max-width: 100%; }
+.ci-motion { flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--c-border); background: var(--c-accent-soft); color: var(--c-text); font-size: var(--fs-label, 11.5px); font-weight: 650; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* The folder's status and the Claude run as wide as their widest row
    (fitColumns), each still one column. */
@@ -907,7 +911,7 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .hearings-summary .hs-pill.active:not(.hs-all) { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
 .home-app .hearings-summary .hs-pill:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 .home-app .hearings-summary > span { margin-left: 6px; }
-.home-app .ci-title .ci-done-mark { margin: 0 -4px 0 0; }
+.home-app .hearing-item .ri-name > .ci-done-mark { align-self: flex-start; margin: 2px 6px 0 0; }
 
 /* ==========================================================================
    One design system (the owner, 2026-11-24: "make it look more like a
