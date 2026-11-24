@@ -164,14 +164,14 @@ async function run() {
 
     console.log("1. the name in the top bar, in the real names");
     check("the export's name, its pseudonyms put back", await title(page), "Corwin Ashdale Decl");
-    check("the tab's title too", await page.title(), "Corwin Ashdale Decl.txt — Text Reader");
+    check("the tab's title names the case folder (paintWindowTitle)", await page.title(), "Case Rename — Text Reader");
     check("the Documents list too", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Corwin Ashdale Decl"]);
     truthy("the status bar too", /^Corwin Ashdale Decl\.txt · /.test(await page.evaluate(() => document.getElementById("st-file").textContent)));
     truthy("its PDF is matched", await page.evaluate(() => !document.getElementById("pdf-tab-btn").disabled));
     const fakes = (on) => page.evaluate((on) => { const t = document.getElementById("fakes-toggle"); if (t.checked !== on) { t.checked = on; t.dispatchEvent(new Event("change")); } }, on);
     await fakes(true);
     check("Show fakes on: the bar in the pseudonyms", await title(page), "Tobias Wrenfield Decl");
-    check("…the tab's title", await page.title(), "Tobias Wrenfield Decl.txt — Text Reader");
+    check("…the tab's title still the case folder", await page.title(), "Case Rename — Text Reader");
     check("…the Documents list", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Tobias Wrenfield Decl"]);
     await fakes(false);
     check("…and off again, the real names", await title(page), "Corwin Ashdale Decl");
@@ -205,7 +205,7 @@ async function run() {
     await rename(page, "Tobias Wrenfield Reply Decl");
     check("both renamed", await names(page), { pdfs: ["Corwin Ashdale Reply Decl.pdf"], txt: ["B Letter.txt", "Tobias Wrenfield Reply Decl.txt"] });
     check("the bar shows the new name", await title(page), "Corwin Ashdale Reply Decl");
-    check("the tab's title too", await page.title(), "Corwin Ashdale Reply Decl.txt — Text Reader");
+    check("the tab's title still the case folder", await page.title(), "Case Rename — Text Reader");
     truthy("…and its PDF is still its PDF", await page.evaluate(() => !document.getElementById("pdf-tab-btn").disabled));
     check("the Documents list has it", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Corwin Ashdale Reply Decl"]);
 

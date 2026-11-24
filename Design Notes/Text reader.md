@@ -152,6 +152,26 @@ file (`printTitle`). Tests: `test-rename-doc.mjs` (case 1: the titles real,
 Show fakes, the screenshot in the pseudonyms; 4a: the field left as shown
 renames nothing).
 
+**The window's title names the case folder** (`paintWindowTitle`,
+`windowTitleName`; owner, 2026-11-24: "PDF+ displays Complaint.txt as the
+document regardless of which document in the case folder it is actually on.
+I would prefer it to display the case folder name. This includes in the
+thumbnail that I get when I hover over the PDF+ icon in the tool bar.") With
+a case folder open, `document.title` is `<folder> — Text Reader` whatever
+document is on screen, so the shell's tab (`cleanTitle`), the desktop window
+(`trackWindow`, `<folder> — PDF+`) and Windows' taskbar preview, which
+captions itself from the window title, all name the case. The title had
+tracked the head of the reel and only sometimes the document read into, so
+it read as the first document's name. The document being read is still named
+where it belongs: the top bar's name (the rename control), the status bar,
+the Documents list. A Text Files folder opened on its own (its name says
+nothing) and a lone document title the window by the document, as before.
+A print still takes the file's name for the length of the print
+(`printTitle`) and paints the title again after it. A screenshot fakes the
+folder name in the shell's tab with the rest of the chrome (`swapChrome`).
+Tests: `test-window-title.mjs`; `test-rename-doc.mjs` case 1 now expects the
+folder in the title.
+
 **📷 Screenshot** leaves the room like a print, so it is taken in the
 pseudonyms whichever way Show fakes sits (`fakesForShot`, which answers the
 function that puts the screen back). On the pages within a screen of the

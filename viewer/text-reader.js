@@ -968,6 +968,7 @@ window.addEventListener("afterprint", () => {
     if (titleBeforePrint.had) { try { window.top.document.title = titleBeforePrint.top; } catch { /* gone */ } }
     titleBeforePrint = null;
   }
+  paintWindowTitle(); // …and anything that moved while it printed (a document scrolled into, a folder read)
 });
 
 // ── screenshot ───────────────────────────────────────────────────────────────
@@ -3295,7 +3296,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // never remembered as a case folder (rememberDir), and nothing that belongs
   // to the case is written into it (textFolderOpen).
   const text = looksLikeTextFiles(h, found);
-  if (dirHandle === h) folderIsText = text;
+  if (dirHandle === h) { folderIsText = text; paintWindowTitle(); }
   if (rec && rec.role !== (text ? "text" : "case")) await dirIdFor(h, () => (text ? "text" : "case"));
   // Home's Case folders list in the app (pwa/app-web.js) lists every case
   // folder a reader tab attached, however it came to it.
@@ -4106,13 +4107,37 @@ function paintDocTitle() {
   docTitleEl.title = shownDocName(m.name) + " — " + (why ? "not renamed here: " + why : "click to rename it, and its PDF with it");
 }
 /**
+ * THE WINDOW'S TITLE NAMES THE CASE. With a case folder open the reader's
+ * title is the folder's name, whichever of its documents is being read; the
+ * owner (2026-11-24): "PDF+ displays Complaint.txt as the document regardless
+ * of which document in the case folder it is actually on. I would prefer it
+ * to display the case folder name. This includes in the thumbnail that I get
+ * when I hover over the PDF+ icon in the tool bar." The app's tab, its window
+ * and Windows' taskbar preview all take this title (pwa/app-web.js
+ * watchTitle, desktop/main.js trackWindow). The document being read is still
+ * named in the reader's own title line (paintDocTitle) and the status bar. A
+ * Text Files folder is not the case folder, and its name says nothing, so a
+ * document read from one, or alone, titles the window itself. A print is
+ * titled by the file all the same (printTitle).
+ */
+function windowTitleName() {
+  if (dirHandle && folderName && !textFolderOpen()) return folderName;
+  const m = reelCurrent();
+  const open = (m && m.name) || fileName;
+  return open ? shownDocName(open) : "";
+}
+function paintWindowTitle() {
+  if (titleBeforePrint) return; // a print is under way: its title stands until it ends
+  const t = windowTitleName();
+  if (t) document.title = t + " — Text Reader";
+}
+/**
  * Every place a document's name is shown, painted again: the key has come or
  * changed, or Show fakes has been turned (shownDocName). Nothing is rebuilt.
  */
 function paintDocNames() {
   const m = reelCurrent();
-  const open = (m && m.name) || fileName;
-  if (open) document.title = shownDocName(open) + " — Text Reader";
+  paintWindowTitle();
   renderReelState();
   for (const li of docsList.children) {
     const t = li.firstChild;
@@ -4825,7 +4850,7 @@ function openText(text, name, handle, built, { stash = null, d = null, base = nu
   clearHistory();
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
-  document.title = shownDocName(name) + " — Text Reader";
+  paintWindowTitle();
   docSeq++;      // …whose own reading of what stands in its clear has yet to be made
   leakStep = -1; // a new document, a new walk through what stands in its clear
   answered = 0;
@@ -5020,6 +5045,7 @@ async function letGoOfFolder({ forget = true } = {}) {
   folderDocs = [];
   folderPdfs = [];
   flagsFor = null;
+  paintWindowTitle();
   // The document stays, on its own, under the key that stays: its spots are
   // kept as a lone document's from here, as they were, and it saves as one
   // (saveDocument) — whether it stays because the reel was one document or
@@ -20960,7 +20986,7 @@ function reelSyncCurrent() {
   fileName = now.name;
   fileHandle = now.handle;
   spots = now.spots;
-  document.title = shownDocName(now.name) + " — Text Reader";
+  paintWindowTitle();
   renderSpots();
   markDocList();
   renderReelState();
