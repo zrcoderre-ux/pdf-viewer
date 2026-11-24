@@ -13,17 +13,19 @@
   --tools-rail-width: 200px;         /* expanded */
   --tools-rail-collapsed: 46px;      /* icon-only */
   --side-rail-width: 44px;          /* the panels' rail, right */
-  --chrome: #323639;
-  --chrome-2: #2a2d30;
-  --canvas: #525659;
-  --btn: #4a4d50;
-  --btn-border: #5a5d60;
-  --btn-hover: #5a5d60;
-  --text: #f1f1f1;
-  --text-muted: #b9bcc0;
-  --border: #1a1a1a;
-  --inset: #202326;
-  --accent: #1a73e8;
+  /* The shell's and the PDF viewer's palette (pwa/app-web.css, viewer.css),
+     so a reader tab reads as the same product as Home and a PDF tab. */
+  --chrome: #1c1f24;
+  --chrome-2: #16181c;
+  --canvas: #2a2d33;
+  --btn: #2b3037;
+  --btn-border: #3a4049;
+  --btn-hover: #353b44;
+  --text: #e7e9ec;
+  --text-muted: #aab1bb;
+  --border: #0f1114;
+  --inset: #121418;
+  --accent: #3f6fc9;
   /* The two "attention" text colours, as TOKENS rather than as one hex used
      everywhere. They were a fixed amber and a fixed salmon, picked against the
      dark chrome and then worn unchanged on the light one — where pale amber on
@@ -46,16 +48,17 @@
   --gutter-w: 2.6em;         /* the numbered margin */
 }
 :root[data-theme="light"] {
-  --chrome: #f3f4f6;
-  --chrome-2: #f7f8fa;
-  --canvas: #c9cccf;
-  --btn: #e8eaed;
-  --btn-border: #c4c7cb;
-  --btn-hover: #dbdee2;
-  --text: #1f2328;
-  --text-muted: #5a5f66;
-  --border: #d2d5d9;
+  --chrome: #f8f9fb;
+  --chrome-2: #ffffff;
+  --canvas: #d5d9df;
+  --btn: #ffffff;
+  --btn-border: #d3d8de;
+  --btn-hover: #f2f4f7;
+  --text: #1b1f24;
+  --text-muted: #555e69;
+  --border: #e1e4e8;
   --inset: #ffffff;
+  --accent: #2b59b5;
   /* Dark amber and dark rust: the same two signals, legible on a light bar —
      7.8:1 and 7.5:1 against it, where the amber they replace was 1.3:1. */
   --note: #6f4200;
@@ -66,8 +69,9 @@ html, body { margin: 0; height: 100%; }
 body {
   background: var(--canvas);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 13px;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
