@@ -258,6 +258,14 @@ check("timely only if served personally", briefingChips({ kind: "motion", motion
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
 check("an OSC with only Does left is amber, not red", briefingChips({ kind: "osc", osc: { text: "ⓘ Only Does not dismissed: Does 1 through 20", state: "note" } }).map((c) => [c.label, c.state, c.mark, c.title]), [["Defaults", "personal", "!", "ⓘ Only Does not dismissed: Does 1 through 20"]]);
+{
+  const dcOsc = briefingChips({ kind: "osc", osc: { text: "⚠ Default Not Entered", state: "warn" }, defaultConflict: { label: "Motion to Vacate Default", day: "12/14/26", iso: "2026-12-14", caption: "Motion to Set Aside/Vacate Default" } });
+  check("an OSC with a motion to vacate set adds a red Vacate chip, its date under it", dcOsc.map((c) => [c.label, c.state, c.mark, c.due || ""]), [["Defaults", "missing", "!", ""], ["Vacate", "missing", "!", "Set 12/14"]]);
+  check("…its hover names the motion", dcOsc[1].title.includes("Motion to Set Aside/Vacate Default"), true);
+  const dcMot = briefingChips({ kind: "motion", motion: slot("filed"), defaultConflict: { label: "OSC Re: Default Judgment", iso: "2026-12-04", caption: "Order to Show Cause Re: Default Judgment" } });
+  check("the motion to vacate's row names the OSC", dcMot.map((c) => c.label), ["Mot", "OSC DJ"]);
+  check("no conflict, no extra chip", briefingChips({ kind: "motion", motion: slot("filed"), defaultConflict: null }).length, 1);
+}
 check("the file's name", BRIEFING_FILE, "E-Court Briefing Status.json");
 
 console.log("1b2. several motions the same day, as E-Court works them");
@@ -857,6 +865,16 @@ async function browserPart() {
     check("…the briefing in one column down the list, whatever the status beside it", await shell.$$eval("#hearing-list .ci-brief", (bs) => new Set(bs.map((b) => Math.round(b.getBoundingClientRect().left))).size), 1);
     await shell.setViewportSize({ width: 1200, height: 1000 }); await shell.waitForTimeout(300);
     check("…and the summary counts the briefing not filed", /1 with briefing not filed/.test(await shell.textContent("#hearings-summary")), true);
+    // A motion to vacate the default with an OSC Re: Default Judgment set in the same case (E-Court Suite's defaultConflict).
+    await putBriefing([
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed", "", -12), opp: st("filed", "", -6), reply: st("missing", "Not Filed"), defaultConflict: { label: "OSC Re: Default Judgment", day: "", iso: iso(inDays(9)), caption: "Order to Show Cause Re: Default Judgment" }, at: Date.now() },
+      { caseNumber: "24STCV00777", day: iso(inDays(2)), motionType: "MSJ", key: "b", kind: "motion", motion: st("filed"), opp: st("pending", "Not Posted Yet"), reply: null, at: Date.now() },
+    ]);
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-chip").length >= 6, null, { timeout: 15000 });
+    const setWant = (await dueOf(inDays(9))).replace(/^Due/, "Set");
+    check("a default-judgment OSC set in the same case: a red chip after the briefing, its date under it", await acmeRowB.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => [c.querySelector(".cc-label").textContent, c.className.includes("st-missing"), c.querySelector(".cc-due").textContent])).then((l) => l[3]), ["OSC DJ !", true, setWant]);
+    check("…every chip whole in its column", await shell.$$eval("#hearing-list .ci-brief", (bs) => bs.every((b) => { const c = b.getBoundingClientRect(); return [...b.querySelectorAll(".ci-chip")].every((x) => x.getBoundingClientRect().right <= c.right + 0.5); })), true);
+    if (process.env.SHOT_DIR) await shell.screenshot({ path: path.join(process.env.SHOT_DIR, "Home with a default conflict chip.png") });
     // Two motions the same day, on one row as Copy All writes it: a line of chips each, and a badge.
     await putBriefing([
       { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer - without Motion to Strike", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("missing", "Not Filed"), at: Date.now() },
