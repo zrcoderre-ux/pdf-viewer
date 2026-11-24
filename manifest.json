@@ -79,6 +79,7 @@
         "viewer/plain-urls.js",
         "viewer/ocr-store.js",
         "viewer/rotation.js",
+        "viewer/page-ranges.js",
         "viewer/web-shim.js",
         "viewer/theme-boot.js",
         "viewer/text-reader.html",

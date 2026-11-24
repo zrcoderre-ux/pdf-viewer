@@ -17,7 +17,7 @@
 // scope picker means.
 
 import { readFileSync } from "node:fs";
-import { normalizeAngle, pagesInScope, rotatedRunPlacement } from "./viewer/rotation.js";
+import { normalizeAngle, pagesInScope, rangeScope, rotatedRunPlacement } from "./viewer/rotation.js";
 
 let fails = 0;
 
@@ -90,6 +90,15 @@ check("odd pages — the recto side of a duplex scan", pagesInScope("odd", 1, 6)
 check("even pages", pagesInScope("even", 1, 6), [2, 4, 6]);
 check("a page beyond the document rotates nothing", pagesInScope("page", 11, 10), []);
 check("an empty document", pagesInScope("all", 1, 0), []);
+check("a typed range", pagesInScope("range", 1, 12, "3-7"), [3, 4, 5, 6, 7]);
+check("a list of pages and ranges", pagesInScope("range", 1, 12, "1, 4, 9-12"), [1, 4, 9, 10, 11, 12]);
+check("a range ignores the page being read", pagesInScope("range", 8, 12, "2"), [2]);
+check("a range with an en dash and spaces", pagesInScope("range", 1, 12, " 3 – 5 "), [3, 4, 5]);
+check("an empty range turns nothing", pagesInScope("range", 3, 12, ""), []);
+check("a page past the end is reported, not dropped", rangeScope("2, 14", 12), { pages: [2], bad: ["14"] });
+check("a word is reported", rangeScope("3-5 x", 12).bad, ["x"]);
+check("page 0 is reported", rangeScope("0-2", 12).bad, ["0-2"]);
+check("a range in an empty document", rangeScope("1", 0), { pages: [], bad: [] });
 
 console.log("\n--- every page that lays out a pdf.js text layer turns it ---");
 // pdf.js builds the text layer in the page's UNROTATED frame and only stamps

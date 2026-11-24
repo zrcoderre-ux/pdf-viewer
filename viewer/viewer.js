@@ -2378,6 +2378,12 @@ async function renderAllPages() {
   // sideways hold is asked once a frame while the pages land.
   sideways.jump = false;
   holdWhileBuilding(signal);
+  // A rebuild that puts the reader back (a zoom, a rotation: restoreScroll)
+  // holds the column at its old height while the pages are rebuilt, so the
+  // window is not dropped to the top of the document in the moment #pages is
+  // empty, before the page being read is back to be scrolled to.
+  const holdHeight = restoreScroll ? pagesEl.offsetHeight : 0;
+  pagesEl.style.minHeight = holdHeight ? `${holdHeight}px` : "";
   pagesEl.innerHTML = "";
   measurePageWidths();
   totalLinks = 0;
@@ -2401,6 +2407,7 @@ async function renderAllPages() {
     // Landed, abandoned or stopped by a page that failed to load: the hold's
     // frame loop ends and the observer is back.
     if (sideways.building === signal) { sideways.building = null; watchSideways(); }
+    if (holdHeight && !signal.aborted) pagesEl.style.minHeight = "";
   }
   // Every page in place, the column as wide as it will be: held once more.
   // A page being read that fits the room is held at the left edge from here,
@@ -6117,6 +6124,9 @@ async function reloadEditedBytes(out, plan = null, { keepPlace = false } = {}) {
   if (plan) remapOcrPages(plan);
   const pn = keepPlace ? visiblePageNumber() : null;
   const y = keepPlace ? window.scrollY : 0;
+  // Turned pages change height, so the place is the page and how far down it
+  // the window was, put back as that page is rebuilt (rerenderKeepingPlace).
+  const place = keepPlace && plan ? captureScroll() : null;
   resetOrganizeState();
   // The bytes we're about to load already carry whatever rotation was pending,
   // so keeping the view angles would turn every page a second time.
@@ -6128,6 +6138,7 @@ async function reloadEditedBytes(out, plan = null, { keepPlace = false } = {}) {
   // working on the plain bytes, so the security survives the reload.
   const security = docSecurity;
   const src = sourceBytes;
+  restoreScroll = place;
   await renderBytes(out.slice(0));
   if (security && !docSecurity) docSecurity = security;
   if (src && !editingAllowed) sourceBytes = src;
@@ -6135,8 +6146,10 @@ async function reloadEditedBytes(out, plan = null, { keepPlace = false } = {}) {
   // Same pages, same sizes: back to the same spot. Turned pages change
   // height, so then it is back to the same page.
   if (keepPlace && pn) {
-    if (plan) scrollToPage(pn, { smooth: false });
-    else window.scrollTo(0, y);
+    if (plan) {
+      if (!place || restoreScroll === place) scrollToPage(pn, { smooth: false });
+      restoreScroll = null;
+    } else window.scrollTo(0, y);
   }
   if (thumbnailPanelEl.classList.contains("open")) refreshOpenPanel();
 }
@@ -6858,16 +6871,30 @@ async function applyRotationToBytes(bytes, deltas) {
 // Re-draw every page at the current angles, then put the reader back on the
 // page they were reading — a rotated page changes height, so the old scroll
 // offset would land somewhere else in the document.
+//
+// The place is put back the moment the page being read is rebuilt, as a zoom
+// does (restoreScroll), not once the whole render is over: emptying #pages
+// drops the window to the top of the document, and the render goes on to read
+// every page's text (and OCR a scan's) before it returns, so the old
+// scrollToPage at the end left the reader at page 1 for all that time and
+// then put them at the top of their page rather than where they were on it
+// (the owner, 2026-11-24: "when I use the page rotate button on a single
+// page, it moves me back up to the top of the document"). The end still
+// catches a render that never rebuilt that page (aborted by another).
 async function rerenderKeepingPlace() {
   if (!pdfDoc) return;
   const pn = visiblePageNumber();
+  restoreScroll = captureScroll();
   await renderAllPages();
   if (!organizeMode && thumbnailPanelEl.classList.contains("open")) {
     thumbsRendered = false;
     panelPagesEl.innerHTML = "";
     await renderThumbnails();
   }
-  scrollToPage(pn, { smooth: false });
+  if (restoreScroll && restoreScroll.pn === pn) {
+    restoreScroll = null;
+    scrollToPage(pn, { smooth: false });
+  }
   updatePageIndicator();
 }
 

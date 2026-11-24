@@ -331,7 +331,9 @@
       <option value="all">All pages</option>
       <option value="odd">Odd pages</option>
       <option value="even">Even pages</option>
+      <option value="range">Pages…</option>
     </select>
+    <input id="rot-range" type="text" placeholder="e.g. 3-7, 10" aria-label="Pages to rotate" title="Pages to rotate: 3-7, or 1, 4, 9-12 (Enter turns them clockwise, Shift+Enter back)" autocomplete="off" spellcheck="false" hidden>
     <button id="rot-left" class="icon-btn sm" title="Rotate counter-clockwise (Shift+R)" aria-label="Rotate counter-clockwise"><i data-icon="rotate-ccw" data-icon-size="16"></i></button>
     <button id="rot-right" class="icon-btn sm" title="Rotate clockwise (R)" aria-label="Rotate clockwise"><i data-icon="rotate-cw" data-icon-size="16"></i></button>
     <span id="rot-state" class="rotate-bar-state fb-state">No rotation.</span>

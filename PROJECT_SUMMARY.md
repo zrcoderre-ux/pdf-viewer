@@ -202,6 +202,7 @@ test-toa-position.mjs                Node-runnable TOA panel position-clamp test
 test-bare-rule.mjs                   Node-runnable bare-rule + rule-set carry-over tests
 test-page-plan.mjs                   Node-runnable: the page-plan writer keeps the document's bookmarks, page labels and links through a rotation, a reorder, a deletion and a page listed twice
 test-page-rotation.mjs               Node-runnable page-rotation geometry + scope tests, text layers turned in both pages
+test-rotate-range.mjs                Browser: the rotate tool's Pages… range, and the reader kept on their page through a rotate
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
 test-lead-in-names.mjs               Node-runnable party names opening with State / California / Court, writ real-party short names
@@ -274,6 +275,7 @@ viewer/web-pdf.js                    A link's bytes checked for a PDF; SharePoin
 viewer/plain-urls.js                 Web addresses written out in a page's text linked where the PDF has no link (test-plain-urls.mjs)
 viewer/autoscroll.js                 Auto-scroll: ppm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
+viewer/page-ranges.js                Typed page ranges ("3-7, 10"), read and written back: the rotate tool and the text reader's page swap (pure)
 viewer/ocr-store.js                  Saved OCR: recognized pages in IndexedDB by file hash, kept N days since last use
 viewer/citation-linker.js            Detection + placement + URL resolution
 viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases, saved across reloads
