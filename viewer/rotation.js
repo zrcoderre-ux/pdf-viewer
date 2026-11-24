@@ -16,6 +16,8 @@
 // viewer.js, so this file stays free of the render pipeline (and importable in
 // Node for the geometry tests).
 
+import { parsePageRanges } from "./page-ranges.js";
+
 // Clockwise degrees, always one of 0/90/180/270.
 export function normalizeAngle(deg) {
   const n = Math.round((Number(deg) || 0) / 90) * 90;
@@ -50,9 +52,11 @@ export function rotatedRunPlacement({ x0, y0, x1, y1, pageW, pageH, angle, scale
 }
 
 // Which pages a scope covers, 1-based. Scopes mirror how scanned exhibits go
-// wrong: one page, the whole document, or every other page from a duplex feed.
-export function pagesInScope(scope, currentPage, numPages) {
+// wrong: one page, the whole document, every other page from a duplex feed,
+// or the pages typed in the Pages… box ("3-7", "1, 4, 9-12"; `rangeText`).
+export function pagesInScope(scope, currentPage, numPages, rangeText = "") {
   const total = Math.max(0, Number(numPages) || 0);
+  if (scope === "range") return rangeScope(rangeText, total).pages;
   const all = [];
   for (let i = 1; i <= total; i++) all.push(i);
   if (scope === "all") return all;
@@ -62,12 +66,22 @@ export function pagesInScope(scope, currentPage, numPages) {
   return pn >= 1 && pn <= total ? [pn] : [];
 }
 
+// The Pages… box read against a document of `numPages` pages: the pages it
+// names and anything it could not use (a word, page 0, a page past the end),
+// which the tool reports rather than turning only the pages it could read.
+export function rangeScope(rangeText, numPages) {
+  const total = Math.max(0, Number(numPages) || 0);
+  if (!total) return { pages: [], bad: [] };
+  return parsePageRanges(rangeText, total);
+}
+
 // ── The tool ────────────────────────────────────────────────────────────────
 
 const noop = () => {};
 
 let barEl = null;
 let scopeEl = null;
+let rangeEl = null;
 let stateEl = null;
 let saveEl = null;
 let toolBtn = null;
@@ -110,6 +124,19 @@ function refreshBar() {
   if (saveEl) saveEl.disabled = busy || !angles.size;
 }
 
+function scope() {
+  return scopeEl ? scopeEl.value : "page";
+}
+
+// The Pages… box shows only while its scope is picked; picking it puts the
+// cursor there, since a range is the next thing to type.
+function syncRangeBox(focus = false) {
+  if (!rangeEl) return;
+  const on = scope() === "range";
+  rangeEl.hidden = !on;
+  if (on && focus) { rangeEl.focus(); rangeEl.select(); }
+}
+
 function setAngle(pageNumber, deg) {
   const a = normalizeAngle(deg);
   if (a === 0) angles.delete(pageNumber);
@@ -120,9 +147,25 @@ function setAngle(pageNumber, deg) {
 // it turned. Repeated clicks accumulate, and a page back at 0° drops out of the
 // map so "any rotation?" stays honest (Save has nothing left to write once
 // everything is upright again).
-async function turn(scope, delta) {
+async function turn(which, delta) {
   if (busy || blocked()) return [];
-  const pages = pagesInScope(scope, currentPage(), numPages());
+  if (which === "range") {
+    // A range that names a page the document lacks, or a word, turns nothing:
+    // turning the pages it could read would leave the others the wrong way up
+    // with no sign they were skipped.
+    const text = rangeEl ? rangeEl.value : "";
+    const { pages, bad } = rangeScope(text, numPages());
+    if (bad.length) {
+      onStatus(`Can't read "${bad.join(", ")}": type pages 1-${numPages()}, e.g. 3-7, 10`);
+      return [];
+    }
+    if (!pages.length) {
+      onStatus("Type the pages to rotate, e.g. 3-7 or 1, 4, 9-12");
+      if (rangeEl) rangeEl.focus();
+      return [];
+    }
+  }
+  const pages = pagesInScope(which, currentPage(), numPages(), rangeEl ? rangeEl.value : "");
   if (!pages.length) return [];
   for (const pn of pages) setAngle(pn, (angles.get(pn) || 0) + delta);
   busy = true;
@@ -182,13 +225,25 @@ function onKeyDown(e) {
   // applies too, so "All pages" + R straightens a whole sideways scan. The key
   // works whether or not the bar is open, so say what happened — a page that
   // turns under a stray keypress should also say how to turn it back.
-  const scope = scopeEl ? scopeEl.value : "page";
-  turn(scope, e.shiftKey ? -90 : 90).then((pages) => {
+  turnAndSay(scope(), e.shiftKey ? -90 : 90, "Shift+R");
+}
+
+function turnAndSay(which, delta, backKey) {
+  return turn(which, delta).then((pages) => {
     if (!pages.length) return;
+    const back = backKey ? ` · ${backKey} turns ${pages.length === 1 ? "it" : "them"} back` : "";
     onStatus(pages.length === 1
-      ? `Page ${pages[0]} rotated ${angles.get(pages[0]) || 0}° · Shift+R turns it back`
-      : `Rotated ${pages.length} pages · Shift+R turns them back`);
+      ? `Page ${pages[0]} rotated ${angles.get(pages[0]) || 0}°${back}`
+      : `Rotated ${pages.length} pages${back}`);
   });
+}
+
+// In the Pages… box, Enter turns the range clockwise and Shift+Enter back,
+// as R and Shift+R do on the page (which can't, while the cursor is here).
+function onRangeKey(e) {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  turnAndSay("range", e.shiftKey ? -90 : 90, e.shiftKey ? "Enter" : "Shift+Enter");
 }
 
 export const pageRotation = {
@@ -213,6 +268,7 @@ export const pageRotation = {
 
     barEl = document.getElementById("rotate-bar");
     scopeEl = document.getElementById("rot-scope");
+    rangeEl = document.getElementById("rot-range");
     stateEl = document.getElementById("rot-state");
     saveEl = document.getElementById("rot-save");
     toolBtn = opts.toolButton || document.getElementById("rotate-pages");
@@ -223,8 +279,11 @@ export const pageRotation = {
     const doneBtn = document.getElementById("rot-done");
 
     if (toolBtn) toolBtn.addEventListener("click", () => setMode(!active));
-    if (left) left.addEventListener("click", () => turn(scopeEl ? scopeEl.value : "page", -90));
-    if (right) right.addEventListener("click", () => turn(scopeEl ? scopeEl.value : "page", 90));
+    if (left) left.addEventListener("click", () => turn(scope(), -90));
+    if (right) right.addEventListener("click", () => turn(scope(), 90));
+    if (scopeEl) scopeEl.addEventListener("change", () => syncRangeBox(true));
+    if (rangeEl) rangeEl.addEventListener("keydown", onRangeKey);
+    syncRangeBox();
     if (resetBtn) resetBtn.addEventListener("click", reset);
     if (saveEl) saveEl.addEventListener("click", save);
     if (doneBtn) doneBtn.addEventListener("click", () => setMode(false));

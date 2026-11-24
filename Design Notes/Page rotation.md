@@ -80,3 +80,27 @@ A bookmark that names its page by NUMBER rather than by reference (`[4 /XYZ
 …]`, which some producers write and pdf.js hands through as it stands) did
 nothing when clicked: `destToPageNum` asked `getPageIndex` of a number. It is
 read now as the 0-based page it counts.
+
+**A page range, and the place kept** (2026-11-24; the owner: "Add the ability
+to use a pagerange with rotate pages", and "when I use the page rotate button
+on a single page, it moves me back up to the top of the document"). The scope
+box's **Pages…** (`range`) shows `#rot-range`; `rangeScope` reads it through
+`parsePageRanges`, now in `viewer/page-ranges.js` so the text reader's page
+swap (re-exported by `pdfsync.js`) and the rotate tool read a range one way. A
+range with anything it cannot use (a word, page 0, a page past the end)
+turns NOTHING and says what it could not read, rather than turning the pages
+it could and leaving the rest silently the wrong way up. Enter / Shift+Enter
+in the box turn it, as R / Shift+R do on the page.
+
+The jump: `rerenderKeepingPlace` called `scrollToPage` only after
+`renderAllPages` returned, and that waits on every page's text (and a scan's
+OCR) and the link pass; emptying `#pages` had dropped the window to page 1 in
+the meantime, and the scroll at the end put the reader at the TOP of their
+page, not where on it they were. It now sets `restoreScroll = captureScroll()`
+as a zoom does, so the place goes back the moment the page being read is
+rebuilt, and `renderAllPages` holds `#pages` at its old height
+(`min-height`) through pass 1a whenever a `restoreScroll` is pending, so the
+window never collapses to the top while the earlier pages are rebuilt (zoom
+gains this too). A Save rotation reload (`reloadEditedBytes` with a plan and
+`keepPlace`) takes the same path. `test-rotate-range.mjs` pins it in the
+browser: three of its checks fail on the old code.

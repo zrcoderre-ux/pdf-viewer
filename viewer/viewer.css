@@ -917,6 +917,8 @@ body.thumbs-open #thumb-resize { display: block; }
 .fb-check { display: inline-flex; align-items: center; gap: 5px; color: var(--c-text-2); font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; }
 #redact-bar select { max-width: 200px; }
 #rotate-bar .rotate-bar-state, #redact-bar .redact-bar-state { min-width: 120px; }
+#rot-range { width: 110px; height: 28px; }
+#rot-range[hidden] { display: none; }
 
 .find-bar {
   left: auto;

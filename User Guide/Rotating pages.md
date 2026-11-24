@@ -6,10 +6,16 @@ document — a web PDF you're only reading included, because turning a page to
 read it shouldn't require downloading it first.
 
 Rotation is a view state until you say otherwise. **↺** and **↻** turn the
-pages in the scope you pick — **This page**, **All pages**, or **Odd** / **Even
-pages**, which is what a duplex scanner's alternating sideways pages need — and
-the bar keeps a running summary of which pages are turned. **Reset** puts
-everything back.
+pages in the scope you pick — **This page**, **All pages**, **Odd** / **Even
+pages**, which is what a duplex scanner's alternating sideways pages need, or
+**Pages…**, which opens a box for the pages you name: `3-7`, or `1, 4, 9-12`
+— and the bar keeps a running summary of which pages are turned. In the
+Pages box **Enter** turns them clockwise and **Shift + Enter** back. A range
+naming a page the document doesn't have turns nothing and says which part it
+couldn't use. **Reset** puts everything back.
+
+Turning pages keeps your place: the page you were reading stays on screen
+where it was, whichever pages turned.
 
 **Save rotation** writes the angles into the PDF, the same way Organize pages
 does. For a document you've downloaded that saves in place (highlights ride
