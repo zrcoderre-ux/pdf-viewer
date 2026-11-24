@@ -1199,3 +1199,12 @@ body { font-variant-numeric: tabular-nums; }
 /* Focus, everywhere on Home: one ring. */
 .home-app button:focus-visible, #tabstrip button:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 .home-app .hearing-tools button, .home-app .hearing-tools .ci-line, .home-app .hearing-tools .ci-word { margin: 0; }
+
+/* A new filing posted on eCourt that the case folder's PDFs do not show
+   (newFilingChip): the accent, apart from the amber Downloads marker. */
+.ci-newfiling-chip {
+  flex: none; align-self: center; display: inline-flex; align-items: center; gap: 4px; height: 19px; margin-left: 8px; padding: 0 6px;
+  border-radius: var(--r-xs, 4px); border: 1px solid var(--c-accent, #2563eb); color: var(--c-accent, #2563eb); background: transparent;
+  font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer;
+}
+.ci-newfiling-chip:hover { background: color-mix(in srgb, var(--c-accent, #2563eb) 12%, transparent); }

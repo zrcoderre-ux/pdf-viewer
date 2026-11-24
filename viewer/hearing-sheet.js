@@ -1224,3 +1224,112 @@ export function briefingChips(entry) {
   }
   return out;
 }
+
+// ---- Download the new filing -------------------------------------------------
+//
+// The owner (2026-11-24): "I want an additional flag when the number of PDFs
+// does not increase following the posting of the Opposition or Reply that
+// were not previously posted on E-Court. The goal being that If I had not
+// previously downloaded them, I would then do so." And: "If no other hearing
+// is pending, it should be even broader, so that I can capture other types of
+// later filings that might affect that hearing."
+//
+// E-Court Suite stamps when it first saw each paper filed (`seen` on a slot)
+// and each rise in the case's docket (`docket.adds`: { at, n, names }), its
+// lib/briefing-news.js. Home keeps each case folder's PDF count over time
+// (`log`: [{ at, count }], oldest first). A posting at `at` wants the folder
+// to hold more PDFs now than it did then.
+
+/** The folder's PDF count at `at`: the last logged at or before it, or null where Home did not know the folder yet. */
+export function pdfCountAt(log, at) {
+  let out = null;
+  for (const e of log || []) { if (e.at <= at) out = e.count; else break; }
+  return out;
+}
+
+/** The log with `count` at `now` added where it changed (or was never logged), trimmed to `keepMs`, the last entry always kept. */
+export function logPdfCount(log, count, now, keepMs = 45 * 86400000, max = 80) {
+  let out = (log || []).slice();
+  if (!out.length || out[out.length - 1].count !== count) out.push({ at: now, count });
+  // The newest entry at or before the cut stays: it is the count at every
+  // moment after the cut until the next.
+  let from = 0;
+  for (let i = 0; i < out.length; i++) if (out[i].at < now - keepMs) from = i;
+  out = out.slice(from);
+  if (out.length > max) out = out.slice(-max);
+  return out;
+}
+
+const NEWS_SLOTS = [["opp", "Opposition", "Opp"], ["reply", "Reply", "Rep"]];
+
+/**
+ * The postings a hearing's briefing entries report since `since` (a moment
+ * already settled or dismissed): [{ at, want, what: [labels], short: [tags] }],
+ * oldest first. An Opposition or Reply each wants a PDF of its own. Where the
+ * hearing is the case's only motion on calendar (`onlyMotion`, E-Court Suite
+ * 3.49.42+), every rise in the docket is a posting too, wanting at least one
+ * PDF however many docket entries it brought (one filing is often a brief, a
+ * declaration and a proof of service).
+ */
+export function newPostings(entries, since = 0) {
+  const byAt = new Map();
+  const at = (t) => { if (!byAt.has(t)) byAt.set(t, { at: t, slots: 0, docs: 0, what: [], short: [] }); return byAt.get(t); };
+  for (const e of entries || []) {
+    if (!e || e.kind === "osc") continue;
+    for (const [k, word, tag] of NEWS_SLOTS) {
+      const s = e[k];
+      if (!s || s.filed == null || typeof s.seen !== "number" || s.seen <= since) continue;
+      const p = at(s.seen);
+      p.slots++;
+      p.what.push(word);
+      p.short.push(tag);
+    }
+    if (e.onlyMotion && e.docket && Array.isArray(e.docket.adds)) {
+      for (const a of e.docket.adds) {
+        if (!a || typeof a.at !== "number" || a.at <= since || !(a.n > 0)) continue;
+        const p = at(a.at);
+        p.docs += a.n;
+        p.names = (a.names || []).filter((x) => typeof x === "string");
+      }
+    }
+  }
+  return [...byAt.values()].sort((a, b) => a.at - b.at).map((p) => {
+    const what = p.what.slice();
+    const short = p.short.slice();
+    // A docket rise beyond the Opposition or Reply it brought: other filings.
+    if (p.docs > p.slots) {
+      const others = (p.names || []).filter((n) => !/^\s*(opposition|reply)\b/i.test(n));
+      what.push(...(others.length ? others : [p.docs - p.slots === 1 ? "a filing" : `${p.docs - p.slots} docket entries`]));
+      if (!short.length) short.push("filing");
+    }
+    return { at: p.at, want: Math.max(p.slots, p.docs ? 1 : 0), what, short };
+  });
+}
+
+/**
+ * The flag, or null: { missing, since, before, now, what, short, settled }.
+ * Each posting wants the folder to hold, now, its count then plus every PDF
+ * that posting and the later ones want. A posting from before Home knew the
+ * folder is left out: the folder was downloaded with it. `settled` is the
+ * moment every posting is answered (null while one is not), which the caller
+ * keeps, so a PDF deleted later does not bring an answered flag back.
+ */
+export function newFilingFlag(entries, log, since = 0) {
+  const posts = newPostings(entries, since).filter((p) => p.want > 0);
+  if (!posts.length || !log || !log.length) return null;
+  const nowCount = log[log.length - 1].count;
+  let worst = null;
+  for (let i = 0; i < posts.length; i++) {
+    const before = pdfCountAt(log, posts[i].at);
+    if (before == null) continue;
+    const want = posts.slice(i).reduce((s, p) => s + p.want, 0);
+    const missing = before + want - nowCount;
+    // On a tie the later posting is the one short: the PDF added between was the earlier one's.
+    if (missing > 0 && (!worst || missing >= worst.missing)) worst = { missing, i, before };
+  }
+  const last = posts[posts.length - 1].at;
+  if (!worst) return { missing: 0, settled: last };
+  const open = posts.slice(worst.i);
+  const short = [...new Set(open.flatMap((p) => p.short))];
+  return { missing: worst.missing, since: open[0].at, before: worst.before, now: nowCount, what: open.flatMap((p) => p.what), short, settled: null };
+}

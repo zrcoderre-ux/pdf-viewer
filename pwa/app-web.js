@@ -1461,6 +1461,9 @@ async function renderCaseFoldersNow() {
   // The calendar E-Court Suite read, written into the sheet; a change made
   // reads the sheet again (the next pass).
   try { if (await syncCalendar(sheet, hv.briefing, now)) caseAgain = true; } catch (e) { console.warn("calendar", e); }
+  // A new Opposition, Reply (or, the only motion on calendar, any filing)
+  // posted since, and the case folder's PDFs not up (newFilingFlags).
+  try { hv.newFiling = await newFilingFlags(hv, now); } catch (e) { console.warn("new filing", e); hv.newFiling = new Map(); }
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
@@ -1719,6 +1722,85 @@ function briefingCell(hg, briefing, now) {
 }
 const briefingMissing = (hg, briefing) => briefingsOf(hg, briefing).some((e) => ["motion", "opp", "reply"].some((k) => e[k] && e[k].note === "Not Filed"));
 
+// ---- Home: download the new filing ------------------------------------------
+//
+// The owner (2026-11-24): a flag "when the number of PDFs does not increase
+// following the posting of the Opposition or Reply that were not previously
+// posted on E-Court", and, where no other hearing is pending, "even broader,
+// so that I can capture other types of later filings that might affect that
+// hearing". E-Court Suite stamps when each paper first appeared
+// (hearing-sheet.js, newPostings); Home keeps each case folder's PDF count
+// over time (`pdfCountLog` in the places store, by folder name) and flags a
+// hearing whose folder holds no more PDFs than it did when the paper
+// appeared (newFilingFlag). Answered (the count went up) or dismissed, the
+// moment is kept (`newFilingSettled`, by hearing), so a PDF deleted later
+// does not bring the flag back.
+let pdfCountLogs = null;  // { folder name: [{ at, count }] }
+let filingSettled = null; // { hearing key: at }
+const PDF_LOG_KEEP_MS = 45 * 86400000;
+const filingKey = (hg) => `${hg.caseNumber || hg.caseName}|${hg.date || hg.dateText || ""}`;
+const pdfCount = (listing) => ((listing && listing.files) || []).filter((f) => /\.pdf$/i.test(f.name)).length;
+async function newFilingFlags(hv, now) {
+  const out = new Map();
+  if (!pdfCountLogs) { try { pdfCountLogs = (await foldersTx("places", "readonly", (st) => st.get("pdfCountLog"))) || {}; } catch { pdfCountLogs = {}; } }
+  if (!filingSettled) { try { filingSettled = (await foldersTx("places", "readonly", (st) => st.get("newFilingSettled"))) || {}; } catch { filingSettled = {}; } }
+  briefRows = (hv.all || []).filter((h) => h.mark !== "off");
+  let logsMoved = false, settledMoved = false;
+  const logged = new Set();
+  for (const it of hv.items || []) {
+    const { hg, r } = it;
+    if (!r || r.locked || !r.listing) continue;
+    if (!logged.has(r.name)) {
+      logged.add(r.name);
+      const was = pdfCountLogs[r.name] || [];
+      const next = hearingLib.logPdfCount(was, pdfCount(r.listing), now, PDF_LOG_KEEP_MS);
+      if (next.length !== was.length || (next[next.length - 1] || {}).at !== (was[was.length - 1] || {}).at) { pdfCountLogs[r.name] = next; logsMoved = true; }
+    }
+    if (hg.mark) continue;
+    const key = filingKey(hg);
+    const flag = hearingLib.newFilingFlag(briefingsOf(hg, hv.briefing), pdfCountLogs[r.name], filingSettled[key] || 0);
+    if (!flag) continue;
+    if (flag.settled) { filingSettled[key] = flag.settled; settledMoved = true; continue; }
+    out.set(it, flag);
+  }
+  if (logsMoved) {
+    for (const [k, log] of Object.entries(pdfCountLogs)) if (!log.length || now - log[log.length - 1].at > PDF_LOG_KEEP_MS) delete pdfCountLogs[k];
+    try { await foldersTx("places", "readwrite", (st) => st.put(pdfCountLogs, "pdfCountLog")); } catch { /* kept for this session only */ }
+  }
+  if (settledMoved) await saveFilingSettled(now);
+  return out;
+}
+async function saveFilingSettled(now) {
+  for (const [k, at] of Object.entries(filingSettled || {})) if (now - at > PDF_LOG_KEEP_MS) delete filingSettled[k];
+  try { await foldersTx("places", "readwrite", (st) => st.put(filingSettled, "newFilingSettled")); } catch { /* kept for this session only */ }
+}
+/** The flag on a hearing's name line: what was posted, the PDFs then and now; a click dismisses it. */
+function newFilingChip(hg, flag, now) {
+  const chip = document.createElement("span");
+  chip.className = "ci-newfiling-chip";
+  chip.setAttribute("role", "button");
+  chip.innerHTML = icon("download", { size: 12, stroke: 2.4 });
+  const words = document.createElement("span");
+  words.textContent = "New " + flag.short.join(", ");
+  chip.appendChild(words);
+  const list = flag.what.slice(0, 8);
+  chip.title = `Posted on eCourt since ${caseLib.whenText(flag.since, now)}:\n` + list.map((w) => "• " + w).join("\n")
+    + (flag.what.length > list.length ? `\n• …and ${flag.what.length - list.length} more` : "")
+    + `\n\nThe case folder held ${flag.before} PDF${flag.before === 1 ? "" : "s"} then and holds ${flag.now} now: ${flag.missing === 1 ? "one" : flag.missing} short. Download ${flag.missing === 1 ? "it" : "them"} into the case folder and this clears.`
+    + "\nClick to dismiss (already have it).";
+  chip.setAttribute("aria-label", "New filing to download: " + flag.what.join(", "));
+  chip.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    filingSettled[filingKey(hg)] = Date.now();
+    await saveFilingSettled(Date.now());
+    chip.remove();
+    hearingsShown = "";
+    renderCaseFolders();
+  });
+  return chip;
+}
+
 // Refresh from eCourt: E-Court Suite reads the next ten court days at once
 // (its service worker, "The background refresh"). Home cannot reach eCourt,
 // so it opens an eCourt page the extension knows (REFRESH_URL) in Chrome; the
@@ -1971,7 +2053,7 @@ let hearingsAll = false; // "Show off calendar"
 let hearingsPast = false;
 const PAST_DAYS = 60;
 let hearingsShown = "";
-// The summary pill the list is filtered by ("" none): "notdl", "unbriefed", "claude", "downloaded", "done".
+// The summary pill the list is filtered by ("" none): "notdl", "unbriefed", "newfiling", "claude", "downloaded", "done".
 let hearingFilter = "";
 let downloadsIndexSeen = null; // { at, name, places }
 
@@ -2693,9 +2775,9 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     hv.runs ? hv.runs.key : "", Math.floor(now / 120000),
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
     Math.floor(now / 600000), canAskClaude() ? "claude" : "", hearingFilter,
-    ...items.map(({ hg, place, r, controls, inDl }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hearingLib.ecourtUrlOf(hg), hg.submitted, hg.submittedText,
+    ...items.map((it) => { const { hg, place, r, controls, inDl } = it; return [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hearingLib.ecourtUrlOf(hg), hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
-      controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
+      controls ? folderControlsSig(r, line) : "", (() => { const f = hv.newFiling && hv.newFiling.get(it); return f ? [f.missing, f.since, f.now, f.what.join("/")].join(":") : ""; })()].join("|"); })].join("\n");
   if (sig === hearingsShown) return;
   hearingsShown = sig;
 
@@ -2730,6 +2812,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   const counts = {
     notdl: notDl,
     unbriefed: open.filter((h) => briefingMissing(h, hv.briefing)).length,
+    newfiling: hv.newFiling ? hv.newFiling.size : 0,
     claude: going.length,
     downloaded,
     done: doneCount,
@@ -2751,6 +2834,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     };
     if (notDl) pill(`${notDl} not downloaded`, "notdl", "hs-warn");
     if (counts.unbriefed) pill(`${counts.unbriefed} with briefing not filed`, "unbriefed", "hs-warn");
+    if (counts.newfiling) pill(`${counts.newfiling} with a new filing to download`, "newfiling", "hs-warn", "An Opposition or Reply (or, where it is the only motion on calendar, any filing) posted on eCourt since, and the case folder holds no more PDFs than it did then.");
     // The Claude runs going, the ones on no hearing of the list included.
     // Only runs moving now (isGoingNow): not a failed or paused one, nor one
     // left days ago still saying "running".
@@ -2821,6 +2905,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     downloaded: (it) => !it.hg.mark && isDl(it),
     done: (it) => it.hg.mark === "done",
     unbriefed: (it) => !it.hg.mark && briefingMissing(it.hg, hv.briefing),
+    newfiling: (it) => !!(hv.newFiling && hv.newFiling.get(it)),
     claude: (it) => !!(hv.runs && runsLib && runsLib.runsForHearing(it.hg, hv.runs.runs, it.place ? it.place.name : "").some((r) => runsLib.isGoingNow(r, now))),
   }[hearingFilter];
   const rowItems = filterBy ? items.filter(filterBy) : items;
@@ -2862,7 +2947,8 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   for (const { hg } of rowItems) { const k = hg.date || hg.dateText; dayCounts.set(k, (dayCounts.get(k) || 0) + 1); }
   const today0 = new Date(now).setHours(0, 0, 0, 0);
   let pastHead = false;
-  for (const { hg, place, r, controls, inDl } of rowItems) {
+  for (const it of rowItems) {
+    const { hg, place, r, controls, inDl } = it;
     // The previous hearings (Show previous) under a heading of their own.
     if (!pastHead && hg.date && hg.date < today0) {
       pastHead = true;
@@ -3020,6 +3106,11 @@ async function renderHearings(sheet, hv, dlState, now, line) {
         badge.title = `${set.length} motions set ${hg.date ? new Date(hg.date).toLocaleDateString() : "that day"}, each worked up apart in eCourt:\n` + set.map((e) => "• " + (e.motionType || "motion")).join("\n");
         b.querySelector(".ci-name-line").appendChild(badge);
       }
+    }
+    // A new filing posted on eCourt and not downloaded (newFilingFlags).
+    {
+      const flag = hv.newFiling && hv.newFiling.get(it);
+      if (flag) b.querySelector(".ci-name-line").appendChild(newFilingChip(hg, flag, now));
     }
     // A LEAKS sheet in the case folder: PDF-Linker flagged values to answer.
     if (r && !r.locked && caseLib.showsLeaks(r.status)) b.querySelector(".ci-name-line").appendChild(leaksChip());

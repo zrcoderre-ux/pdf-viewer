@@ -130,7 +130,8 @@ is cut short after that, so nothing is pushed off the edge.
 ## The summary and the days
 
 The summary above the list counts what needs doing first (**not
-downloaded**, **with briefing not filed**, **Claude runs going**), then **to
+downloaded**, **with briefing not filed**, **with a new filing to download**,
+**Claude runs going**), then **to
 work up**, **downloaded** and **done**. Each count is a button: click it to
 list only those hearings, and click it again (or **to work up**) to list them
 all. Each day's heading says how far off it is and how many hearings it holds
@@ -216,6 +217,27 @@ heading asks for a check at once: Chrome opens an eCourt tab, the extension
 checks, and the tab closes. Open the eCourt agenda once after updating, so the
 extension learns your agenda's address. The extension's options page turns the
 hourly check off.
+
+### A new filing to download
+
+With E-Court Suite 3.49.42 or later, a blue **New Opp** (or **New Rep**, or
+**New filing**) tag by the case name means an Opposition or Reply was posted on
+eCourt after the hearing was first checked, and the case folder holds no more
+PDFs now than it did when it appeared: you have probably not downloaded it.
+Download it into the case folder and the tag goes on Home's next look. Where
+the hearing is the case's only motion on calendar, any later filing counts
+(an errata, a supplemental brief, a notice), not only the Opposition and
+Reply; hover the tag for what was posted and the PDF count then and now.
+
+Each Opposition and each Reply wants a PDF of its own, so if both were posted
+and only one PDF was added, the tag stays. Any other filing wants one more PDF
+for each time eCourt was found to have new papers, however many docket entries
+came at once (a brief, its declaration and its proof of service are three).
+Click the tag to dismiss it if you already have the paper. Once answered or
+dismissed it does not come back, even if you later delete a PDF. The summary
+line counts these hearings (**with a new filing to download**). A paper already
+on file the first time the extension checked the hearing never raises the tag,
+and neither does one that came before the case folder was downloaded.
 
 After pulling E-Court Suite, reload the extension. Its native host writes the
 status to **E-Court Briefing Status.json** in Downloads, which Home reads (so

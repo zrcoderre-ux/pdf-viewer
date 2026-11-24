@@ -925,3 +925,55 @@ of `.ci-title` to stand before it in `.ri-name`, so it stays beside the name.
 `test-hearing-sheet.mjs` 8 checks the tag is under the name, aligned with it,
 and whole.
 
+
+### A new filing to download (2026-11-24)
+
+The owner: "I want an additional flag when the number of PDFs does not
+increase following the posting of the Opposition or Reply that were not
+previosly posted on E-Court. The goal being that If I had not previsouly
+downlaoded them, I would then do so." And: "If no other hearing is pending,
+it should be even broader, so that I can capture other types of later filings
+that might affect that hearing."
+
+**When a paper appeared is kept by E-Court Suite**, not Home: Home is not
+always open when the hourly refresh finds a paper, and a count taken when Home
+next opens may already include a download made in between. Its service
+worker's store (`lib/briefing-news.js`, `carryNews`, 3.49.42) stamps a slot's
+`seen` when a report shows it filed where the last report of the same hearing
+did not, and keeps `docket.adds` ({ at, n, names }) for each rise in the case's
+docket count (`computeFiledStatus`' `docket`, with `onlyMotion` from
+`singleUpcomingMotion`). A paper on file at the first report gets no `seen`, so
+upgrading raises nothing.
+
+**The PDF count over time is kept by Home**: `pdfCountLog` in the places store,
+by folder name, a `{ at, count }` each time a hearing's matched folder's count
+of `*.pdf` (top level) changes (`logPdfCount`, 45 days, the newest before the
+cut kept). `pdfCountAt` reads the count at a posting's moment; a posting from
+before Home first logged the folder is left out (the folder was downloaded with
+it).
+
+**The rule** (`newPostings`, `newFilingFlag` in hearing-sheet.js;
+`newFilingFlags` in app-web.js): postings in time order; posting i wants the
+folder to hold, now, its count then plus every PDF posting i and later ones
+want. An Opposition or Reply wants one each (both found in one look want two).
+Where the hearing is the only motion on calendar, each docket rise is a posting
+wanting one PDF however many entries it brought (a brief, a declaration and a
+proof of service are three entries the owner may file as one download), the
+Opposition or Reply it brought counted once. Other hearings pending, only the
+Opposition and Reply count, since another filing may be another motion's. On a
+tie the later posting is named the short one. Answered, the moment is kept
+(`newFilingSettled`, by case number and date), so a PDF deleted later does not
+bring the flag back; a click on the tag settles it too (dismiss: "already have
+it"). Done and off rows are not flagged.
+
+**The tag** (`newFilingChip`, `.ci-newfiling-chip`): blue, on the name's line,
+"New Opp" / "New Rep" / "New Opp, Rep" / "New filing", its hover listing what
+was posted (docket titles where the docket rose) and the PDFs then and now. It
+is apart from the amber Downloads marker, which shows only once a hearing is
+marked done. The summary's **with a new filing to download** filters to them.
+
+Residual: a download made before E-Court Suite first sees the paper (eCourt's
+Documents tab is a case page, which reports at once, so only a paper fetched
+some other way) is counted in the "then", and the flag stands until dismissed.
+Tests: `test-hearing-sheet.mjs` 6b (the rule) and 14d2 (the tag, cleared by a
+PDF, not back after one is removed, the broad case, dismissed by a click).
