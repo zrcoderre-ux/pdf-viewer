@@ -330,6 +330,33 @@ spelling. Test: `test-shot-pictures.mjs` (A to E, red pixels counted in the
 real picture: 0 on each; the code before, 510, 294 and 366 on A to C), and
 `test-redact.mjs` for `pictureRegions`.
 
+**…but a page with no name on either side goes in as it stands**
+(`textPageClean`, `sheetPageIndex`, `shotClean`; 2026-11-24, which narrows the
+paragraph above). The owner, of the covers that paragraph added: "If there are
+no faked words on the text side, and no detected real words on the pdf side,
+it should let me screenshot the pdf side." The unit is the PDF page and the
+text page it stands beside (a pane slot's `data-index`, or the page an inline
+sheet sits in), since that is what the reader matches. The text side is clean
+where its export page, as it stands (its built body serialized with the fakes,
+else `doc.pages[i].lines`), has no stand-in the key reverses (`PK.translate`
+over `rev`), no real value standing unfaked (`egressSwaps`) and no flagged
+value. The PDF side is clean where `pdfNameCovers` read its text layer and
+found nothing. Both clean: `pdfNamesOn` answers null before the pictures,
+fields and OCR-over-shapes rules are asked, and the toast counts the page.
+A sheet whose words were not yet laid, or whose layer is askew or sideways
+(nothing could be read off it), is still left out whole.
+
+A scan has nothing in its text layer, so its PDF side is clean by default;
+what vouches for it is the export page, which PDF-Linker wrote by OCR off the
+same page and scrubbed. So an export page reading `[DID NOT OCR]` (`TD.DID_NOT_OCR`),
+or carrying fewer than `CLEAN_PAGE_MIN_LETTERS` (40) letters, is not taken as
+clean: nobody read that page, and its pictures are covered as before. The cost
+the owner accepted with the rule: a name in a picture that PDF-Linker's OCR
+missed or misread, on a page whose export has no other name, goes into the
+picture. Test: `test-shot-pictures.mjs` F to H (a picture shown on a clean
+page, covered where the export reads `[DID NOT OCR]`, and a name in the PDF's
+own text faked although its export page is clean).
+
 **A page shown ⇄ Raw is a page, not chrome (`shotRaw`).** It was left to
 `swapChrome`, which runs `egressSwaps` one text node at a time, and the raw
 sheet's orange marks split a name into a node a piece: a name wrapped down a
