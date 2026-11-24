@@ -101,8 +101,8 @@ number for the surest match.
 ## A case's buttons
 
 Each row shows only what you want to see for every case at a glance: the case
-number and name, the motion as a tag beside the name (under it when the line
-has no room for both), the sticky note where there is one, the ✓ when done,
+number and name, the motion as a tag on its own line under the name (shortened
+with "…" only when even that line is too narrow; hover for the whole), the sticky note where there is one, the ✓ when done,
 the Downloads icon, the briefing chips, PDF-Linker's status, the case's place
 in PDF-Linker's line and the Claude run. Every other case is shaded a little
 darker, starting again under each day, so a row is easy to follow across.
