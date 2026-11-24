@@ -300,6 +300,7 @@ viewer/federal-codes.js              C.F.R. / U.S.C. / named federal codes, rev.
 viewer/code-tables.js                WL / Lexis URL builders
 desktop/                             PDF+, the desktop app (Electron): main.js, preload.js, shim.js, assemble.mjs (see desktop/README.md)
 test-desktop.mjs                     Electron test (Playwright): PDF+ opening, saving, Recent, a second launch, the bridge, no network, links, a moved tab, OCR under the CSP, the reader's screenshot, the update button, app files from a checkout; skips without them
+test-own-row-spacing.mjs             Node + browser test (Playwright, Chromium): a single-spaced block on pleading paper stands on the PDF's own rows at its size, its margin numbers on the grid (pdfsync.ownRowTops); the browser part skips without them
 pdfjs/build/pdf.mjs                  PDF.js main module (downloaded)
 pdfjs/build/pdf.worker.mjs           PDF.js worker (downloaded)
 Design Notes/                        How the code works and why, one file per area (linked above)

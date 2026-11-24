@@ -24032,7 +24032,7 @@ function applyMatchedLayoutNow() {
       if (slot) matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, gnShift: had.gnShift, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -24041,7 +24041,7 @@ function applyMatchedLayoutNow() {
     let geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     let numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null, inds = null, unread = null, spread = null;
+    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null, inds = null, unread = null, spread = null, ownRowOf = null, gnShift = null;
     // A SCAN (an OCR layer, or a page the run read again): its rows' sizes and
     // places are the OCR's, a line at a time, and are not taken as they come
     // (pdfsync.scanLayout, scanTypeSize).
@@ -24103,7 +24103,7 @@ function applyMatchedLayoutNow() {
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       if (slot) matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, gnShift: had.gnShift, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -24175,6 +24175,14 @@ function applyMatchedLayoutNow() {
       const byWords = geom.scan || !rows || !rows.length ? null : PS.nearRows(bodies, nums, geom, rows);
       const rowOf = geom.scan || !rows || !rows.length ? null
         : PS.numberedRowOf(nums, geom, rows, off.rowOf.map((j, k) => (j != null ? j : byWords[k])), left).map((j, k) => (lines[k].classList.contains("own") ? null : j));
+      // The row each line's WORDS print on, wherever it stands (alignLines,
+      // in order, no window round its number): a single-spaced block drifts
+      // further from its numbers than half a pitch by its foot, and the row
+      // nearest a slot there is the line above's (pdfsync.ownRowTops).
+      if (rowOf) {
+        const map = PS.alignLines(bodies, rows.map((r) => r.text));
+        ownRowOf = map.map((j, k) => (lines[k].classList.contains("own") || j == null ? null : j));
+      }
       // Each line's pieces of the PDF's type (matchItems), the margin's own
       // numbers left out: what its faces are read off (planCells, below), and
       // its size. A LINE'S SIZE IS ITS FIRST PIECE'S, not its row's: a caption
@@ -24421,7 +24429,22 @@ function applyMatchedLayoutNow() {
       return (fixed && fixed[k] && !t.trim()) || RULE_ONLY_RE.test(t) || (!t.trim() && !!lines[k].querySelector(".rb.paren"));
     };
     if (fixed && sizes && tops) {
-      const f = PS.fitRuns(tops, sizes.map((h, k) => (bare(k) ? 0 : h)), fixed, { floor: FIT_FLOOR, spans });
+      const clearAt = sizes.map((h, k) => (bare(k) ? 0 : h));
+      let f = PS.fitRuns(tops, clearAt, fixed, { floor: FIT_FLOOR, spans });
+      // …but a SINGLE-SPACED block the PDF sets at its own leading (a proof
+      // of service's 14 points on 22-point paper) stands on the PDF's rows at
+      // its size, not on its numbers taken down to 0.7 (pdfsync.ownRowTops;
+      // the owner, 2026-11-24: yes to "use the PDF's own row spacing
+      // there"). Its numbers stay on the grid: each moved numbered line's
+      // number is shifted back onto its slot (--gn-shift).
+      if (ownRowOf && rows && f.some((x) => x < 0.999)) {
+        const own = PS.ownRowTops(tops, fixed, clearAt, ownRowOf, rows, f);
+        if (own.moved.some(Boolean)) {
+          gnShift = own.moved.map((m, k) => (m && fixed[k] ? tops[k] - own.tops[k] : 0));
+          tops = own.tops;
+          f = PS.fitRuns(tops, clearAt, fixed, { floor: FIT_FLOOR, spans });
+        }
+      }
       sizes = sizes.map((h, k) => h * f[k]);
     }
     // (A line given its room (`spread`: a picture's words, set to fit beside
@@ -24479,8 +24502,8 @@ function applyMatchedLayoutNow() {
     // caption, a signature block) ends its type well short of the margin.
     const leftAt = bodyX > 0 ? bodyX : rows && rows.length ? PS.bodyLeftOf(rows) : null;
     const bodyR = Math.max(docBodyRight(info) || 0, (rows && PS.bodyRightOf(rows)) || 0, leftAt > 0 ? sz.w - leftAt : 0) || null;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, gnShift, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, gnShift, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // A page the reel has SHED has no lines to lay and stands at the height it
   // was pinned at (shedMember). Its slot used to fall to the pane's width —
@@ -24636,7 +24659,8 @@ function applyMatchedLayoutNow() {
         : p.lefts && p.lefts[k] != null ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null;
       const want = top == null ? "" :
         (top * p.scale) + "|" + (lineLeft == null ? "" : lineLeft) + "|" +
-        (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale) + "|" + (ind == null ? "" : ind);
+        (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale) + "|" + (ind == null ? "" : ind) + "|" +
+        (p.gnShift && p.gnShift[k] ? p.gnShift[k] * p.scale : "");
       if (l.__laid === want) return;
       l.__laid = want;
       // Where the PDF's row at this line's slot starts its text (pdfIndents).
@@ -24644,6 +24668,10 @@ function applyMatchedLayoutNow() {
       if (ind != null) l.style.setProperty("--pdf-ind", ind.toFixed(2) + "px"); else l.style.removeProperty("--pdf-ind");
       if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; return; }
       l.style.top = (top * p.scale) + "px";
+      // A numbered line set on its PDF row (ownRowTops) keeps its number on
+      // the grid: the number is shifted back by what the line moved.
+      if (p.gnShift && p.gnShift[k]) l.style.setProperty("--gn-shift", (p.gnShift[k] * p.scale).toFixed(2) + "px");
+      else l.style.removeProperty("--gn-shift");
       l.style.left = lineLeft == null ? "" : lineLeft + "px";
       l.style.fontSize = (p.sizes[k] * p.scale) + "px";
       l.style.lineHeight = (p.boxes[k] * p.scale) + "px";

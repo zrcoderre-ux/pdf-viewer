@@ -1130,6 +1130,9 @@ body.gutter-off .gutter { color: inherit; font-size: inherit; }
 /* A margin number the OCR missed, put back (readExport): in italics, the
    reader's until a save writes it into the file. */
 .gutter.restored .gn { font-style: italic; }
+/* A numbered line set on its PDF row (a single-spaced block, pdfsync.ownRowTops)
+   keeps its number on the margin's grid. */
+.page-body.numbered .line .gutter .gn { position: relative; top: var(--gn-shift, 0px); }
 
 /* A pseudonym: the real name shown, the fake underneath. Lightly marked, and
    brighter under the pointer, so an unmarked name-shaped word reads as what
