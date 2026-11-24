@@ -92,6 +92,31 @@ export function ecourtUrlOf(h) {
   return isWebLink(h.ecourtUrl) ? h.ecourtUrl : "";
 }
 
+/**
+ * A case's link marked with the case it belongs to, so that E-Court Suite
+ * puts a case's eCourt page and its Claude chat in one Chrome window (the
+ * owner, 2026-11-24: "a claude tab opened in a case would open in the same
+ * window as the ecourt for the same case (and vice versa)"). The mark is the
+ * fragment `#pdfplus-case=<case>`, a link's own fragment kept after `&then=`;
+ * the extension (case-window/background.js) takes it off before the page
+ * loads and restores that fragment. No case: the link as it was.
+ */
+export const CASE_WINDOW_MARK = "pdfplus-case=";
+export function caseWindowKey(h) {
+  if (!h) return "";
+  return String(h.caseNumber || h.caseName || "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+export function caseWindowUrl(url, h) {
+  const key = caseWindowKey(h);
+  if (!key || !isWebLink(url)) return String(url || "");
+  try {
+    const u = new URL(String(url));
+    const own = u.hash.replace(/^#/, "");
+    u.hash = CASE_WINDOW_MARK + encodeURIComponent(key) + (own ? "&then=" + encodeURIComponent(own) : "");
+    return u.href;
+  } catch { return String(url); }
+}
+
 /** Whether a link may be opened from Home: http(s) only. */
 export function isWebLink(url) {
   return /^https?:\/\//i.test(String(url || ""));

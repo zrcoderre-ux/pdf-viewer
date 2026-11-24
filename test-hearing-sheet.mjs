@@ -22,7 +22,7 @@ import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
   hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
-  fillEcourtLinks, ecourtUrlOf, briefingsFor, motionTag,
+  fillEcourtLinks, ecourtUrlOf, briefingsFor, motionTag, caseWindowUrl, caseWindowKey,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -309,6 +309,16 @@ console.log("1c. an eCourt link for a hearing the sheet gives none");
   ]);
   check("…the sheet's own link left as it is", [hs[1].url, hs[2].url], ["", ""]);
   check("no calendar: only another row of the case", [fillEcourtLinks(hs, null), ecourtUrlOf(hs[2])], [1, ""]);
+}
+{
+  // One Chrome window a case: its links carry the case (E-Court Suite reads it).
+  const hg = { caseNumber: " 24stcv00777 ", caseName: "Doe v. Globex" };
+  check("case window: keyed on the case number", caseWindowKey(hg), "24STCV00777");
+  check("…else the case name", caseWindowKey({ caseName: "Doe  v. Globex" }), "DOE V. GLOBEX");
+  check("…marked on the link", caseWindowUrl("https://civil.lacourt.org/ecourt/ecms/case?id=111", hg), "https://civil.lacourt.org/ecourt/ecms/case?id=111#pdfplus-case=24STCV00777");
+  check("…a link's own fragment kept after it", caseWindowUrl("https://claude.ai/chat/abc#x=1", hg), "https://claude.ai/chat/abc#pdfplus-case=24STCV00777&then=x%3D1");
+  check("…no case: the link as it was", caseWindowUrl("https://claude.ai/chat/abc", {}), "https://claude.ai/chat/abc");
+  check("…not a web link: as it was", caseWindowUrl("mailto:a@example.com", hg), "mailto:a@example.com");
 }
 const rAt = new Date(2026, 10, 18, 9, 5).getTime();
 check("the last check, off the file", parseBriefingFile(JSON.stringify({ entries: [], refresh: { at: rAt, state: "done", cases: 12, how: "hourly" } })).refresh.cases, 12);
@@ -598,7 +608,7 @@ async function browserPart() {
     console.log("10. eCourt, and a case folder's buttons on its hearing's row");
     await pick(shell.locator("#hearing-list .hearing-row:nth-of-type(3)"));
     await shell.click("#hearing-list .hearing-row:nth-of-type(3) .ci-ecourt");
-    check("eCourt opens the sheet's link", await shell.evaluate(() => window.__opened), ["https://civil.lacourt.org/ecourt/ecms/case?id=222"]);
+    check("eCourt opens the sheet's link, marked with its case", await shell.evaluate(() => window.__opened), ["https://civil.lacourt.org/ecourt/ecms/case?id=222#pdfplus-case=24STCV00777"]);
     // The owner: a click on a case not downloaded "should let me try to locate the file".
     await shell.evaluate(async () => {
       const top = await navigator.storage.getDirectory();
@@ -916,7 +926,7 @@ async function browserPart() {
     check("a hearing the sheet does not link still has its eCourt button", await fillRow.locator(".hearing-tools .ci-ecourt").count(), 1);
     check("…which says where its link came from", /E-Court Suite read from eCourt's calendar/.test(await fillRow.locator(".hearing-tools .ci-ecourt").getAttribute("title")), true);
     await fillRow.locator(".hearing-tools .ci-ecourt").click();
-    check("…and opens the case's eCourt page", (await shell.evaluate(() => window.__opened)).slice(-1)[0], "https://civil.lacourt.org/ecourt/ecms/case?id=444");
+    check("…and opens the case's eCourt page", (await shell.evaluate(() => window.__opened)).slice(-1)[0], "https://civil.lacourt.org/ecourt/ecms/case?id=444#pdfplus-case=23STCV04444");
     await shell.keyboard.press("Escape");
     // The owner (2026-11-20): "Change the still in download symbol to only show up after I mark the item done".
     check("a case still in Downloads but not done: no marker (it is still being worked)", await acmeRowB.evaluate((r) => [r.classList.contains("in-downloads"), !!r.querySelector(".ci-dl-chip")]), [false, false]);
@@ -998,7 +1008,7 @@ async function browserPart() {
     await shell.keyboard.press("Escape");
     const opened1 = await shell.evaluate(() => window.__opened.length);
     await runCellOf.click();
-    check("a click opens the chat it last worked in", (await shell.evaluate(() => window.__opened)).slice(opened1), ["https://claude.ai/chat/aaa"]);
+    check("a click opens the chat it last worked in", (await shell.evaluate(() => window.__opened)).slice(opened1), ["https://claude.ai/chat/aaa#pdfplus-case=25STCV12345"]);
     check("…and does not select the row", await acmeRowB.evaluate((r) => r.classList.contains("selected")), false);
     await putRuns({ version: 1, written: Date.now(), runs: [
       { id: "r1", name: "25STCV12345 ACME — 11/20/26", caseNumber: "25STCV12345", status: "done", progress: "Finished all 3 steps", step: 3, total: 3, at: Date.now(), finishedAt: new Date().setHours(15, 10, 0, 0),

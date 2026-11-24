@@ -204,6 +204,21 @@ the claude runs that you did for ecourt. New window"); the Claude button's
 marker page (claude.ai's root with a hash) stays a tab, since the Claude
 extension closes it.
 
+One window a case (the owner, 2026-11-24: "a claude tab opened in a case
+would open in the same window as the ecourt for the same case (and vice
+versa)"). Chrome's command line cannot name a window to open in, so both links
+carry their case as a fragment, `#pdfplus-case=<case number>` (the case name
+where there is none; a link's own fragment kept after `&then=`), put on by
+`caseWindowUrl` in `viewer/hearing-sheet.js`, and E-Court Suite places the tab
+(`case-window/background.js` there): it takes the mark off before the page
+loads, and moves the tab into the window it last put that case in, if that
+window is still open, and brings it forward; the window `--new-window` made,
+left empty, closes. No window for the case yet, or it was closed: the tab stays
+in its new window, which becomes the case's. The case -> window map lives in
+the extension's session storage, so it starts empty when Chrome restarts, and
+a window opened before this change is unknown to it. Without E-Court Suite (or
+an older one) every link still opens its own window, the mark left on.
+
 New window and a tab pulled out of the strip use `window.open` with the
 opener kept; `setWindowOpenHandler` allows app URLs as a window like the
 first. Electron shows no dialog for `beforeunload`: the close is simply

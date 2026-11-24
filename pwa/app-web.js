@@ -2348,7 +2348,7 @@ function runCell(hg, placeName, runs, now) {
   if (r.url) {
     cell.setAttribute("role", "button");
     cell.classList.add("link");
-    cell.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); window.open(r.url, "_blank", "noopener"); });
+    cell.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); window.open(hearingLib.caseWindowUrl(r.url, hg), "_blank", "noopener"); });
   }
   return cell;
 }
@@ -2539,7 +2539,9 @@ function ecourtButton(hg) {
 function openEcourt(hg) {
   const url = hearingLib.ecourtUrlOf(hg);
   if (!url) return;
-  window.open(url, "_blank", "noopener");
+  // Marked with its case: E-Court Suite puts it in the window the case's
+  // Claude chat is in, if one is open (hearing-sheet.js caseWindowUrl).
+  window.open(hearingLib.caseWindowUrl(url, hg), "_blank", "noopener");
 }
 
 /**
