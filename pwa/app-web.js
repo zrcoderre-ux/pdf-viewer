@@ -55,6 +55,9 @@ function updateChrome() {
   document.body.classList.toggle("has-tabs", tabs.length > 0);
   document.body.classList.toggle("home-open", showHome && tabs.length > 0);
   homeTab.classList.toggle("active", showHome);
+  // Home's theme and settings buttons sit in the strip while Home is shown.
+  const homeTools = document.getElementById("home-strip-tools");
+  if (homeTools) homeTools.hidden = !showHome;
   // A tab's PDF side by side goes and comes back with its tab.
   for (const t of tabs) if (t.split) t.split.setVisible(!showHome && t.id === activeId);
   if (showHome) { renderRecent(); renderCaseFolders(); }
@@ -1672,7 +1675,10 @@ function briefingCell(hg, briefing, now) {
     const chips = hearingLib.briefingChips(entry);
     // Each chip's due date on a line under it, where any chip has one; a chip
     // without keeps the line blank, so the chips stay one height.
-    const dueLine = chips.some((c) => c.due);
+    // Where every chip is due the same day, the date is said once, after
+    // them (the owner, 2026-11-24).
+    const oneDue = chips.length > 1 && chips[0].due && chips.every((c) => c.due === chips[0].due) ? chips[0].due : "";
+    const dueLine = !oneDue && chips.some((c) => c.due);
     for (const ch of chips) {
       const chip = document.createElement("span");
       chip.className = "ci-chip st-" + ch.state + (dueLine ? " has-due" : "");
@@ -1688,6 +1694,13 @@ function briefingCell(hg, briefing, now) {
       }
       chip.title = (multi && entry.motionType ? entry.motionType + " — " : "") + ch.title + "\n" + asOf;
       group.appendChild(chip);
+    }
+    if (oneDue) {
+      const due = document.createElement("span");
+      due.className = "cc-due-once";
+      due.textContent = oneDue;
+      due.title = `Every paper above is due ${oneDue.replace(/^Due /, "")}`;
+      group.appendChild(due);
     }
     lines.push((multi && entry.motionType ? entry.motionType + ": " : "") + (entry.text || "") + "\n" + asOf);
   }
@@ -1958,6 +1971,8 @@ let hearingsAll = false; // "Show off calendar"
 let hearingsPast = false;
 const PAST_DAYS = 60;
 let hearingsShown = "";
+// The summary pill the list is filtered by ("" none): "notdl", "unbriefed", "claude", "downloaded", "done".
+let hearingFilter = "";
 let downloadsIndexSeen = null; // { at, name, places }
 
 async function sheetHandle() {
@@ -2629,6 +2644,22 @@ async function hearingItems(rows, sheet, dl, dlState, now) {
   return { items, all, open, shownAll, downloaded, pastCount: pastShown.length, matched: new Set(owner.keys()) };
 }
 
+// The folder's status and the Claude run take the room their widest row
+// needs, no more (the owner, 2026-11-24: the case name had been cut to
+// "Doe…" beside columns half empty); each still one column down the list.
+// Measured while the list is on screen; hidden, the CSS defaults stand.
+function fitColumns(listEl) {
+  // Not on screen: drawn again (and measured) on the next look.
+  if (!listEl.isConnected || !listEl.getClientRects().length) { hearingsShown = ""; return; }
+  listEl.classList.add("measuring");
+  const widest = (sel) => Math.max(0, ...[...listEl.querySelectorAll(sel)].map((e) => Math.ceil(e.getBoundingClientRect().width)));
+  const st = widest(".ci-status-col"), run = widest(".ci-run.has");
+  listEl.classList.remove("measuring");
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  if (st) listEl.style.setProperty("--status-w", clamp(st + 6, 110, 290) + "px");
+  if (run) listEl.style.setProperty("--run-w", clamp(run + 2, 96, 210) + "px");
+}
+
 const LOCKED_STATUS = { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" };
 
 async function renderHearings(sheet, hv, dlState, now, line) {
@@ -2646,7 +2677,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     (calLog || []).map((e) => e.id + (e.undone ? "u" : "") + (e.cleared ? "c" : "") + (e.resolved ? "r" : "")).join(","), calState.waiting, calState.why, calState.refused.length,
     hv.runs ? hv.runs.key : "", Math.floor(now / 120000),
     (hearingEdits || []).length, editsError ? 1 : 0, hv.briefing ? hv.briefing.key || (hv.briefing.none ? "none" : "") : "",
-    Math.floor(now / 600000), canAskClaude() ? "claude" : "",
+    Math.floor(now / 600000), canAskClaude() ? "claude" : "", hearingFilter,
     ...items.map(({ hg, place, r, controls, inDl }) => [hg.sheet, hg.row, hg.date, hg.caseName, hg.motion, hg.mark, hg.waiting ? 1 : 0, hg.note, hg.noteWaiting ? 1 : 0, inDl ? 1 : 0, hearingLib.ecourtUrlOf(hg), hg.submitted, hg.submittedText,
       place ? place.kind + ":" + place.name + ":" + (r && r.inTree ? r.chain.join("/") : "") : "", r ? [folderSt(r).text, folderSt(r).tone, folderSt(r).sub || ""].join("/") : "",
       controls ? folderControlsSig(r, line) : ""].join("|"))].join("\n");
@@ -2677,27 +2708,41 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   }
 
   const notDl = open.length - downloaded;
+  // The counts are filters (the owner, 2026-11-24: "Turn them into pills that
+  // filter the list"): a click shows only the hearings it counts, a second
+  // click (or "to work up") shows them all again. What needs doing leads.
+  const going = hv.runs && runsLib ? hv.runs.runs.filter((r) => runsLib.isGoingNow(r, now)) : [];
+  const counts = {
+    notdl: notDl,
+    unbriefed: open.filter((h) => briefingMissing(h, hv.briefing)).length,
+    claude: going.length,
+    downloaded,
+    done: doneCount,
+  };
+  if (hearingFilter && !counts[hearingFilter]) hearingFilter = "";
   sumEl.hidden = !open.length && !doneCount;
   sumEl.textContent = "";
   if (open.length || doneCount) {
-    const add = (text, cls) => { const s = document.createElement("span"); s.textContent = text; if (cls) s.className = cls; sumEl.appendChild(s); };
-    add(`${open.length} to work up`);
-    add(`${downloaded} downloaded`, "hs-ok");
-    if (notDl) add(`${notDl} not downloaded`, "hs-warn");
-    if (doneCount) add(`${doneCount} done`, "hs-ok");
-    const unbriefed = open.filter((h) => briefingMissing(h, hv.briefing)).length;
-    if (unbriefed) add(`${unbriefed} with briefing not filed`, "hs-warn");
+    const pill = (text, key, cls, title) => {
+      const s = document.createElement("button");
+      s.type = "button";
+      s.className = "hs-pill" + (cls ? " " + cls : "") + (key && hearingFilter === key ? " active" : "") + (!key && !hearingFilter ? " active" : "");
+      s.textContent = text;
+      s.setAttribute("aria-pressed", (key ? hearingFilter === key : !hearingFilter) ? "true" : "false");
+      s.title = (title ? title + "\n" : "") + (key ? (hearingFilter === key ? "Click to show every hearing again" : "Click to show only these") : "Every hearing ahead");
+      s.addEventListener("click", () => { hearingFilter = key && hearingFilter !== key ? key : ""; hearingsShown = ""; renderCaseFolders(); });
+      sumEl.appendChild(s);
+      return s;
+    };
+    if (notDl) pill(`${notDl} not downloaded`, "notdl", "hs-warn");
+    if (counts.unbriefed) pill(`${counts.unbriefed} with briefing not filed`, "unbriefed", "hs-warn");
     // The Claude runs going, the ones on no hearing of the list included.
     // Only runs moving now (isGoingNow): not a failed or paused one, nor one
     // left days ago still saying "running".
-    const going = hv.runs && runsLib ? hv.runs.runs.filter((r) => runsLib.isGoingNow(r, now)) : [];
-    if (going.length) {
-      const sp = document.createElement("span");
-      sp.className = "hs-claude";
-      sp.textContent = `${going.length} Claude run${going.length === 1 ? "" : "s"} going`;
-      sp.title = going.map((r) => `${r.name}: ${runsLib.runLine(r, hv.runs.written, now).line}`).join("\n");
-      sumEl.appendChild(sp);
-    }
+    if (going.length) pill(`${going.length} Claude run${going.length === 1 ? "" : "s"} going`, "claude", "hs-claude", going.map((r) => `${r.name}: ${runsLib.runLine(r, hv.runs.written, now).line}`).join("\n"));
+    pill(`${open.length} to work up`, "", "hs-all");
+    if (downloaded) pill(`${downloaded} downloaded`, "downloaded", "hs-ok");
+    if (doneCount) pill(`${doneCount} done`, "done", "hs-ok");
     // How E-Court Suite's last check of the briefing went.
     const rt = hv.briefing && !hv.briefing.none ? hearingLib.refreshText(hv.briefing.refresh, now) : null;
     if (rt) {
@@ -2754,20 +2799,55 @@ async function renderHearings(sheet, hv, dlState, now, line) {
   if (sheet.state === "ok" && !sheet.sheets.length) return empty(`No sheet in ${sheet.name} has a header row with Date and Case Name columns.`);
   if (!items.length) { if (sheet.state === "ok") empty(marked ? "Every upcoming hearing is off calendar." : "No hearings from today on in the sheet."); return; }
 
+  // A summary pill picked: only the hearings it counts.
+  const isDl = ({ place }) => !!place && (place.kind === "folder" || place.kind === "opened");
+  const filterBy = {
+    notdl: (it) => !it.hg.mark && !isDl(it),
+    downloaded: (it) => !it.hg.mark && isDl(it),
+    done: (it) => it.hg.mark === "done",
+    unbriefed: (it) => !it.hg.mark && briefingMissing(it.hg, hv.briefing),
+    claude: (it) => !!(hv.runs && runsLib && runsLib.runsForHearing(it.hg, hv.runs.runs, it.place ? it.place.name : "").some((r) => runsLib.isGoingNow(r, now))),
+  }[hearingFilter];
+  const rowItems = filterBy ? items.filter(filterBy) : items;
+  if (!rowItems.length) {
+    const p = document.createElement("p");
+    p.className = "case-empty with-action";
+    p.textContent = "No hearing on the list matches. ";
+    const go = document.createElement("button");
+    go.className = "case-empty-go";
+    go.textContent = "Show every hearing";
+    go.addEventListener("click", () => { hearingFilter = ""; hearingsShown = ""; renderCaseFolders(); });
+    p.appendChild(go);
+    listEl.appendChild(p);
+    return;
+  }
   // The briefing column takes room only for the chips there are.
-  const chipMost = Math.max(0, ...items.map(({ hg }) => (hv.briefing && !hv.briefing.none && hg.mark !== "off" ? Math.max(0, ...briefingsOf(hg, hv.briefing).map((e) => hearingLib.briefingChips(e).length)) : 0)));
-  const dashes = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.caseNumber && hg.mark !== "done" && hg.mark !== "off" && !briefingsOf(hg, hv.briefing).length);
+  // Its width: a chip with its due date under it 76px, one whose date is said
+  // once after the chips 58px plus the date's 70px.
+  const chipsWide = (e) => {
+    const cs = hearingLib.briefingChips(e);
+    if (!cs.length) return 0;
+    const once = cs.length > 1 && cs[0].due && cs.every((c) => c.due === cs[0].due);
+    return once ? cs.length * 58 + (cs.length - 1) * 5 + 74 : cs.length * 76 + (cs.length - 1) * 5;
+  };
+  const chipMost = Math.max(0, ...rowItems.map(({ hg }) => (hv.briefing && !hv.briefing.none && hg.mark !== "off" ? Math.max(0, ...briefingsOf(hg, hv.briefing).map(chipsWide)) : 0)));
+  const dashes = hv.briefing && !hv.briefing.none && rowItems.some(({ hg }) => hg.caseNumber && hg.mark !== "done" && hg.mark !== "off" && !briefingsOf(hg, hv.briefing).length);
   // A row with more than one motion set that day leads each line of chips with its tag.
-  const multiBrief = hv.briefing && !hv.briefing.none && items.some(({ hg }) => hg.mark !== "off" && briefingsOf(hg, hv.briefing).length > 1);
+  const multiBrief = hv.briefing && !hv.briefing.none && rowItems.some(({ hg }) => hg.mark !== "off" && briefingsOf(hg, hv.briefing).length > 1);
   listEl.classList.toggle("has-multi-brief", !!multiBrief);
   listEl.classList.toggle("has-brief", chipMost > 0 || !!dashes);
   listEl.classList.toggle("has-claude", canAskClaude());
-  listEl.classList.toggle("has-runs", !!(hv.runs && runsLib && items.some(({ hg, place }) => runsLib.runsForHearing(hg, hv.runs.runs, place ? place.name : "").length)));
-  listEl.style.setProperty("--brief-w", (chipMost ? chipMost * 72 + (chipMost - 1) * 4 : 24) + "px");
+  listEl.classList.toggle("has-runs", !!(hv.runs && runsLib && rowItems.some(({ hg, place }) => runsLib.runsForHearing(hg, hv.runs.runs, place ? place.name : "").length)));
+  listEl.style.setProperty("--brief-w", (chipMost || 24) + "px");
   let lastDay = null;
+  // Every other case a shade apart (the owner, 2026-11-24: "a subtle color
+  // shift between cases"), starting again under each day.
+  let altRow = false;
+  const dayCounts = new Map();
+  for (const { hg } of rowItems) { const k = hg.date || hg.dateText; dayCounts.set(k, (dayCounts.get(k) || 0) + 1); }
   const today0 = new Date(now).setHours(0, 0, 0, 0);
   let pastHead = false;
-  for (const { hg, place, r, controls, inDl } of items) {
+  for (const { hg, place, r, controls, inDl } of rowItems) {
     // The previous hearings (Show previous) under a heading of their own.
     if (!pastHead && hg.date && hg.date < today0) {
       pastHead = true;
@@ -2779,10 +2859,31 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const dayKey = hg.date || hg.dateText;
     if (dayKey !== lastDay) {
       lastDay = dayKey;
+      altRow = false;
+      // The day, how far off it is and how many hearings it holds (the owner,
+      // 2026-11-24): "Thu, Nov 26 · in 2 days · 2 hearings"; today and
+      // tomorrow stand out.
       const head = document.createElement("div");
       head.className = "hearing-day";
-      head.textContent = hg.date ? hearingLib.dayText(hg.date, now) : hg.dateText;
-      if (hg.date) head.title = new Date(hg.date).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      const main = document.createElement("span");
+      main.className = "hd-day";
+      main.textContent = hg.date ? hearingLib.dayText(hg.date, now) : hg.dateText;
+      head.appendChild(main);
+      const rel = hg.date ? hearingLib.daysAwayText(hg.date, now) : "";
+      const n = dayCounts.get(dayKey) || 0;
+      for (const t of [rel, n ? `${n} hearing${n === 1 ? "" : "s"}` : ""]) {
+        if (!t) continue;
+        const x = document.createElement("span");
+        x.className = "hd-more";
+        x.textContent = t;
+        head.appendChild(x);
+      }
+      if (hg.date) {
+        const off = hearingLib.daysAway(hg.date, now);
+        if (off === 0) head.classList.add("today");
+        else if (off === 1) head.classList.add("tomorrow");
+        head.title = new Date(hg.date).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      }
       listEl.appendChild(head);
     }
     // The case folder, where there is one: its status in the pill, its name
@@ -2790,10 +2891,13 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     const folder = r ? r.handle : place && (place.kind === "folder" || place.kind === "opened") ? place.handle : null;
     const st = r ? folderSt(r) : null;
     const row = document.createElement("div");
-    row.className = "case-row hearing-row" + (hg.mark ? " mark-" + hg.mark : "");
+    row.className = "case-row hearing-row" + (hg.mark ? " mark-" + hg.mark : "") + (altRow ? " alt" : "");
+    altRow = !altRow;
     const b = document.createElement("button");
     b.className = "recent-item case-item hearing-item" + (folder ? " has-folder" : "");
-    b.innerHTML = `<span class="ri-icon">${icon(folder ? "folder" : "calendar", { size: 17 })}</span><span class="ci-main"><span class="ci-name-line"><span class="ri-name"><span class="ci-num"></span> <span class="ci-case"></span></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    // No folder or calendar icon in front (the owner, 2026-11-24): the pill
+    // says where the case folder stands.
+    b.innerHTML = `<span class="ci-main"><span class="ci-name-line"><span class="ri-name"><span class="ci-num"></span> <span class="ci-title"><span class="ci-case"></span></span></span></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
     // The briefing, then the status, each in a column of fixed width.
     const statusCol = document.createElement("span");
     statusCol.className = "ci-status-col";
@@ -2904,14 +3008,23 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     }
     // A LEAKS sheet in the case folder: PDF-Linker flagged values to answer.
     if (r && !r.locked && r.status && r.status.leaks) b.querySelector(".ci-name-line").appendChild(leaksChip());
+    // The motion as a tag on the name's line (the owner, 2026-11-24), not
+    // grey under it: what is being heard reads with whose case it is.
+    if (hg.motion) {
+      const tag = document.createElement("span");
+      tag.className = "ci-motion";
+      tag.textContent = hg.motion;
+      tag.title = hg.motion;
+      b.querySelector(".ci-title").appendChild(tag);
+    }
 
     const where = [];
-    if (hg.motion) where.push(hg.motion);
     if (hg.caseNumber && !hearingLib.caseNumbersIn(hg.caseName).includes(hg.caseNumber)) where.push(hg.caseNumber);
     const moved = movedOf(hg);
     if (moved && moved.from) where.push("Moved from " + hearingLib.shortDate(calLib.dayAt(moved.from), now));
     if (hg.submitted || hg.submittedText) where.push("Submitted " + (hg.submitted ? hearingLib.shortDate(hg.submitted, now) : hg.submittedText));
-    if (folder) where.push(place.name + (r && r.inTree ? ` (in ${r.chain.length > 1 ? r.chain[r.chain.length - 2] : r.root.name})` : ""));
+    // The case folder's name is on the hover only: the row is that folder.
+    const folderSaid = folder ? place.name + (r && r.inTree ? ` (in ${r.chain.length > 1 ? r.chain[r.chain.length - 2] : r.root.name})` : "") : "";
     if (st && st.sub) where.push(st.sub);
     b.querySelector(".ci-where").textContent = where.join(" · ");
     const pill = document.createElement("span");
@@ -2928,7 +3041,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     if (hg.waiting) pill.classList.add("waiting");
     pill.title = said.text;
     const placeSaid = hearingLib.placeText(place);
-    b.title = (folder ? `Click for this case's buttons; double-click to open ${place.name}, the whole case folder.` : "Click for this case's buttons, Find its folder among them; double-click to look for it at once.")
+    b.title = (folder ? `Case folder: ${folderSaid}\nClick for this case's buttons; double-click to open ${place.name}, the whole case folder.` : "Click for this case's buttons, Find its folder among them; double-click to look for it at once.")
       + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`
       + (hg.waiting ? `\nMarked ${hg.mark === "off" ? "off" : "on"} calendar here; not yet written into ${sheet.name} (open in Excel?).` : "");
     const openIt = async () => {
@@ -2990,6 +3103,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     // The note's panel is in the list only while it is open.
     if (noteEl && !noteEl.hidden) listEl.appendChild(noteEl);
   }
+  fitColumns(listEl);
   if (shownAll.length > HEARING_ROWS_MAX) empty(`And ${shownAll.length - HEARING_ROWS_MAX} more in the sheet.`);
 }
 

@@ -31,6 +31,16 @@
     <button id="open-case-tab" class="strip-btn text" title="Open a whole case folder in ONE reader: the combined file where the run made one, else the first export, with the folder's pseudonym key, PDFs and LEAKS worksheet attached — and every other export listed in its Documents panel, a click away, searched by Find and walked by the leak review without leaving the tab"><i data-icon="folder" data-icon-size="16"></i><span>Case folder</span></button>
     <button id="images-to-pdf" class="strip-btn text" title="Create a PDF from images: photos and scans, one per page"><i data-icon="images" data-icon-size="16"></i><span>PDF from images</span></button>
     <span class="strip-spacer"></span>
+    <span id="home-strip-tools" class="home-strip-tools">
+        <button id="home-theme" class="home-settings home-theme" title="Switch to light mode" aria-label="Switch color theme"><i data-icon="sun" data-icon-size="17"></i></button>
+        <span class="home-settings-box">
+          <button id="home-settings" class="home-settings" title="The hearings sheet and the Downloads folder Home reads" aria-label="Settings" aria-haspopup="menu" aria-expanded="false"><i data-icon="sliders" data-icon-size="17"></i></button>
+          <div id="home-settings-menu" class="home-menu" role="menu" hidden>
+            <button id="hearings-link" class="link-btn" role="menuitem">Link hearings sheet…</button>
+            <button id="case-downloads" class="link-btn" role="menuitem">Link Downloads…</button>
+          </div>
+        </span>
+    </span>
     <button id="new-window" class="strip-btn" title="New window (Ctrl+N). To move a document to a window of its own, pull its tab out of the strip or right-click it." aria-label="New window"><i data-icon="window-plus" data-icon-size="18"></i></button>
   </div>
 
@@ -50,7 +60,7 @@
           <summary>How Home's lists work</summary>
           <div class="home-more-body">
           <p><strong>A whole matter in one pick:</strong> opened from Home, a case folder opens in a window of its own, so Home stays on screen; it opens as <em>one</em> reader — the <strong>Combined Text.txt</strong> where the run made one, else the first export in its <strong>Text Files</strong> folder — with the folder's <strong>pseudonym_key.xlsx</strong>, its PDFs and its <strong>LEAKS.xlsx</strong> already attached. Every other export is listed in that reader's Documents panel, a click away, and Find and the leak review read straight through the folder without leaving the tab. A <strong>.txt</strong> export from PDF-Linker opens in the text reader: real names on screen from the pseudonym key, citations linked, editable. Each PDF opens in its own tab with citation links, comments, OCR and the Table of Authorities.</p>
-          <p><strong>Hearings:</strong> <strong>Link hearings sheet…</strong> (in the settings menu, top right; Open a file, Case folder and PDF from images are in the tab strip) points Home at your Excel sheet of upcoming hearings once (its <strong>Date</strong>, <strong>Motion Type</strong>, <strong>Case Name</strong> and <strong>Date Submitted</strong> columns). Each hearing is matched to its case folder by the case number, in Downloads or among the folders opened here, and says whether it is downloaded; a row filled green (done) carries a ✓, and one filled red (off calendar) is set aside. <strong>eCourt</strong> opens the case name's own link. A hearing whose case folder is found carries that folder: PDF-Linker's status, and its Word, Log to share, Prioritize and Take over buttons; <strong>Case folders</strong> lists only the folders that match no hearing on the list. <strong>✓ Done</strong> fills the hearing's Motion Type and Case Name cells green in the sheet (and a ✓ stands before its name here until it has passed), <strong>Off calendar</strong> fills the same two cells red and sets it aside, and pressed again each takes its colour off (while Excel has the workbook open, the change waits and is written when it closes). Words typed in a case's Date cell are a note: click the <strong>*</strong> after the case name. <strong>Folders</strong>, on the left, holds Downloads and the folders you add with <strong>+ Add</strong> (or several at once, dropped from File Explorer): drag a case's row onto one to move its case folder there, and it stays on its hearing's row until the hearing has passed. Save the sheet in Excel and Home reads it again.</p>
+          <p><strong>Hearings:</strong> <strong>Link hearings sheet…</strong> (in the settings menu, at the right of the tab strip; Open a file, Case folder and PDF from images are in the tab strip) points Home at your Excel sheet of upcoming hearings once (its <strong>Date</strong>, <strong>Motion Type</strong>, <strong>Case Name</strong> and <strong>Date Submitted</strong> columns). Each hearing is matched to its case folder by the case number, in Downloads or among the folders opened here, and says whether it is downloaded; a row filled green (done) carries a ✓, and one filled red (off calendar) is set aside. <strong>eCourt</strong> opens the case name's own link. A hearing whose case folder is found carries that folder: PDF-Linker's status, and its Word, Log to share, Prioritize and Take over buttons; <strong>Case folders</strong> lists only the folders that match no hearing on the list. <strong>✓ Done</strong> fills the hearing's Motion Type and Case Name cells green in the sheet (and a ✓ stands before its name here until it has passed), <strong>Off calendar</strong> fills the same two cells red and sets it aside, and pressed again each takes its colour off (while Excel has the workbook open, the change waits and is written when it closes). Words typed in a case's Date cell are a note: click the sticky note before the case number. <strong>Folders</strong>, on the left, holds Downloads and the folders you add with <strong>+ Add</strong> (or several at once, dropped from File Explorer): drag a case's row onto one to move its case folder there, and it stays on its hearing's row until the hearing has passed. Save the sheet in Excel and Home reads it again.</p>
           <p><strong>PDF-Linker's line:</strong> <strong>Prioritize</strong> (the double up-arrow) on a case whose run is going puts it in line, and ▲ ▼ ✕ move it or take it out. The line is listed first. While a case runs, PDF-Linker gives it the computer's OCR cores ahead of every run behind it, and those runs drop to below-normal CPU priority. They keep working, just slower. A case keeps its place for 24 hours from when it was given, through any re-run, unless you move it or take it out.</p>
           </div>
         </details>
@@ -60,17 +70,13 @@
       <!-- The bar: what Home is, and what it opens. PDF+'s shim names the
            title (.home-hero h1) and adds its version and updates beside
            .home-more, so both stay where it looks for them. -->
+      <!-- Home's name, for screen readers and PDF+'s shim (which names it
+           PDF+); not drawn, since the Home tab says it (the owner,
+           2026-11-24: the bar took 70px of height for a title and two
+           buttons, which are now in the tab strip). -->
       <header class="home-hero home-top">
         <div class="home-logo"><i data-icon="logo" data-icon-size="20"></i></div>
         <h1>PDF Viewer</h1>
-        <button id="home-theme" class="home-settings home-theme" title="Switch to light mode" aria-label="Switch color theme"><i data-icon="sun" data-icon-size="17"></i></button>
-        <span class="home-settings-box">
-          <button id="home-settings" class="home-settings" title="The hearings sheet and the Downloads folder Home reads" aria-label="Settings" aria-haspopup="menu" aria-expanded="false"><i data-icon="sliders" data-icon-size="17"></i></button>
-          <div id="home-settings-menu" class="home-menu" role="menu" hidden>
-            <button id="hearings-link" class="link-btn" role="menuitem">Link hearings sheet…</button>
-            <button id="case-downloads" class="link-btn" role="menuitem">Link Downloads…</button>
-          </div>
-        </span>
       </header>
 
     <div class="home-inner">

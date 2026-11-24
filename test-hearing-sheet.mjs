@@ -21,7 +21,7 @@ import { makeZip } from "./viewer/zip.js";
 import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
-  hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, shortDate, hearingForPlace, nameWords,
+  hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, daysAway, daysAwayText, shortDate, hearingForPlace, nameWords,
   fillEcourtLinks, ecourtUrlOf, briefingsFor, motionTag, caseWindowUrl, caseWindowKey,
 } from "./viewer/hearing-sheet.js";
 
@@ -332,6 +332,7 @@ console.log("6. the list");
 check("upcoming, unmarked, by date", upcoming(hearings, NOW).map((x) => x.row), [3, 5, 10]);
 check("every one from today on", upcoming(hearings, NOW, { all: true }).map((x) => x.row), [3, 4, 5, 6, 7, 10]);
 check("days said", [dayText(day(2026, 11, 18), NOW), dayText(day(2026, 11, 19), NOW), dayText(day(2027, 1, 8), NOW).includes("2027")], ["Today", "Tomorrow", true]);
+check("how far off a day is, for its heading", [daysAwayText(day(2026, 11, 18), NOW), daysAwayText(day(2026, 11, 19), NOW), daysAwayText(day(2026, 11, 20), NOW), daysAwayText(day(2026, 11, 17), NOW), daysAwayText(day(2026, 11, 15), NOW), daysAway(day(2026, 12, 18), NOW)], ["", "", "in 2 days", "yesterday", "3 days ago", 30]);
 check("Date Submitted said short", [shortDate(day(2026, 11, 12), NOW), shortDate(day(2025, 11, 12), NOW)], ["11/12", "11/12/25"]);
 check("a folder's hearing: the next one for its case", hearingForPlace(hearings, { name: "Jane Doe Initech", numbers: ["26STCV09999"] }, NOW).row, 5);
 check("…else the latest past one", hearingForPlace(hearings, { name: "Doe Initech", numbers: ["99STCV99999"] }, NOW).row, 8);
@@ -469,7 +470,7 @@ async function browserPart() {
       name: b.querySelector(".ri-name").textContent, where: b.querySelector(".ci-where").textContent, status: b.querySelector(".ci-status").textContent,
     })));
     // A case's buttons open under it once it is selected (a click on the row).
-    const pick = async (row) => { if (!(await row.evaluate((r) => r.classList.contains("selected")))) await row.locator(".ci-where").click(); await row.locator(".hearing-tools").waitFor({ timeout: 5000 }); };
+    const pick = async (row) => { if (!(await row.evaluate((r) => r.classList.contains("selected")))) await row.locator(".ci-num").click(); await row.locator(".hearing-tools").waitFor({ timeout: 5000 }); };
     let got = await rows();
     check("the hearings from today on, by date, the one off calendar left out", got.map((r) => r.name.slice(0, 11)), ["25STCV12345", "24STCV00777", "26STCV09999", "23STCV04444", "22STCV05555"]);
     check("a case downloaded says what PDF-Linker has done in it; the rest where the case stands", got.map((r) => r.status.replace(/^Finished .*/, "Finished")),
@@ -484,10 +485,30 @@ async function browserPart() {
     await shell.keyboard.press("Escape");
     check("…and Escape closes them", await shell.$$eval("#hearing-list .hearing-tools", (t) => t.length), 0);
     check("…an Order Template Input sheet three days old is no sign of Doe v. Globex", got[1].status, "Not downloaded");
-    check("…a folder in Downloads, by its name", got[0].where, "Demurrer · 25STCV12345 ACME");
-    check("…a folder opened elsewhere, by its Register of Actions", got[2].where, "Motion to Compel · Initech compel");
+    // The owner (2026-11-24): the motion a tag on the name's line, the case folder's name on the hover.
+    const folderOf = (i) => shell.$$eval("#hearing-list .hearing-item", (bs, i) => (bs[i].title.match(/^Case folder: (.*)$/m) || [])[1] || "", i);
+    check("the motion a tag beside the name", await shell.$$eval("#hearing-list .hearing-item", (bs) => bs.map((b) => (b.querySelector(".ci-motion") || {}).textContent)), ["Demurrer", "MSJ", "Motion to Compel", "Motion to Strike", "Demurrer"]);
+    check("…and nothing under the name that the row does not need", [got[0].where, got[2].where], ["", ""]);
+    check("…a folder in Downloads, by its name (on the hover)", await folderOf(0), "25STCV12345 ACME");
+    check("…a folder opened elsewhere, by its Register of Actions", await folderOf(2), "Initech compel");
     check("grouped under their days", await shell.$$eval("#hearing-list .hearing-day", (d) => d.length), 3);
-    check("the summary", await shell.textContent("#hearings-summary"), "4 to work up2 downloaded2 not downloaded1 done");
+    check("the summary: what needs doing first", await shell.$$eval("#hearings-summary .hs-pill", (x) => x.map((e) => e.textContent)), ["2 not downloaded", "4 to work up", "2 downloaded", "1 done"]);
+    // The owner (2026-11-24): "Turn them into pills that filter the list".
+    await shell.click("#hearings-summary .hs-pill:has-text('not downloaded')");
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 2, null, { timeout: 10000 });
+    check("a count clicked: only the hearings it counts", (await rows()).map((r) => r.name.slice(0, 11)), ["24STCV00777", "22STCV05555"]);
+    check("…its pill pressed", await shell.$$eval("#hearings-summary .hs-pill.active", (x) => x.map((e) => e.textContent)), ["2 not downloaded"]);
+    await shell.click("#hearings-summary .hs-pill:has-text('not downloaded')");
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 5, null, { timeout: 10000 });
+    check("…clicked again, every hearing", (await rows()).length, 5);
+    await shell.click("#hearings-summary .hs-pill:has-text('done')");
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 1, null, { timeout: 10000 });
+    await shell.click("#hearings-summary .hs-pill:has-text('to work up')");
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .hearing-item").length === 5, null, { timeout: 10000 });
+    check("…and to work up shows them all", (await rows()).length, 5);
+    // The days: how far off, how many; and every other case a shade apart.
+    check("each day says how far off and how many", await shell.$$eval("#hearing-list .hearing-day", (d) => d.map((e) => [...e.querySelectorAll(".hd-more")].map((x) => x.textContent))), [["in 2 days", "2 hearings"], ["in 3 days", "2 hearings"], ["in 5 days", "1 hearing"]]);
+    check("…every other case shaded, from the top of each day", await shell.$$eval("#hearing-list .hearing-row", (rs) => rs.map((r) => r.classList.contains("alt"))), [false, true, false, true, false]);
     // The owner (2026-11-20): "there is now more room for the pdf linker
     // status, so lets make them full size again. Also you can cut off any case
     // name that runs too long to avoid anything being pushed off the edge."
@@ -521,13 +542,14 @@ async function browserPart() {
       const name = row.querySelector(".ci-case"), pill = row.querySelector(".ci-status");
       const was = name.textContent;
       name.textContent = longName;
-      const out = { before, cut: name.scrollWidth > name.clientWidth, ellipsis: getComputedStyle(name).textOverflow, after: fit(), pillWhole: pill.scrollWidth <= pill.clientWidth };
+      const out = { before, cut: name.scrollHeight > name.clientHeight + 1, lines: Math.round(name.clientHeight / parseFloat(getComputedStyle(name).lineHeight)), after: fit(), pillWhole: pill.scrollWidth <= pill.clientWidth };
       name.textContent = was;
       return out;
     }, "A VERY LONG CASE NAME FOR A CONSOLIDATED MATTER WITH MANY PARTIES AND CROSS-COMPLAINANTS AND INTERVENORS, LLC vs EVERY OTHER PARTY TO IT");
     const fit = await fits();
     check("every row fits its width", fit.before, true);
-    check("a case name too long: cut short, with an ellipsis", [fit.cut, fit.ellipsis], [true, "ellipsis"]);
+    // The owner (2026-11-24): the name wraps before it is cut short.
+    check("a case name too long: two lines, then cut short", [fit.cut, fit.lines], [true, 2]);
     check("…and nothing pushed off the edge, the status still whole", [fit.after, fit.pillWhole], [true, true]);
     const buttons = async () => {
       const out = [];
@@ -556,7 +578,7 @@ async function browserPart() {
     check("…and closes on Escape", await shell.isVisible("#home-settings-menu"), false);
 
     console.log("9a. the bar: no open buttons; PDF from images in the strip");
-    check("the bar holds the title and the settings only", await shell.evaluate(() => [!!document.querySelector(".home-top #open-file, .home-top #open-case, .home-top #combine-files, .home-top #images-to-pdf"), !!document.querySelector(".home-top #home-settings")]), [false, true]);
+    check("the bar holds the title only, not drawn; its settings in the strip", await shell.evaluate(() => [!!document.querySelector(".home-top #open-file, .home-top #open-case, .home-top #combine-files, .home-top #images-to-pdf, .home-top button"), !!document.querySelector("#tabstrip #home-settings"), document.querySelector(".home-top").getBoundingClientRect().height <= 1]), [false, true, true]);
     check("PDF from images stands beside Case folder in the strip", await shell.evaluate(() => { const b = document.querySelector("#tabstrip #images-to-pdf"); return !!b && b.previousElementSibling.id === "open-case-tab"; }), true);
 
     console.log("9a2. the sidebar's foot: how Home works, and PDF+'s updates and app files");
@@ -590,7 +612,7 @@ async function browserPart() {
       return {
         name: parseFloat(getComputedStyle(document.querySelector("#hearing-list .ci-case")).fontSize),
         // The name of a row done stands after its ✓.
-        names: new Set([...document.querySelectorAll("#hearing-list .ci-case")].filter((e) => !e.previousElementSibling.classList.contains("ci-done-mark")).map((e) => Math.round(e.getBoundingClientRect().left))).size,
+        names: new Set([...document.querySelectorAll("#hearing-list .ci-case")].filter((e) => !(e.previousElementSibling && e.previousElementSibling.classList.contains("ci-done-mark"))).map((e) => Math.round(e.getBoundingClientRect().left))).size,
         nums: new Set(xs("#hearing-list .ci-num")).size,
         rightMargin: Math.round(window.innerWidth - hear.right),
         chips: new Set(xs("#hearing-list .ci-status-col")).size,
@@ -625,8 +647,8 @@ async function browserPart() {
     check("a click on it asks for its folder; one carrying another case's number is refused", await shell.textContent("#shell-toast"), "25STCV12345 ACME is not 24STCV00777 Doe v. Globex's folder: it carries 25STCV12345, not 24STCV00777.");
     check("…and eCourt is not opened by the click", await shell.evaluate(() => window.__opened.length), 1);
     await doeLoc.locator(".hearing-item").dblclick();
-    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.textContent.includes("Globex papers")), null, { timeout: 10000 });
-    check("the folder picked is that hearing's, whatever its name", [await doeLoc.locator(".ci-where").textContent(), await doeLoc.locator(".ci-status").textContent()], ["MSJ · Globex papers", "Not run yet"]);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("24STCV00777") && r.querySelector(".hearing-item").title.includes("Case folder: Globex papers")), null, { timeout: 10000 });
+    check("the folder picked is that hearing's, whatever its name", [/^Case folder: Globex papers$/m.test(await doeLoc.locator(".hearing-item").getAttribute("title")), await doeLoc.locator(".ci-status").textContent()], [true, "Not run yet"]);
     check("…its buttons under it, still selected", await doeLoc.locator(".hearing-tools .ci-done").count(), 1);
     // Prioritize is offered on a run going: one starts in ACME.
     const etaIn = (on) => shell.evaluate(async (on) => {
@@ -769,7 +791,7 @@ async function browserPart() {
 
     console.log("14c. the briefing E-Court Suite reports, on each hearing's row");
     const iso = (at) => { const d = new Date(at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-    const st = (state, note = "") => ({ due: inDays(-2), filed: state === "filed" || state === "late" ? inDays(-3) : null, state, note, manual: false });
+    const st = (state, note = "", due = -2) => ({ due: inDays(due), filed: state === "filed" || state === "late" ? inDays(-3) : null, state, note, manual: false });
     const putBriefing = (entries, refresh = null) => shell.evaluate(async ({ entries, refresh }) => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
       const w = await (await dl.getFileHandle("E-Court Briefing Status.json", { create: true })).createWritable();
@@ -781,7 +803,7 @@ async function browserPart() {
     const janeRowB = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("26STCV09999 Jane Doe"))');
     const chipsOf = (row) => row.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => [c.querySelector(".cc-label").textContent, c.className.replace("ci-chip st-", "").replace(" has-due", "")]));
     await putBriefing([
-      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("missing", "Not Filed"), at: Date.now() },
+      { caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed", "", -12), opp: st("filed", "", -6), reply: st("missing", "Not Filed"), at: Date.now() },
       { caseNumber: "24STCV00777", day: iso(inDays(2)), motionType: "MSJ", key: "b", kind: "motion", motion: st("filed"), opp: st("pending", "Not Posted Yet"), reply: null, at: Date.now() },
     ]);
     await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-chip").length >= 5, null, { timeout: 15000 });
@@ -790,11 +812,15 @@ async function browserPart() {
     // The owner (2026-11-20): "It should also show the time of most recent update".
     check("…when it was last updated, first in the briefing's hover and on each chip's, not in the row", [/^Last updated \d{1,2}:\d\d\s?[AP]M\n/.test(await acmeRowB.locator(".ci-brief").getAttribute("title")), /Last updated /.test(await acmeRowB.locator(".ci-chip").first().getAttribute("title")), await acmeRowB.locator(".ci-brief-at").count()], [true, true, 0]);
     // The owner (2026-11-20): "expand the Motion Opposition Reply labels to include due dates underneath".
-    const dueWant = await shell.evaluate((ms) => { const d = new Date(ms); return `Due ${d.getMonth() + 1}/${d.getDate()}`; }, inDays(-2));
+    const dueOf = (ms) => shell.evaluate((ms) => { const d = new Date(ms); return `Due ${d.getMonth() + 1}/${d.getDate()}`; }, ms);
+    const dueWant = await dueOf(inDays(-2));
     check("…each with its due date underneath", await acmeRowB.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => {
       const a = c.querySelector(".cc-label").getBoundingClientRect(), b = c.querySelector(".cc-due").getBoundingClientRect();
       return [c.querySelector(".cc-due").textContent, b.top >= a.bottom - 1, c.scrollWidth <= c.clientWidth];
-    })), [[dueWant, true, true], [dueWant, true, true], [dueWant, true, true]]);
+    })), [[await dueOf(inDays(-12)), true, true], [await dueOf(inDays(-6)), true, true], [dueWant, true, true]]);
+    // The owner (2026-11-24): a date every chip shares is said once, after them.
+    check("…one date every chip shares, said once after them", [await doeRowB.locator(".cc-due").count(), await doeRowB.locator(".cc-due-once").textContent()], [0, dueWant]);
+    check("…a paper missing filled solid, one filed outlined", await acmeRowB.locator(".ci-chip").evaluateAll((cs) => cs.map((c) => getComputedStyle(c).backgroundColor === "rgba(0, 0, 0, 0)")), [true, true, false]);
     check("…and the chips whole in their column", await shell.$$eval("#hearing-list .ci-brief", (bs) => bs.every((b) => b.scrollWidth <= b.clientWidth + 0.5)), true);
     check("…a hearing the extension has not reported: a dash that says how to get it", [await janeRowB.locator(".ci-brief").textContent(), /Refresh from eCourt/.test(await janeRowB.locator(".ci-brief").getAttribute("title"))], ["—", true]);
     await shell.setViewportSize({ width: 2560, height: 1400 }); await shell.waitForTimeout(300);
@@ -921,7 +947,7 @@ async function browserPart() {
     // Roe v. Umbrella's row has no link in the sheet; the calendar read has its case id.
     check("the fixture's Roe v. Umbrella row has no link of its own", rowsNow.find((h) => h.caseName === "23STCV04444 Roe v. Umbrella").url, "");
     const fillRow = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("23STCV04444"))');
-    await fillRow.locator(".ci-where").click();
+    await fillRow.locator(".ci-num").click();
     await fillRow.locator(".hearing-tools").waitFor({ timeout: 5000 });
     check("a hearing the sheet does not link still has its eCourt button", await fillRow.locator(".hearing-tools .ci-ecourt").count(), 1);
     check("…which says where its link came from", /E-Court Suite read from eCourt's calendar/.test(await fillRow.locator(".hearing-tools .ci-ecourt").getAttribute("title")), true);
@@ -1061,9 +1087,9 @@ async function browserPart() {
       const nov = await (await top.getDirectoryHandle("Filed")).getDirectoryHandle("November");
       return { dl: (await names(dl)).includes("25STCV12345 ACME"), moved: await names(await nov.getDirectoryHandle("25STCV12345 ACME")) };
     }), { dl: false, moved: ["DONE 2.40PM.txt", "Demurrer.pdf", "PDF-Linker Priority.json"] });
-    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-item")].some((b) => b.textContent.includes("(in November)")), null, { timeout: 15000 });
-    const moved = await acmeRow.locator(".ci-where").textContent();
-    check("the hearing still carries its folder, at its new place", moved, "Demurrer · 25STCV12345 ACME (in November)");
+    await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-item")].some((b) => b.title.includes("(in November)")), null, { timeout: 15000 });
+    const moved = (await acmeRow.locator(".hearing-item").getAttribute("title")).match(/^Case folder: (.*)$/m)[1];
+    check("the hearing still carries its folder, at its new place", moved, "25STCV12345 ACME (in November)");
     await pick(acmeRow);
     check("…with its status and its buttons", [/^Finished /.test(await acmeRow.locator(".ci-status").textContent()), await acmeRow.locator(".ci-line").count()], [true, 1]);
     check("…and the case folder shows in the list, closed", await shell.$$eval("#tree-list .tree-node.leaf .tree-name", (x) => x.map((e) => e.textContent)), ["25STCV12345 ACME"]);

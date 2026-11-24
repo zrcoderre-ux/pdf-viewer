@@ -603,7 +603,8 @@ removed), with the status itself as the pill's hover. The status column
 column clips, so nothing past it moves. A case name that runs long is cut by
 `.ci-case`'s ellipsis. `test-hearing-sheet.mjs` (section 8) sets one row's
 name very long and checks that it ends in an ellipsis, that every row's cells
-stay inside it, and that the status beside it is still whole.
+stay inside it, and that the status beside it is still whole. (Since 2026-11-24 the name wraps to two lines before it is cut, and the
+status column is as wide as its widest row: see "Readability" below.)
 
 ### Due dates under Mot, Opp and Rep (2026-11-20)
 
@@ -825,3 +826,60 @@ the item done." The `in-downloads` stripe and `.ci-dl-chip` now need
 `hg.mark === "done"` as well as `inDl`: a case still being worked belongs in
 Downloads; one done and still there is left to file. Dragging a row onto a
 folder works as before, marked or not. `test-hearing-sheet.mjs` 14f.
+
+## Readability (2026-11-24)
+
+The owner asked for ideas to make Home more readable, then: "Do all of them
+except 8 ... Also, I think adding a sublte color shift between cases would also
+help readability." (Idea 8, moving Case folders below Hearings, was refused:
+"when it does I want it visable.")
+
+- **The name gets the room.** At 1200px the fixed status (230px) and Claude
+  (150px) columns had cut "Doe v. Globex" to "Doe…". `fitColumns` now
+  measures, once per redraw and while the list is on screen, the widest
+  `.ci-status-col` and `.ci-run.has` at `max-content` (the list's `measuring`
+  class), and sets `--status-w` (110 to 290px) and `--run-w` (96 to 210px) on
+  the list, so each is still one column down the list. Off screen it measures
+  nothing and clears `hearingsShown`, so the next look draws and measures
+  again; the CSS defaults are the old widths. `.ci-case` wraps to two lines
+  (`-webkit-line-clamp: 2`) before it is cut; the test checks the clamp, not
+  an ellipsis. Under 1300px the main column's right margin drops to 32px.
+- **The motion is a tag** (`.ci-motion`) in `.ci-title` beside the name, a
+  wrapping flex box, so on a narrow row it drops under the name, aligned with
+  it. The case folder's name left the line under the name for the row's hover
+  ("Case folder: …"); `.ci-where` is hidden when empty (it keeps a case number
+  not in the name, Moved from, Submitted and a run's start). Tests read the
+  folder from the hover and pick a row by `.ci-num`, since `.ci-where` may be
+  empty.
+- **Chips.** Larger (`--fs-meta`), a problem filled solid (missing and late
+  red, personal amber), a paper in order outlined; brighter green in dark
+  mode. Where a row's chips (two or more) all share one due date it is said
+  once after them (`.cc-due-once`), and `--brief-w` counts it (`chipsWide`).
+- **Done and in Downloads** keeps the stripe and the icon; the row's amber
+  tint is gone, since it made a finished row the loudest on the page.
+- **Every other case shaded** (`.alt`, `--c-row-alt`, 3.5% white in dark,
+  3.5% slate in light), counted from the top of each day so the first row
+  under a heading is always plain. Hover and selection win over it.
+- **The summary's counts are filter pills** (`hearingFilter`, in the redraw's
+  signature): not downloaded, briefing not filed and Claude runs going lead,
+  then to work up (no filter), downloaded and done. A pill clicked again, or
+  to work up, clears it; a filter whose count falls to 0 clears itself; an
+  empty result offers "Show every hearing". The Claude filter shows hearings
+  with a run going now (`runsForHearing` + `isGoingNow`); the count still
+  includes runs on no hearing.
+- **Day headings** say how far off and how many: `daysAway`/`daysAwayText`
+  (hearing-sheet.js; "" for today and tomorrow, which `dayText` names, else
+  "in N days", "yesterday", "N days ago"), counted over the rows shown. Today
+  and tomorrow get an accent bar and colour.
+- **Fewer icons.** The folder/calendar icon before each hearing is gone (the
+  pill says where the folder stands). An empty sticky note is drawn at
+  opacity 0 until the row is hovered or selected (opacity, not visibility, so
+  it keeps its place and Playwright can still click it); a note that exists,
+  is open or is waiting shows as before.
+- **No title bar.** `.home-top` (logo and "PDF Viewer", which PDF+'s shim
+  renames) stays in the page for the shim and screen readers but is not
+  drawn; the theme and settings buttons moved to `#home-strip-tools` in the
+  tab strip, shown only while Home is (`updateChrome`). The strip is lifted
+  above Home while the settings menu is open so the menu is not painted over,
+  and the menu is `app-region: no-drag` in PDF+.
+
