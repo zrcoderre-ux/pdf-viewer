@@ -1886,6 +1886,81 @@ export function spreadTops(tops, box, fixed = null, spans = null) {
 }
 
 /**
+ * A SINGLE-SPACED BLOCK ON PLEADING PAPER AT THE PDF'S OWN SPACING (the
+ * owner, 2026-11-24: yes to "use the PDF's own row spacing there"). A proof
+ * of service sets its paragraphs at 14 points' leading on 22-point paper, so
+ * the export writes a line between every two numbers; held at its number and
+ * its half line, each line had 11 points and its 13-point type was taken
+ * down to 0.7 of the PDF's size (fitRuns). Where a run between two numbers
+ * would be taken down (`factors[k] < 1`, fitRuns' answer) and every line of
+ * it that holds room (`clear[k] > 0`) has its own PDF row (`rowOf[k]`, an
+ * index into `rows`, each with its `top`) set at least most of a line under
+ * the one before, the run's lines are put on their rows' tops instead, the
+ * PDF's leading, and fit there at their size. A run of lines side by side (a
+ * caption's two columns, rows level with each other) is no such block and is
+ * left to fitRuns. The margin numbers stay on their grid: `moved[k]` says
+ * which lines left their slot (the caller shifts a moved numbered line's
+ * number back onto it). Returns { tops, moved }.
+ */
+export function ownRowTops(tops, fixed, clear, rowOf, rows, factors) {
+  const n = (tops || []).length;
+  const out = (tops || []).slice();
+  const moved = new Array(n).fill(false);
+  if (!fixed || !rowOf || !rows || !factors) return { tops: out, moved };
+  const at = [];
+  for (let k = 0; k < n; k++) if (fixed[k]) at.push(k);
+  // Each run: its lines holding room, their rows' tops, and whether those
+  // stand a line apart (a block) and whether fitRuns would take it down.
+  const runs = at.map((a, r) => {
+    const b = r + 1 < at.length ? at[r + 1] : n;
+    const ks = [];
+    for (let k = a; k < b; k++) if (clear[k] > 0) ks.push(k);
+    let shrink = false;
+    for (let k = a; k < b; k++) if (factors[k] < 0.999) shrink = true;
+    const rowed = ks.length > 0 && ks.every((k) => rowOf[k] != null && rows[rowOf[k]]);
+    const ys = rowed ? ks.map((k) => rows[rowOf[k]].top) : [];
+    let block = rowed;
+    for (let i = 1; block && i < ys.length; i++) if (!(ys[i] - ys[i - 1] >= clear[ks[i - 1]] * 0.95)) block = false;
+    return { ks, ys, shrink, block };
+  });
+  // The block: every run that would be taken down and stands on rows, and
+  // each run beside one that does (a single-spaced paragraph runs past its
+  // numbers, and a line of it left on its slot stood over the line above).
+  const on = runs.map((u) => u.shrink && u.block && u.ks.length > 1);
+  for (let grew = true; grew;) {
+    grew = false;
+    runs.forEach((u, r) => {
+      if (on[r] || !u.block) return;
+      if ((r > 0 && on[r - 1]) || (r + 1 < runs.length && on[r + 1])) { on[r] = true; grew = true; }
+    });
+  }
+  // …and none that would then stand over a line left where it was.
+  const firstTop = (r) => (on[r] ? runs[r].ys[0] : runs[r].ks.length ? tops[runs[r].ks[0]] : null);
+  const lastBottom = (r) => {
+    const u = runs[r];
+    if (!u.ks.length) return null;
+    const k = u.ks[u.ks.length - 1];
+    return (on[r] ? u.ys[u.ys.length - 1] : tops[k]) + clear[k] * 0.95;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    runs.forEach((u, r) => {
+      if (!on[r]) return;
+      const below = r + 1 < runs.length ? firstTop(r + 1) : null;
+      const above = r > 0 ? lastBottom(r - 1) : null;
+      if ((below != null && !(below >= lastBottom(r))) || (above != null && !(firstTop(r) >= above))) {
+        on[r] = false; changed = true;
+      }
+    });
+  }
+  runs.forEach((u, r) => {
+    if (!on[r]) return;
+    u.ks.forEach((k, i) => { out[k] = u.ys[i]; moved[k] = true; });
+  });
+  return { tops: out, moved };
+}
+
+/**
  * NO LINE ON TOP OF ANOTHER, on pleading paper. spreadTops shares the space
  * between two numbered lines evenly where the lines between them cannot all
  * have their room there, and shared at less than their room they were drawn
