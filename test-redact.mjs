@@ -18,7 +18,7 @@ import {
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
   valueWords, wordsOwed, coveredClaims, pageLayoutFromSpans, spanPiecesFor, charKeys, columnNamesOver,
   scrubbedStem, unweldNames, nameWordFakes, partWelds, boundValueStands,
-  spreadPhrase, phraseHits, coveredBy,
+  spreadPhrase, phraseHits, coveredBy, pictureRegions,
 } from "./viewer/redact.js";
 import { parseKey, compileReals, findRealSpans, findColumnSpans, compileForward, forwardRuns, translate, boundRows } from "./viewer/pseudo-key.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
@@ -831,6 +831,58 @@ console.log("\none mark, every place");
   ok("a name wrapped over two lines is covered only when both lines are",
     !coveredBy([box(100, 100, 60, 12)], [{ x: 101, y: 101, w: 50, h: 10 }, { x: 72, y: 86, w: 40, h: 10 }]));
   ok("nothing on the page covers nothing", !coveredBy([], [{ x: 1, y: 1, w: 5, h: 5 }]));
+}
+
+console.log("what a page draws that its text layer does not say (pictureRegions)");
+{
+  // pdf.js's OPS, the ones read; numbers as in pdfjs/build/pdf.mjs.
+  const O = { save: 10, restore: 11, transform: 12, beginText: 31, setCharSpacing: 33, setWordSpacing: 34, setHScale: 35,
+    setLeading: 36, setFont: 37, setTextRenderingMode: 38, moveText: 40, setLeadingMoveText: 41, setTextMatrix: 42, nextLine: 43,
+    showText: 44, showSpacedText: 45, nextLineShowText: 46, nextLineSetSpacingShowText: 47,
+    paintFormXObjectBegin: 74, paintFormXObjectEnd: 75, beginAnnotation: 80, endAnnotation: 81,
+    paintImageMaskXObject: 83, paintImageMaskXObjectGroup: 84, paintImageXObject: 85, paintInlineImageXObject: 86,
+    paintInlineImageXObjectGroup: 87, paintImageXObjectRepeat: 88, paintImageMaskXObjectRepeat: 89, paintSolidColorImageMask: 90 };
+  const L = (...pairs) => ({ fnArray: pairs.map((p) => p[0]), argsArray: pairs.map((p) => p[1] || null) });
+  const G = (s, w = 500) => [...s].map((c) => ({ unicode: c, width: w, isSpace: c === " " }));
+  const words = (text, mode, at = [72, 700]) => [[O.beginText], [O.setFont, ["F1", 12]], [O.setTextRenderingMode, [mode]],
+    [O.setTextMatrix, [1, 0, 0, 1, at[0], at[1]]], [O.showText, [G(text)]]];
+
+  const scan = pictureRegions(L([O.save], [O.transform, [612, 0, 0, 792, 0, 0]], [O.paintImageXObject, ["img1", 100, 100]], [O.restore],
+    ...words("Nadia Quillfeather", 3)), O);
+  check("a scan: the picture is the page", scan.images, [[0, 0, 612, 792]]);
+  check("…and its OCR layer stands over it", scan.hiddenOutside, false);
+
+  const outlines = pictureRegions(L(...words("Nadia Quillfeather", 3)), O);
+  check("an OCR layer over no picture (type drawn as outlines) is told", outlines.hiddenOutside, true);
+  const visible = pictureRegions(L(...words("Nadia Quillfeather", 0)), O);
+  check("plain text is no picture and nothing hidden", [visible.images, visible.annots, visible.hiddenOutside], [[], [], false]);
+
+  const logo = pictureRegions(L([O.save], [O.transform, [100, 0, 0, 40, 72, 720]], [O.paintImageXObject, ["logo"]], [O.restore],
+    ...words("Nadia Quillfeather", 3, [400, 300])), O);
+  check("a letterhead's picture where it is drawn", logo.images, [[72, 720, 172, 760]]);
+  check("…and an OCR run off it is told", logo.hiddenOutside, true);
+  const runOff = pictureRegions(L([O.save], [O.transform, [100, 0, 0, 40, 72, 720]], [O.paintImageXObject, ["logo"]], [O.restore],
+    ...words("Nadia Quillfeather and more words past the picture", 3, [80, 730])), O);
+  check("an OCR run starting on a picture and running past it is told", runOff.hiddenOutside, true);
+
+  const form = pictureRegions(L([O.save], [O.paintFormXObjectBegin, [[2, 0, 0, 2, 10, 10], [0, 0, 1, 1]]], [O.transform, [50, 0, 0, 50, 0, 0]],
+    [O.paintImageMaskXObject, [{}]], [O.paintFormXObjectEnd], [O.restore]), O);
+  check("a picture inside a form XObject, through its matrix", form.images, [[10, 10, 110, 110]]);
+  const rep = pictureRegions(L([O.paintImageMaskXObjectRepeat, [{}, 10, 0, 0, 12, [0, 0, 100, 200]]]), O);
+  check("a repeated mask, each place", rep.images, [[0, 0, 10, 12], [100, 200, 110, 212]]);
+  const grp = pictureRegions(L([O.paintImageMaskXObjectGroup, [[{ transform: [5, 0, 0, 5, 1, 1] }, { transform: [5, 0, 0, 5, 50, 1] }]]]), O);
+  check("a group of masks, each by its transform", grp.images, [[1, 1, 6, 6], [50, 1, 55, 6]]);
+
+  const field = pictureRegions(L([O.beginAnnotation, ["12R", [300, 500, 500, 520], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0], false]],
+    ...words("Nadia Quillfeather", 0, [2, 5]), [O.endAnnotation]), O);
+  check("a filled field's appearance is its rect", field.annots.map((x) => x.rect), [[300, 500, 500, 520]]);
+  ok("…its words not taken for the page's", field.images.length === 0 && !field.hiddenOutside);
+  const tick = pictureRegions(L([O.beginAnnotation, ["13R", [300, 400, 312, 412], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0], false]],
+    [O.beginText], [O.setFont, ["ZaDb", 10]], [O.showText, [[{ unicode: "\u2714", width: 800 }]]], [O.endAnnotation]), O);
+  check("a checkbox's tick is not covered", tick.annots, []);
+  const stamp = pictureRegions(L([O.beginAnnotation, ["14R", [10, 10, 110, 60], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0], false]],
+    [O.transform, [100, 0, 0, 50, 0, 0]], [O.paintImageXObject, ["s"]], [O.endAnnotation]), O);
+  check("a stamp drawn as a picture is its rect, not a page picture", [stamp.annots.map((x) => x.rect), stamp.images], [[[10, 10, 110, 60]], []]);
 }
 
 console.log(`\n${"=".repeat(60)}\nFAILURES: ${fails}`);

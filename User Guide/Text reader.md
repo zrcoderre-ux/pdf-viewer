@@ -359,7 +359,13 @@ app, which routes it to the reader tab.
   picture names it. A name you flagged as spotted unfaked has no fake yet,
   so it is covered with █████ too: in the Flagged panel's list when it is
   open, on the pages, in the bars and the Find box, and over the PDF — with a
-  key open or none — and the message counts them. A page shown ⇄ Raw is
+  key open or none — and the message counts them. Over the PDF, anything
+  that can carry a name that cannot be read is covered too: every picture on
+  the page (a scanned page is covered whole, a letterhead or an exhibit where
+  it stands) and every filled form field or typed note, each as a grey box;
+  and a PDF page whose words had not finished loading, or whose words are
+  drawn as shapes under an OCR layer, is left out of the picture whole. The
+  message counts both. A page shown ⇄ Raw is
   read whole, like the page itself, so
   a name wrapped down a caption's column is faked or covered as one name. The
   flag pop-up and the keep menu are taken off the screen for the picture and

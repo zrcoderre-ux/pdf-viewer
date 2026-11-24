@@ -184,8 +184,9 @@ name alone in a short span at a line's far end ran into the next line's first
 word from 0.85°, and its surname went into the PNG beside an "Odile" cover
 (Design Notes/Redaction.md, "A slant under the slack"). A name only in an
 annotation's appearance (a FreeText note, a filled form field) is drawn on the
-page but is in no text layer, and is not covered (same file, the residual
-after it). Only a sheet that is
+page but is in no text layer, and was not covered (same file, the residual
+after it); it is now, with every picture on the page (see "…and what the PDF
+draws that its text layer does not say", below). Only a sheet that is
 covered name by name adds its `WITHHELD` names to the toast. A name
 the key holds only an instruction for is covered with `WITHHELD`, on the pages,
 in the chrome and over the PDF alike (`egressSwaps`, under **A control word in
@@ -257,6 +258,57 @@ takes the family most of the PDF page's items are set in (`sheetFace`, off
 fit; that much is the cost of covering a picture. Test: `test-shot-fit.mjs`
 case 3 (a name in two of the PDF's spans: one cover, in Times; on the code
 before, a fake and a blank, in "serif").
+
+**…and what the PDF draws that its text layer does not say** (`pdfNamesOn`,
+`pdfNameCovers`, `pictureBlocks`, `shotPdfPrep`, `RD.pictureRegions`;
+2026-11-24). The owner: "Screenshot isn't properly obscuring the real values in
+the pdf like it should." Every cover over the PDF was placed from the page's
+text layer, and four kinds of sheet put a real name into the PNG under "the
+names in their pseudonyms". Measured with the name drawn in red and the
+picture taken for real (Playwright's screenshot at the moment the reader takes
+its frame): a name in a picture on the page, 510 red pixels in the PNG; in a
+filled form field, 294; drawn as shapes under an OCR layer that read it wrong
+("Qui11feather"), 366; and a page drawn before its text layer was laid had
+nothing to read at all. Now:
+
+- **Pictures and annotations are covered whole.** Before the fakes go up
+  (`withFakes`), each sheet in the picture has its operator list read
+  (`shotPdfPrep`, through `opListOf`, four seconds at most, memoized on the
+  page proxy) and `RD.pictureRegions` finds every image painted (the unit
+  square through the transform, form XObjects and the repeat and group masks
+  included) and every annotation whose appearance draws a letter, a digit or a
+  picture (its rect, from `beginAnnotation`; a checkbox's tick is left).
+  `pictureBlocks` turns them into the sheet's pixels through the drawing's
+  viewport (`el.__vp`) and `coverPdfNames` paints each a grey box
+  (`.shot-cover.pic`) before the names' covers; a name cover wholly inside one
+  is dropped. A scan is a picture the size of the page, so it is covered
+  whole. Words in a picture cannot be read to be faked, and an OCR layer over
+  one may have read a name wrong, so no reading of the picture is trusted.
+- **Text drawn invisibly where no picture lies under it** (render mode 3 or 7
+  off every image, by the run's two ends from the text matrix and the glyphs'
+  widths: `hiddenOutside`) is an OCR layer over type drawn as shapes; the sheet
+  goes out whole.
+- **A bitmap whose words are not all laid** goes out whole: the slot carries
+  `data-text-for`, set only when this drawing's text layer is laid and
+  repaired and cleared when the layer is emptied or the slot released, and
+  `el.__drawnPage`, the page the bitmap is of. A sheet with a bitmap (the
+  canvas has pixels) and no `rendered`, a `textFor` that is not its
+  `rendered`, or regions read of another page is left out: the quick preview
+  (`paintWarm`), a page shot while its layer was still being laid, a page too
+  big to lay out (`sayHugePage`), a layer that failed, an inline page switched
+  to another page and not yet drawn again. Before, a sheet with no spans
+  answered null: nothing to cover.
+
+The toast counts the pictures and fields covered (`shotPictures`) beside the
+pages left out. The costs: a picture drawn under typed text (a background, a
+watermark) covers the text over it too, and a filled field is covered whether
+its value is a name or not. Still not covered: type drawn as shapes with no OCR
+layer at all (no words anywhere to say a name is there), words inside a tiling
+pattern, and a name the PDF's own text spells otherwise than the key (cut by a
+hyphen at a line's end, misspelled) where the key holds no row for that
+spelling. Test: `test-shot-pictures.mjs` (A to E, red pixels counted in the
+real picture: 0 on each; the code before, 510, 294 and 366 on A to C), and
+`test-redact.mjs` for `pictureRegions`.
 
 **A page shown ⇄ Raw is a page, not chrome (`shotRaw`).** It was left to
 `swapChrome`, which runs `egressSwaps` one text node at a time, and the raw
