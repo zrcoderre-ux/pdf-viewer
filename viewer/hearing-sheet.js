@@ -1016,7 +1016,7 @@ export function hearingForPlace(hearings, place, now) {
 //     "motionOnly" | "osc", motion, opp, reply: { due, filed (ms | null),
 //     state: "filed" | "late" | "missing" | "personal" | "pending", note:
 //     "Not Filed" | "Not Posted Yet" | "", manual } | null,
-//     osc: { text, state: "ok" | "warn" }, text, at }
+//     osc: { text, state: "ok" | "warn" | "note" (only Does left) }, text, at }
 // The states are the case page's own colours, so Home says what it says.
 
 export const BRIEFING_FILE = "E-Court Briefing Status.json";
@@ -1198,8 +1198,13 @@ const shortDay = (ms) => {
 export function briefingChips(entry) {
   if (!entry) return [];
   if (entry.kind === "osc") {
-    const warn = entry.osc && entry.osc.state === "warn";
-    return [{ label: "Defaults", state: warn ? "missing" : "filed", mark: warn ? "!" : "✓", title: (entry.osc && entry.osc.text) || entry.text || "" }];
+    // "note": every named defendant is in default or dismissed and only Does
+    // are left, a lesser thing than a missing default, so amber, not red.
+    const st = entry.osc && entry.osc.state;
+    const title = (entry.osc && entry.osc.text) || entry.text || "";
+    if (st === "note") return [{ label: "Defaults", state: "personal", mark: "!", title }];
+    const warn = st === "warn";
+    return [{ label: "Defaults", state: warn ? "missing" : "filed", mark: warn ? "!" : "✓", title }];
   }
   const out = [];
   for (const [k, label] of [["motion", "Mot"], ["opp", "Opp"], ["reply", "Rep"]]) {

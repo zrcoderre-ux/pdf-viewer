@@ -257,6 +257,7 @@ check("not posted yet is unsure, not missing", briefingChips({ kind: "motion", r
 check("timely only if served personally", briefingChips({ kind: "motion", motion: slot("personal") })[0].state, "personal");
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
+check("an OSC with only Does left is amber, not red", briefingChips({ kind: "osc", osc: { text: "ⓘ Only Does not dismissed: Does 1 through 20", state: "note" } }).map((c) => [c.label, c.state, c.mark, c.title]), [["Defaults", "personal", "!", "ⓘ Only Does not dismissed: Does 1 through 20"]]);
 check("the file's name", BRIEFING_FILE, "E-Court Briefing Status.json");
 
 console.log("1b2. several motions the same day, as E-Court works them");
