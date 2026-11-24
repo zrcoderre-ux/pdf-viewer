@@ -77,7 +77,7 @@ folders opened in the app, the hearing row *is* that folder:
   name: those are the ones left to file. (A case still being worked shows
   none.) Drag the row onto a folder on the left to file it.
 - The pill says what PDF-Linker has done in it (Not run yet, Running — ETA …,
-  Finished …). Hover over the row for the folder's name and where it is.
+  Finished; hover over it for when). Hover over the row for the folder's name and where it is.
 - The folder's buttons are on the row: **Word**, **Log to share**,
   **Prioritize** (or its place in PDF-Linker's line with ▲ ▼ ✕) and **Take
   over** when a run stopped part-way.
@@ -119,8 +119,8 @@ stays selected while Home refreshes.
 use it, the case keeps its place in line for 24 hours, through any re-run, so
 you don't have to press it again; ▲ ▼ ✕ change it at any time.
 
-PDF-Linker's status is spelled out at the right of the row ("Finished 2:40
-PM", "Running — ETA ~4.10PM"): green finished, amber something to answer or a
+PDF-Linker's status is spelled out at the right of the row ("Finished", with
+when it finished on its hover; "Running — ETA ~4.10PM"): green finished, amber something to answer or a
 run that looks stopped, blue (pulsing) running, grey not run yet. One too long
 for its column ends in "…"; hover over it to read it whole. The status and
 Claude columns are only as wide as their widest row needs, so the case name

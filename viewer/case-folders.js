@@ -342,7 +342,10 @@ export function statusText(st, now) {
       };
     case "done":
       return {
-        text: `Finished ${whenText(st.at, now)}${tail}`,
+        // Just "Finished"; when is on the hover (the owner, 2026-11-24: "The
+        // pdf linker run can just show Finished with the date and time
+        // viewable on hover").
+        text: `Finished${tail}`,
         title: `PDF-Linker's last run finished at ${whenText(st.at, now)} (its DONE stamp reads ${st.label}).${extras.length ? " " + extras.join("; ") + "." : ""}`,
         tone: extras.length ? "warn" : "ok",
       };
