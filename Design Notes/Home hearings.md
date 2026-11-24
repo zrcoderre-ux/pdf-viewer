@@ -891,3 +891,12 @@ viewable on hover." `statusText` (case-folders.js) says a finished run as
 `title` ("PDF-Linker's last run finished at …") is now the pill's hover on
 hearing rows and in Case folders, which used to repeat the pill's words. Every
 other state says what it said. `test-case-folders.mjs`, `test-hearing-sheet.mjs`.
+
+### A finished Claude run: "Finished", the time on the hover (2026-11-24)
+
+The owner, after the same for PDF-Linker's status: "Same with the Claude
+workflow runs." `runLine` (claude-runs.js) says a finished run as `Finished`,
+no time; `runCell`'s hover says "Finished <time or day, time>." in place of
+"Last moved …" for it. Every other state (running, held, paused, failed,
+stalled, canceled) reads as before. `test-claude-runs.mjs`,
+`test-hearing-sheet.mjs` 14g.

@@ -140,7 +140,9 @@ export function runLine(r, written, now = Date.now()) {
   if (st.stale) line = `Stalled since ${clockText(r.at, now)}`;
   else if (st.tone === "quiet") line = `No word since ${clockText(written, now)}`;
   else if (r.status === "running") line = at ? `Running step ${at}` : "Running";
-  else if (r.status === "done") line = r.finishedAt ? `Finished ${clockText(r.finishedAt, now)}` : "Finished";
+  // Just "Finished"; when is on the column's hover (the owner, 2026-11-24,
+  // after the same for PDF-Linker's status: "Same with the Claude workflow runs").
+  else if (r.status === "done") line = "Finished";
   else if (r.status === "error") line = at ? `Failed at step ${at}` : "Failed";
   else if (r.status === "waiting") line = r.held ? `Held: ${r.held}` : "Held";
   else if (r.status === "paused") line = at ? `Paused before ${at}` : "Paused";

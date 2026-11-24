@@ -1084,16 +1084,16 @@ async function browserPart() {
       { id: "r1", name: "25STCV12345 ACME — 11/20/26", caseNumber: "25STCV12345", status: "done", progress: "Finished all 3 steps", step: 3, total: 3, at: Date.now(), finishedAt: new Date().setHours(15, 10, 0, 0),
         steps: [{ label: "1", state: "done" }, { label: "2", state: "done" }, { label: "3", state: "done" }] }] });
     await shell.waitForFunction(() => /Finished/.test((document.querySelector("#hearing-list .ci-run.has .cr-line") || {}).textContent || ""), null, { timeout: 15000 });
-    check("finished: when, all its steps done", [await runCellOf.locator(".cr-line").textContent(), await runCellOf.locator(".cr-frac").textContent(), await runCellOf.locator(".cr-name").count()], ["Finished 3:10 PM", "3/3", 0]);
+    check("finished: just Finished, when on the hover, all its steps done", [await runCellOf.locator(".cr-line").textContent(), /^Finished 3:10 PM\.$/m.test(await runCellOf.getAttribute("title")), await runCellOf.locator(".cr-frac").textContent(), await runCellOf.locator(".cr-name").count()], ["Finished", true, "3/3", 0]);
     // The owner (2026-11-20): "It should show in the home page the status of the
     // current or most recent claude run for each case (but only if there was one)".
     const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).setHours(15, 10, 0, 0);
     await putRuns({ version: 1, written: Date.now(), runs: [
       { id: "r9", name: "24STCV00777 Doe — 11/13/26", caseNumber: "24STCV00777", status: "done", progress: "Finished all 2 steps", step: 2, total: 2, at: fiveDaysAgo, finishedAt: fiveDaysAgo,
         steps: [{ label: "1", state: "done" }, { label: "2", state: "done" }] }] });
-    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-run.has").length === 1 && /Finished/.test(document.querySelector("#hearing-list .ci-run.has .cr-line").textContent), null, { timeout: 15000 });
+    await shell.waitForFunction(() => document.querySelectorAll("#hearing-list .ci-run.has").length === 1 && /Finished/.test(document.querySelector("#hearing-list .ci-run.has .cr-line").textContent) && /24STCV00777 Doe/.test(document.querySelector("#hearing-list .ci-run.has").title), null, { timeout: 15000 });
     const wantDay = await shell.evaluate((at) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" }), fiveDaysAgo);
-    check("a case's last run, days ago: on its row, with the day", [await doeRowB.locator(".ci-run .cr-line").textContent().then((t) => t.startsWith("Finished " + wantDay)), await acmeRowB.locator(".ci-run.has").count()], [true, 0]);
+    check("a case's last run, days ago: on its row, with the day", [await doeRowB.locator(".ci-run").getAttribute("title").then((t) => new RegExp("^Finished " + wantDay, "m").test(t)), await acmeRowB.locator(".ci-run.has").count()], [true, 0]);
     await putRuns(null);
     await shell.waitForFunction(() => !document.getElementById("hearing-list").classList.contains("has-runs"), null, { timeout: 15000 });
     check("the file gone: the column goes", true, true);

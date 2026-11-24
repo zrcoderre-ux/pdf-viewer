@@ -2357,7 +2357,7 @@ function runCell(hg, placeName, runs, now) {
   row.appendChild(txt);
   cell.appendChild(row);
   cell.title = [`Claude run: ${r.name}${r.template ? " (" + r.template + ")" : ""}`, ...runsLib.stepLines(r),
-    r.error ? `Failed: ${r.error}` : "", r.at ? `Last moved ${runsLib.clockText(r.at, now)}.` : "",
+    r.error ? `Failed: ${r.error}` : "", r.status === "done" && r.finishedAt ? `Finished ${runsLib.clockText(r.finishedAt, now)}.` : "", r.at && !(r.status === "done" && r.finishedAt) ? `Last moved ${runsLib.clockText(r.at, now)}.` : "",
     r.url ? "Click to open its chat." : "", mine.length > 1 ? `${mine.length - 1} earlier run${mine.length > 2 ? "s" : ""} for this case.` : ""].filter(Boolean).join("\n");
   cell.setAttribute("aria-label", `Claude run${r.template ? " of " + r.template : ""}: ${frac ? frac.done + " of " + frac.total + " steps done, " : ""}${line}`);
   if (r.url) {

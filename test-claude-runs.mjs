@@ -53,7 +53,7 @@ console.log("4. the row's Claude column");
 check("its steps read, an unknown state taken as to come", got.runs[0].steps.map((x) => x.state), ["done", "here", "todo"]);
 check("running: the step it is on", runLine(a, got.written, NOW).line, "Running step 2");
 check("steps done as a fraction: from the steps, pauses not counted; else from step and total", [stepFraction(a), stepFraction({ steps: [{ state: "done" }, { state: "done", pause: true }, { state: "here" }] }), stepFraction({ status: "running", step: 3, total: 5, steps: [] }), stepFraction({ status: "done", step: 5, total: 5, steps: [] }), stepFraction({ steps: [] })], [{ done: 1, total: 3 }, { done: 1, total: 2 }, { done: 2, total: 5 }, { done: 5, total: 5 }, null]);
-check("finished: when", runLine({ ...c, steps: [] }, got.written, NOW).line, "Finished " + new Date(NOW - 3600000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
+check("finished: just Finished, when on the hover (the owner, 2026-11-24)", runLine({ ...c, steps: [] }, got.written, NOW).line, "Finished");
 check("held: why", runLine(b, got.written, NOW).line, "Held: usage limit");
 check("failed: where", runLine({ ...a, status: "error", steps: [{ label: "1", state: "done" }, { label: "2", state: "failed" }] }, got.written, NOW).line, "Failed at step 2");
 check("gone quiet: since when", runLine(a, NOW - QUIET_MS - 60000, NOW).line.startsWith("No word since "), true);

@@ -268,7 +268,7 @@ order things happen: briefing, the case folder and PDF-Linker, the Claude run):
 - the workflow's name;
 - under it, the steps done out of the run's steps (**2/7**), coloured as the
   run stands (orange running, green finished, amber held or paused, red
-  failed), and a line: **Running step 3**, **Finished 3:10 PM**, **Held:
+  failed), and a line: **Running step 3**, **Finished** (when, on its hover), **Held:
   usage limit**, **Paused before 4**, **Failed at step 3**, or **Queued**.
 
 It shows the run going now, or else the case's most recent one from the last
