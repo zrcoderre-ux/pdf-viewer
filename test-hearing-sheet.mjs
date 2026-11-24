@@ -23,6 +23,7 @@ import {
   readHearings, parseStyles, caseNumbersIn, caseNumberOfUrl, markOfColor, serialToDate, textToDate, headerColumns,
   hyperlinkOfFormula, dateNote, namesMatch, parseBriefing, briefingFor, briefingChips, BRIEFING_FILE, parseBriefingFile, refreshText, markHearing, looseFileCounts, placeMatches, findPlace, placeText, upcoming, dayText, daysAway, daysAwayText, shortDate, hearingForPlace, nameWords,
   fillEcourtLinks, ecourtUrlOf, briefingsFor, motionTag, caseWindowUrl, caseWindowKey,
+  pdfCountAt, logPdfCount, newPostings, newFilingFlag,
 } from "./viewer/hearing-sheet.js";
 
 let fails = 0, passes = 0;
@@ -336,6 +337,32 @@ check("how far off a day is, for its heading", [daysAwayText(day(2026, 11, 18), 
 check("Date Submitted said short", [shortDate(day(2026, 11, 12), NOW), shortDate(day(2025, 11, 12), NOW)], ["11/12", "11/12/25"]);
 check("a folder's hearing: the next one for its case", hearingForPlace(hearings, { name: "Jane Doe Initech", numbers: ["26STCV09999"] }, NOW).row, 5);
 check("…else the latest past one", hearingForPlace(hearings, { name: "Doe Initech", numbers: ["99STCV99999"] }, NOW).row, 8);
+
+console.log("6b. a new filing posted, and the case folder's PDFs not up");
+{
+  const H = 3600000, T = NOW;
+  const log = [{ at: T - 10 * H, count: 4 }, { at: T - 2 * H, count: 5 }];
+  check("the count at a moment: the last logged at or before it", [pdfCountAt(log, T - 11 * H), pdfCountAt(log, T - 5 * H), pdfCountAt(log, T)], [null, 4, 5]);
+  check("logged only where it changed", [logPdfCount(log, 5, T).length, logPdfCount(log, 6, T).slice(-1)[0]], [2, { at: T, count: 6 }]);
+  check("trimmed, the newest before the cut kept", logPdfCount([{ at: T - 100 * 86400000, count: 1 }, { at: T - 90 * 86400000, count: 2 }], 3, T).map((e) => e.count), [2, 3]);
+  const slot = (seen) => ({ due: T, filed: T - 86400000, state: "filed", note: "", ...(seen ? { seen } : {}) });
+  const ent = (o) => ({ caseNumber: "25STCV12345", day: "2026-11-20", kind: "motion", motion: slot(), opp: null, reply: null, ...o });
+  check("an opposition on file before E-Court Suite knew the hearing is no posting", newPostings([ent({ opp: slot() })]), []);
+  check("an opposition and a reply, each a posting wanting a PDF", newPostings([ent({ opp: slot(T - 5 * H), reply: slot(T - H) })]).map((p) => [p.want, p.what, p.short]), [[1, ["Opposition"], ["Opp"]], [1, ["Reply"], ["Rep"]]]);
+  check("…both found in one look want two", newPostings([ent({ opp: slot(T - H), reply: slot(T - H) })]).map((p) => p.want), [2]);
+  check("…a posting already settled is left out", newPostings([ent({ opp: slot(T - 5 * H), reply: slot(T - H) })], T - 3 * H).map((p) => p.what), [["Reply"]]);
+  const docket = { count: 9, adds: [{ at: T - 5 * H, n: 3, names: ["Opposition to Demurrer", "Declaration of J. Doe", "Proof of Service"] }, { at: T - H, n: 1, names: ["Notice of Errata"] }] };
+  check("the docket's rises count only where the hearing is the only motion on calendar", newPostings([ent({ docket })]), []);
+  check("…there, each rise is a posting wanting one PDF, the opposition it brought counted once", newPostings([ent({ docket, onlyMotion: true, opp: slot(T - 5 * H) })]).map((p) => [p.want, p.what, p.short]),
+    [[1, ["Opposition", "Declaration of J. Doe", "Proof of Service"], ["Opp"]], [1, ["Notice of Errata"], ["filing"]]]);
+  const flagOf = (entries, lg, since) => { const f = newFilingFlag(entries, lg, since); return f && (f.missing ? [f.missing, f.before, f.now, f.short] : ["settled", f.settled]); };
+  check("an opposition posted, the folder no fuller since: flagged", flagOf([ent({ opp: slot(T - H) })], log), [1, 5, 5, ["Opp"]]);
+  check("…downloaded (the count went up): settled at the posting", flagOf([ent({ opp: slot(T - 5 * H) })], log), ["settled", T - 5 * H]);
+  check("…opposition downloaded, reply posted since and not: one short", flagOf([ent({ opp: slot(T - 5 * H), reply: slot(T - H) })], log), [1, 5, 5, ["Rep"]]);
+  check("…both posted, one PDF since: one short", flagOf([ent({ opp: slot(T - 12 * H + H * 3), reply: slot(T - 12 * H + H * 3) })], log), [1, 4, 5, ["Opp", "Rep"]]);
+  check("…a posting before Home knew the folder: the folder came with it", flagOf([ent({ opp: slot(T - 20 * H) })], log), ["settled", T - 20 * H]);
+  check("…no folder count at all: nothing", newFilingFlag([ent({ opp: slot(T - H) })], []), null);
+}
 
 // ---- the list on Home -----------------------------------------------------------
 
@@ -865,6 +892,39 @@ async function browserPart() {
     const before = await shell.evaluate(() => window.__opened.length);
     await shell.click("#briefing-refresh");
     check("Refresh briefing opens the eCourt page E-Court Suite answers", (await shell.evaluate(() => window.__opened)).slice(before), ["https://civil.lacourt.org/#lac-refresh-briefing"]);
+
+    console.log("14d2. a new filing posted, and the case folder's PDFs not up");
+    const filingChip = () => acmeRowB.locator(".ci-newfiling-chip");
+    const acmePut = (name, data) => shell.evaluate(async ({ name, data }) => {
+      const acme = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("25STCV12345 ACME");
+      if (data == null) await acme.removeEntry(name);
+      else { const w = await (await acme.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
+      window.dispatchEvent(new Event("focus"));
+    }, { name, data });
+    const acmeEntry = (o) => ({ caseNumber: "25STCV12345", day: iso(inDays(2)), motionType: "Demurrer", key: "a", kind: "motion", motion: st("filed"), opp: st("filed"), reply: st("missing", "Not Filed"), at: Date.now(), ...o });
+    await putBriefing([acmeEntry({})]);
+    await shell.waitForTimeout(1500);
+    check("an opposition on file since before: no flag", await filingChip().count(), 0);
+    await putBriefing([acmeEntry({ opp: { ...st("filed"), seen: Date.now() } })]);
+    await shell.waitForFunction(() => !!document.querySelector("#hearing-list .ci-newfiling-chip"), null, { timeout: 15000 });
+    check("an opposition posted since, the folder no fuller: flagged by the name", [await filingChip().textContent(), /held 1 PDF then and holds 1 now/.test(await filingChip().getAttribute("title"))], ["New Opp", true]);
+    check("…and counted in the summary", /1 with a new filing to download/.test(await shell.textContent("#hearings-summary")), true);
+    check("…apart from the Downloads marker", await acmeRowB.locator(".ci-dl-chip").count(), 0);
+    await acmePut("Opposition.pdf", "%PDF-1.4 stand-in");
+    await shell.waitForFunction(() => !document.querySelector("#hearing-list .ci-newfiling-chip"), null, { timeout: 15000 });
+    check("a PDF downloaded into the folder: the flag clears", await filingChip().count(), 0);
+    await acmePut("Opposition.pdf", null);
+    await shell.waitForTimeout(1500);
+    check("…and does not come back when a PDF is taken out later", await filingChip().count(), 0);
+    const later = Date.now();
+    await putBriefing([acmeEntry({ opp: { ...st("filed"), seen: later - 60000 }, reply: { ...st("filed"), seen: later }, onlyMotion: true, docket: { count: 12, adds: [{ at: later, n: 2, names: ["Reply to Opposition", "Notice of Errata"] }] } })]);
+    await shell.waitForFunction(() => !!document.querySelector("#hearing-list .ci-newfiling-chip"), null, { timeout: 15000 });
+    check("the only motion on calendar: a reply and another filing posted", [await filingChip().textContent(), /Notice of Errata/.test(await filingChip().getAttribute("title"))], ["New Rep", true]);
+    await filingChip().click();
+    await shell.waitForFunction(() => !document.querySelector("#hearing-list .ci-newfiling-chip"), null, { timeout: 15000 });
+    check("…a click dismisses it", await filingChip().count(), 0);
+    check("…without opening the case", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 0);
+    await putBriefing([acmeEntry({ opp: st("filed"), reply: st("filed") })]);
 
     console.log("14e. a Claude workflow run for the case, from PDF+");
     const acmeC = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME"))');
