@@ -943,6 +943,11 @@ async function browserPart() {
     check("each change listed at the top of Hearings", await shell.$$eval("#calendar-changes .cal-item .cal-text", (x) => x.map((t) => t.textContent.replace(/,.*$/, "").replace(/ \(.*$/, "").replace(/:.*$/, ""))).then((l) => l.sort()), ["Added 26STCV07070 NEW v. ARRIVAL", "Off calendar " + new Date(inDays(5)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).split(",")[0]].sort());
     await shell.waitForFunction(() => [...document.querySelectorAll("#hearing-list .hearing-row")].some((r) => r.textContent.includes("NEW v. ARRIVAL")), null, { timeout: 15000 });
     check("…and the new hearing is on the list", true, true);
+    // The owner (2026-11-24): "the calendar changes should come with their own links to those cases in e-court".
+    const addedLink = shell.locator("#calendar-changes .cal-item.k-added .cal-ecourt");
+    check("a change carries its case's eCourt link", await addedLink.count(), 1);
+    await addedLink.click();
+    check("…which opens the case's eCourt page in its case's window", (await shell.evaluate(() => window.__opened)).slice(-1)[0], NEWURL + "#pdfplus-case=26STCV07070");
     // A row of the sheet with no link of its own gets eCourt's from the calendar read.
     // Roe v. Umbrella's row has no link in the sheet; the calendar read has its case id.
     check("the fixture's Roe v. Umbrella row has no link of its own", rowsNow.find((h) => h.caseName === "23STCV04444 Roe v. Umbrella").url, "");
@@ -1001,6 +1006,45 @@ async function browserPart() {
     }
     rowsNow = await sheetRows();
     check("…both undone: the new row out, the red off", [rowsNow.some((h) => h.caseNumber === "26STCV09999" && iso(h.date) === farDay), rowsNow.find((h) => h.caseNumber === "26STCV09999").mark], [false, ""]);
+    // Gone from its day's agenda with no word why: a hearing to check. The
+    // owner (2026-11-24): "if I then click off calendar, that should remove it
+    // from calendar changes as there is no longer a conflict".
+    await putCalendar({ at: Date.now(), windowDays: 10, days: [
+      { day: iso(inDays(2)), state: "ok", rows: [{ motion: "Demurrer", caseText: "25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE", caseId: "111", url: "https://civil.lacourt.org/ecourt/ecms/case?id=111" }] }], gone: [] });
+    const heldItem = shell.locator("#calendar-changes .cal-item.k-held", { hasText: "Doe v. Globex" });
+    await heldItem.waitFor({ timeout: 15000 });
+    check("a hearing gone from the agenda is listed to check, with Off calendar, Keep and eCourt", await heldItem.locator("button").allTextContents(), ["eCourt", "Off calendar", "Keep"]);
+    await heldItem.locator(".cal-ecourt").click();
+    check("…its eCourt link opens the case", (await shell.evaluate(() => window.__opened)).slice(-1)[0], "https://civil.lacourt.org/ecourt/ecms/case?id=222#pdfplus-case=24STCV00777");
+    const doeCal = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("24STCV00777"))');
+    const toggleCal = async () => {
+      await doeCal.waitFor({ timeout: 15000 });
+      await pick(doeCal);
+      await doeCal.locator(".hearing-tools .ci-cal").click();
+    };
+    await toggleCal();
+    await shell.waitForFunction(() => ![...document.querySelectorAll("#calendar-changes .cal-item.k-held")].some((p) => p.textContent.includes("Doe v. Globex")), null, { timeout: 15000 });
+    check("marked off calendar on its row: no longer listed", await heldItem.count(), 0);
+    await shell.keyboard.press("Escape");
+    await shell.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Show off calendar/.test(x.textContent.trim())); if (b) b.click(); });
+    await toggleCal();
+    await heldItem.waitFor({ timeout: 15000 });
+    check("…taken back on calendar: listed again", await heldItem.count(), 1);
+    await shell.keyboard.press("Escape");
+    await shell.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Hide off calendar$/.test(x.textContent.trim())); if (b) b.click(); });
+    await heldItem.locator("button", { hasText: "Off calendar" }).click();
+    await shell.waitForFunction(() => ![...document.querySelectorAll("#calendar-changes .cal-item.k-held")].some((p) => p.textContent.includes("Doe v. Globex")), null, { timeout: 15000 });
+    check("…and its own Off calendar takes it off the list too", await heldItem.count(), 0);
+    for (let k = 0; k < 100 && (await sheetRows()).find((h) => h.caseNumber === "24STCV00777").mark !== "off"; k++) await new Promise((r) => setTimeout(r, 100));
+    check("…the row marked red in the sheet", (await sheetRows()).find((h) => h.caseNumber === "24STCV00777").mark, "off");
+    // Put back on calendar for what follows; decided there, it is not listed again.
+    await shell.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Show off calendar/.test(x.textContent.trim())); if (b) b.click(); });
+    await toggleCal();
+    for (let k = 0; k < 100 && (await sheetRows()).find((h) => h.caseNumber === "24STCV00777").mark; k++) await new Promise((r) => setTimeout(r, 100));
+    await shell.waitForTimeout(800);
+    check("…put back on calendar after its own Off calendar: not listed again", await heldItem.count(), 0);
+    await shell.keyboard.press("Escape");
+    await shell.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Hide off calendar$/.test(x.textContent.trim())); if (b) b.click(); });
     await putCalendar(null);
 
     console.log("14g. Claude workflow runs, from the Claude extension's file: a column on the case's row");
