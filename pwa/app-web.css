@@ -18,9 +18,9 @@
   --c-text: #e7e9ec;
   --c-text-2: #aab1bb;
   --c-text-3: #7b838e;
-  --c-accent: #5b9bff;
-  --c-accent-strong: #3b82f6;
-  --c-accent-soft: rgba(91, 155, 255, 0.14);
+  --c-accent: #7aa5f0;
+  --c-accent-strong: #3f6fc9;
+  --c-accent-soft: rgba(122, 165, 240, 0.13);
   --c-day-band: #262f3e;
   --c-day-text: #bccbe2;
   --c-day-rule: #364257;
@@ -38,9 +38,9 @@
   --c-text: #1b1f24;
   --c-text-2: #555e69;
   --c-text-3: #8a929c;
-  --c-accent: #2563eb;
-  --c-accent-strong: #1d4ed8;
-  --c-accent-soft: rgba(37, 99, 235, 0.09);
+  --c-accent: #2b59b5;
+  --c-accent-strong: #234a99;
+  --c-accent-soft: rgba(43, 89, 181, 0.08);
   --c-day-band: #e3e8f0;
   --c-day-text: #2a3a55;
   --c-day-rule: #cdd5e1;
@@ -908,3 +908,290 @@ body.dragging.has-tabs:not(.home-open) #tab-views::after {
 .home-app .hearings-summary .hs-pill:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 .home-app .hearings-summary > span { margin-left: 6px; }
 .home-app .ci-title .ci-done-mark { margin: 0 -4px 0 0; }
+
+/* ==========================================================================
+   One design system (the owner, 2026-11-24: "make it look more like a
+   professionally designed legal product, and less like it was vibecoded").
+   Tokens first, then every Home surface restated on them. Rules here come
+   last and win over the layers above; what they lay out is unchanged.
+
+   - Colour says state, and only four: in progress (the accent), done
+     (success), wants a look (warning), wrong (danger). Everything else is
+     a neutral. Claude's runs use the same four as PDF-Linker's.
+   - One radius for controls and tags (--r-sm), one for panels (--r-md).
+   - One control height (--h-ctl) for every button on a row or in a head.
+   - Section heads in sentence case; small capitals only for the day.
+   - A status is a dot and words, not a tinted capsule.
+   ========================================================================== */
+:root {
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --h-ctl: 28px;
+  --c-surface-2: #1b1e23;
+  --c-ok: #5cc48d;
+  --c-ok-line: rgba(92, 196, 141, 0.45);
+  --c-warn: #e2a23b;
+  --c-warn-fill: #d99a2b;
+  --c-warn-ink: #1d1404;
+  --c-bad: #f07a70;
+  --c-bad-fill: #c2413a;
+  --c-idle: #6f7781;
+  --c-day-band: #1b1e23;
+  --c-day-text: #9aa3ae;
+  --c-day-rule: rgba(255, 255, 255, 0.07);
+  --shadow-pop: 0 10px 28px rgba(0, 0, 0, 0.38), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --c-row-alt: rgba(255, 255, 255, 0.022);
+}
+:root[data-theme="light"] {
+  --c-surface-2: #f6f7f9;
+  --c-ok: #1f7a4d;
+  --c-ok-line: rgba(31, 122, 77, 0.4);
+  --c-warn: #9a5b00;
+  --c-warn-fill: #e3a32c;
+  --c-warn-ink: #241600;
+  --c-bad: #b42318;
+  --c-bad-fill: #b8322a;
+  --c-idle: #9aa1ab;
+  --c-day-band: #f4f5f7;
+  --c-day-text: #5b6470;
+  --c-day-rule: #e4e7eb;
+  --shadow-pop: 0 10px 28px rgba(16, 24, 40, 0.14), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --c-row-alt: rgba(16, 24, 40, 0.022);
+}
+body { font-variant-numeric: tabular-nums; }
+
+/* --- The tab strip -------------------------------------------------------- */
+.home-tab, .tab { border-radius: var(--r-md) var(--r-md) 0 0; }
+.home-tab { font-weight: 600; }
+.home-tab i { color: var(--c-text-2); }
+.home-tab.active i { color: var(--c-accent); }
+.strip-btn { border-radius: var(--r-sm); }
+.tab-icon { color: var(--c-bad); }
+
+/* --- Menus, dialogs, toasts: one panel ------------------------------------ */
+.shell-menu, .home-menu, .ci-word-menu {
+  border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+  background: var(--c-card); box-shadow: var(--shadow-pop); padding: 4px;
+}
+.shell-menu button, .home-menu .link-btn, .ci-word-item { border-radius: var(--r-xs); }
+.home-menu .link-btn:hover, .ci-word-item:hover, .ci-word-item:focus-visible { background: var(--c-tab-hover); color: var(--c-text); }
+.share-log-dialog { border-radius: var(--r-md); border-color: var(--c-border-strong); box-shadow: var(--shadow-pop); }
+.sl-actions button, #move-bar button { height: var(--h-ctl); padding: 0 12px; border-radius: var(--r-sm); border-color: var(--c-border-strong); }
+.sl-actions button:hover, .sl-actions button:focus-visible { background: var(--c-card-hover); color: var(--c-text); border-color: var(--c-border-strong); }
+#move-bar { border-radius: var(--r-md); border-color: var(--c-border-strong); box-shadow: var(--shadow-pop); }
+#move-bar .mb-go { background: var(--c-accent-strong); border-color: var(--c-accent-strong); }
+#shell-toast { border-radius: var(--r-md); background: #1f2329; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: var(--shadow-pop); font-size: 13px; }
+
+/* --- The sidebar ---------------------------------------------------------- */
+.home-app > .home-tree { background: var(--c-surface-2); padding-top: 20px; }
+.home-tree .recent-head h2, .home-app .home-tree .recent-head h2 {
+  font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--c-text);
+}
+.home-app .tree-node { border-radius: var(--r-xs); }
+.home-app .tree-node:hover { background: var(--c-tab-hover); }
+.tree-icon, .home-app .tree-icon { color: var(--c-text-3); }
+
+/* --- Section heads: sentence case, one weight, buttons of one size -------- */
+.home-app .home-recent { margin-top: 28px; }
+.home-app .home-inner { padding-top: 0; }
+.home-app .home-inner > .home-recent:first-of-type { margin-top: 22px; }
+.home-app .home-tree .tree-add { font-size: 12.5px; color: var(--c-text-2); }
+.home-app .home-tree .tree-add:hover { color: var(--c-accent); }
+.home-app .recent-head { align-items: center; margin-bottom: 10px; min-height: var(--h-ctl); }
+.home-app .home-recent h2 {
+  margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.005em;
+  text-transform: none; color: var(--c-text);
+}
+.home-app .case-head-btns { gap: 6px; }
+.home-app .home-main .recent-head .link-btn {
+  height: var(--h-ctl); padding: 0 10px; border: 1px solid var(--c-border-strong); border-radius: var(--r-sm);
+  background: var(--c-card); color: var(--c-text-2); font-size: 12.5px; font-weight: 500;
+}
+.home-app .home-main .recent-head .link-btn:hover { background: var(--c-card-hover); color: var(--c-text); }
+.home-app .recent-head .link-btn:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+
+/* --- Panels ---------------------------------------------------------------- */
+.home-app .case-list, .home-app #recent-list {
+  border-radius: var(--r-md); border-color: var(--c-border-strong);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+:root[data-theme="light"] .home-app .case-list, :root[data-theme="light"] .home-app #recent-list { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05); }
+.home-app .case-row { border-bottom-color: var(--c-border); }
+.home-app .case-item .ri-icon { color: var(--c-text-3); }
+
+/* --- The summary: a row of filters, colour in a dot ----------------------- */
+.home-app .hearings-summary { gap: 6px; margin: 0 0 12px; }
+.home-app .hearings-summary .hs-pill {
+  display: inline-flex; align-items: center; gap: 7px; height: var(--h-ctl); padding: 0 11px;
+  border: 1px solid var(--c-border-strong); border-radius: var(--r-sm);
+  background: var(--c-card); color: var(--c-text-2); font-size: 12.5px; font-weight: 500;
+}
+.home-app .hearings-summary .hs-pill:hover { background: var(--c-card-hover); color: var(--c-text); }
+.home-app .hearings-summary .hs-pill.hs-warn,
+.home-app .hearings-summary .hs-pill.hs-claude,
+:root:not([data-theme="light"]) .home-app .hearings-summary .hs-pill.hs-claude,
+:root[data-theme="dark"] .home-app .hearings-summary .hs-pill.hs-claude { color: var(--c-text); border-color: var(--c-border-strong); font-weight: 500; }
+.home-app .hearings-summary .hs-pill.hs-warn::before,
+.home-app .hearings-summary .hs-pill.hs-claude::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.home-app .hearings-summary .hs-pill.hs-warn::before { background: var(--c-warn-fill); }
+.home-app .hearings-summary .hs-pill.hs-claude::before { background: var(--c-accent); }
+.home-app .hearings-summary .hs-pill.active:not(.hs-all),
+.home-app .hearings-summary .hs-pill.hs-all.active {
+  background: var(--c-accent-soft); border-color: var(--c-accent); color: var(--c-text); font-weight: 600;
+}
+.home-app .hearings-summary .hs-pill.active.hs-warn::before, .home-app .hearings-summary .hs-pill.active.hs-claude::before { box-shadow: none; }
+.home-app .hearings-summary > span { margin-left: auto; padding-left: 8px; font-size: 12px; color: var(--c-text-3); }
+.home-app .hearings-summary > span.hs-warn { margin-left: 8px; color: var(--c-warn); font-weight: 500; }
+.home-app .hearings-summary .hs-refresh.tone-warn { color: var(--c-warn); }
+.home-app .hearings-summary .hs-refresh.tone-run { color: var(--c-accent); }
+.home-app .hearings-summary .hs-note { color: var(--c-accent); font-size: 12.5px; }
+
+/* --- Calendar changes: a panel, its edge the accent ----------------------- */
+.home-app .calendar-changes {
+  margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--c-border-strong); border-left: 3px solid var(--c-accent);
+  border-radius: var(--r-md); background: var(--c-card); font-size: 12.5px;
+}
+.home-app .calendar-changes .cal-title { font-weight: 600; font-size: 13px; }
+.home-app .calendar-changes .cal-when { color: var(--c-text-3); }
+.home-app .calendar-changes .cal-item { padding: 3px 0 3px 21px; color: var(--c-text-2); }
+.home-app .calendar-changes .cal-item .link-btn { font-size: 12px; color: var(--c-accent); }
+.home-app .calendar-changes .cal-item .link-btn:hover { text-decoration: underline; }
+.calendar-changes .cal-item.k-added .cal-text::before { color: var(--c-ok); }
+.calendar-changes .cal-item.k-off .cal-text::before { color: var(--c-bad); }
+.calendar-changes .cal-item.k-held .cal-text::before { color: var(--c-warn); }
+.home-app .calendar-changes .cal-issue { color: var(--c-warn); }
+.home-app .calendar-changes .cal-issue.warn { color: var(--c-bad); }
+
+/* --- Day headings: a quiet band, the day in small capitals ----------------- */
+.home-app .hearing-day {
+  padding: 7px 16px; background: var(--c-day-band); color: var(--c-day-text);
+  border-top: 1px solid var(--c-day-rule); border-bottom: 1px solid var(--c-day-rule);
+  font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none;
+}
+.home-app .hearing-day .hd-day { font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11.5px; color: var(--c-text); }
+.home-app .hearing-day .hd-more { color: var(--c-day-text); letter-spacing: 0; }
+.home-app .hearing-day .hd-more::before { content: "·"; margin: 0 8px; color: var(--c-text-3); }
+.home-app .hearing-day.today, .home-app .hearing-day.tomorrow { box-shadow: inset 3px 0 0 var(--c-accent); }
+.home-app .hearing-day.today .hd-day, .home-app .hearing-day.tomorrow .hd-day { color: var(--c-accent); }
+.home-app .hearing-past-head { font-size: 12px; letter-spacing: 0.06em; color: var(--c-text-3); }
+
+/* --- Rows ------------------------------------------------------------------ */
+.home-app .ci-num { color: var(--c-text-3); font-size: 0.86em; letter-spacing: 0; }
+.home-app .case-item .ri-name, .home-app .hearing-item .ci-case { font-weight: 500; color: var(--c-text); }
+.home-app .case-item .ci-where { color: var(--c-text-3); }
+.home-app .hearing-row.alt:not(.selected):not(:hover) { background: var(--c-row-alt); }
+.home-app .case-row:hover { background: var(--c-card-hover); }
+/* Selected: a bar down its edge and a wash, no ring. */
+.home-app .hearing-row.selected,
+.home-app .hearing-row.selected:hover { background: var(--c-accent-soft); box-shadow: inset 3px 0 0 var(--c-accent); border-radius: 0; }
+.home-app .hearing-row.in-downloads { box-shadow: inset 3px 0 0 var(--c-warn-fill); }
+.home-app .hearing-row.selected.in-downloads { box-shadow: inset 3px 0 0 var(--c-warn-fill); }
+.home-app .ci-dl-chip { width: 18px; height: 18px; background: transparent; color: var(--c-warn); border: 1px solid var(--c-warn-fill); }
+.home-app .ci-done-mark { color: var(--c-ok); }
+
+/* Tags beside the name: the motion neutral, LEAKS and "2 motions" in their state. */
+.ci-motion {
+  padding: 1px 7px; border-radius: var(--r-xs); border: 1px solid var(--c-border-strong);
+  background: transparent; color: var(--c-text-2); font-size: 11.5px; font-weight: 500; line-height: 1.45; letter-spacing: 0;
+}
+.ci-leaks-chip, :root:not([data-theme="light"]) .ci-leaks-chip {
+  height: 19px; padding: 0 6px; border-radius: var(--r-xs); background: transparent;
+  border: 1px solid var(--c-bad); color: var(--c-bad); font-size: 10.5px; font-weight: 650; letter-spacing: 0.05em;
+}
+.ci-motions-chip, :root:not([data-theme="light"]) .ci-motions-chip {
+  height: 19px; padding: 0 6px; border-radius: var(--r-xs); background: transparent;
+  border: 1px solid var(--c-warn-fill); color: var(--c-warn); font-size: 11px; font-weight: 600;
+}
+
+/* Briefing chips: a paper in order outlined, a problem filled; one shape. */
+.ci-chip { border-radius: var(--r-xs); font-weight: 600; letter-spacing: 0; color: var(--c-text-2); border-color: var(--c-border-strong); }
+.ci-chip.has-due { padding: 3px 7px 4px; }
+.ci-chip .cc-due { font-weight: 500; color: var(--c-text-3); }
+.ci-chip.st-filed, :root:not([data-theme="light"]) .ci-chip.st-filed, :root[data-theme="dark"] .ci-chip.st-filed { color: var(--c-ok); border-color: var(--c-ok-line); background: transparent; }
+.ci-chip.st-late, .ci-chip.st-missing { color: #fff; background: var(--c-bad-fill); border-color: var(--c-bad-fill); }
+.ci-chip.st-late .cc-due, .ci-chip.st-missing .cc-due { color: rgba(255, 255, 255, 0.88); }
+.ci-chip.st-personal { color: var(--c-warn-ink); background: var(--c-warn-fill); border-color: var(--c-warn-fill); }
+.ci-chip.st-personal .cc-due { color: var(--c-warn-ink); opacity: 0.85; }
+.ci-chip.st-unposted { border-style: dashed; }
+.cc-due-once { color: var(--c-text-3); font-weight: 500; }
+
+/* PDF-Linker's status: a dot in its state, then the words. */
+.home-app .case-item .ci-status {
+  display: inline-flex; align-items: center; gap: 7px; padding: 0; border-radius: 0; background: transparent;
+  color: var(--c-text-2); font-size: 12.5px; font-weight: 500;
+}
+.home-app .case-item .ci-status::before,
+.home-app .case-item .ci-status.tone-run::before {
+  content: ""; flex: none; display: inline-block; width: 7px; height: 7px; margin: 0; border-radius: 50%;
+  background: var(--c-idle); vertical-align: 0; animation: none;
+}
+.home-app .case-item .ci-status.tone-idle { color: var(--c-text-3); }
+.home-app .case-item .ci-status.tone-run { color: var(--c-accent); }
+.home-app .case-item .ci-status.tone-run::before { background: var(--c-accent); animation: case-pulse 1.4s ease-in-out infinite; }
+.home-app .case-item .ci-status.tone-ok { color: var(--c-text-2); background: transparent; }
+.home-app .case-item .ci-status.tone-ok::before { background: var(--c-ok); }
+.home-app .case-item .ci-status.tone-warn { color: var(--c-warn); background: transparent; }
+.home-app .case-item .ci-status.tone-warn::before { background: var(--c-warn-fill); }
+.home-app .case-item .ci-status.tone-off { color: var(--c-bad); background: transparent; }
+.home-app .case-item .ci-status.tone-off::before { background: var(--c-bad); }
+.home-app .case-item .ci-status.waiting { outline: none; text-decoration: underline dotted; text-underline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .home-app .case-item .ci-status.tone-run::before { animation: none; } }
+
+/* The Claude run: the same four states as everything else. */
+.ci-run .cr-name { color: var(--c-text-3); }
+.ci-run .cr-frac { border-radius: var(--r-xs); border-color: currentColor; font-weight: 650; opacity: 1; }
+.ci-run.tone-run .cr-frac, .ci-run.tone-run .cr-line,
+:root:not([data-theme="light"]) .ci-run.tone-run .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-run .cr-line,
+:root[data-theme="dark"] .ci-run.tone-run .cr-frac, :root[data-theme="dark"] .ci-run.tone-run .cr-line,
+.ci-run.tone-queued .cr-frac, .ci-run.tone-queued .cr-line { color: var(--c-accent); }
+.ci-run.tone-done .cr-frac, .ci-run.tone-done .cr-line { color: var(--c-ok); }
+.ci-run.tone-error .cr-frac, .ci-run.tone-error .cr-line { color: var(--c-bad); }
+.ci-run.tone-held .cr-frac, .ci-run.tone-paused .cr-frac, .ci-run.tone-quiet .cr-frac,
+.ci-run.tone-held .cr-line, .ci-run.tone-paused .cr-line, .ci-run.tone-quiet .cr-line,
+:root:not([data-theme="light"]) .ci-run.tone-held .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-paused .cr-frac, :root:not([data-theme="light"]) .ci-run.tone-quiet .cr-frac,
+:root:not([data-theme="light"]) .ci-run.tone-held .cr-line, :root:not([data-theme="light"]) .ci-run.tone-paused .cr-line, :root:not([data-theme="light"]) .ci-run.tone-quiet .cr-line,
+:root[data-theme="dark"] .ci-run.tone-held .cr-frac, :root[data-theme="dark"] .ci-run.tone-paused .cr-frac, :root[data-theme="dark"] .ci-run.tone-quiet .cr-frac,
+:root[data-theme="dark"] .ci-run.tone-held .cr-line, :root[data-theme="dark"] .ci-run.tone-paused .cr-line, :root[data-theme="dark"] .ci-run.tone-quiet .cr-line { color: var(--c-warn); }
+.ci-run .cr-line { font-weight: 500; }
+.ci-run.tone-canceled .cr-frac, .ci-run.tone-canceled .cr-line { color: var(--c-text-3); }
+
+/* A selected case's buttons: one height, one radius, one gap. */
+.hearing-tools { gap: 6px; padding-top: 4px; padding-bottom: 12px; }
+.home-app .hearing-tools .ci-slot, .home-app .hearing-tools .ci-actions { width: auto !important; margin: 0; }
+.home-app .hearing-tools .ci-slot .ci-ico { margin: 0; }
+.home-app .hearing-tools .ht-open,
+.home-app .hearing-tools .ci-ico,
+.home-app .hearing-tools button.ci-ico,
+.home-app .hearing-tools .ci-takeover,
+.home-app .hearing-tools .ci-line-btn,
+.home-app .hearing-tools .ci-line-add,
+.home-app .hearing-tools .ci-word-btn,
+.home-app .hearing-tools .ci-share-log {
+  height: var(--h-ctl); padding: 0 11px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500;
+  border: 1px solid var(--c-border-strong); background: var(--c-card); color: var(--c-text); opacity: 1;
+}
+.home-app .hearing-tools .ci-line-btn { width: var(--h-ctl); min-width: 0; padding: 0; color: var(--c-text-2); }
+.home-app .hearing-tools .ht-open { background: var(--c-accent-strong); border-color: var(--c-accent-strong); color: #fff; font-weight: 600; }
+.home-app .hearing-tools .ci-ico:hover, .home-app .hearing-tools .ci-ico:focus-visible,
+.home-app .hearing-tools .ci-line-btn:hover:not(:disabled) { background: var(--c-card-hover); border-color: var(--c-text-3); color: var(--c-text); }
+.home-app .hearing-tools .ci-done.on { background: transparent; border-color: var(--c-ok-line); color: var(--c-ok); }
+.home-app .hearing-tools .ci-cal:hover { color: var(--c-bad); border-color: var(--c-bad); }
+.home-app .hearing-tools .ci-claude:hover { color: var(--c-text); }
+.home-app .hearing-tools .ci-takeover { color: var(--c-warn); border-color: var(--c-warn-fill); }
+.home-app .hearing-tools .ci-takeover.armed { background: var(--c-warn-fill); border-color: var(--c-warn-fill); color: var(--c-warn-ink); }
+.home-app .ci-place { background: var(--c-accent-soft); color: var(--c-accent); border-radius: var(--r-xs); }
+.home-app .ci-place-glance { border-radius: var(--r-xs); }
+
+/* The note. */
+.ci-note.has { color: var(--c-warn); }
+.hearing-note .note-text { border-radius: var(--r-sm); border-left-width: 3px; }
+.hearing-note .note-save { height: var(--h-ctl); padding: 0 12px; border-radius: var(--r-sm); background: var(--c-accent-strong); border-color: var(--c-accent-strong); }
+
+/* Empty states. */
+.home-app .case-empty { color: var(--c-text-3); padding: 18px 16px; }
+.case-empty-go { height: var(--h-ctl); padding: 0 12px; border-radius: var(--r-sm); background: var(--c-accent-strong); border-color: var(--c-accent-strong); font-weight: 600; }
+
+/* Focus, everywhere on Home: one ring. */
+.home-app button:focus-visible, #tabstrip button:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.home-app .hearing-tools button, .home-app .hearing-tools .ci-line, .home-app .hearing-tools .ci-word { margin: 0; }
