@@ -2232,7 +2232,7 @@ async function syncCalendar(sheet, briefing, now) {
   calState.at = briefing.calendar.at || 0;
   // Gone with no word why: listed (once), never changed.
   const held = plan.held.filter((x) => !x.seen);
-  for (const x of held) log.push({ id: `${x.key}|held|${now}`, key: x.key, kind: "held", at: now, day: x.day, caseText: x.hg.caseName, motion: x.hg.motion, reason: x.reason, status: x.status, newDay: x.newDay, sheet: x.hg.sheet, row: x.hg.row, caseName: x.hg.caseName, date: x.hg.date });
+  for (const x of held) log.push({ id: `${x.key}|held|${now}`, key: x.key, kind: "held", at: now, day: x.day, caseText: x.hg.caseName, caseNumber: x.hg.caseNumber || "", url: hearingLib.ecourtUrlOf(x.hg), motion: x.hg.motion, reason: x.reason, status: x.status, newDay: x.newDay, sheet: x.hg.sheet, row: x.hg.row, caseName: x.hg.caseName, date: x.hg.date });
   if (held.length) { await calLogSave(); calNotify("Check the hearings sheet", held.map((x) => calLib.changeText({ ...x, kind: "held" }).text)); }
   const n = plan.adds.length + plan.offs.length;
   if (!n) { calState.waiting = 0; calState.why = ""; calState.refused = []; return false; }
@@ -2256,12 +2256,12 @@ async function syncCalendar(sheet, briefing, now) {
     const lines = [];
     for (const p of res.placed) {
       const a = plan.adds.find((x) => x.key === p.key);
-      const e = { id: `${p.key}|added|${now}`, key: p.key, kind: "added", at: now, day: a.day, caseText: a.caseText, motion: a.motion, movedFrom: a.movedFrom || "", sheet: p.sheet, row: p.row, caseName: p.caseName, date: p.date };
+      const e = { id: `${p.key}|added|${now}`, key: p.key, kind: "added", at: now, day: a.day, caseText: a.caseText, caseNumber: a.caseNumber || "", url: a.url || "", motion: a.motion, movedFrom: a.movedFrom || "", sheet: p.sheet, row: p.row, caseName: p.caseName, date: p.date };
       log.push(e);
       lines.push(calLib.changeText(e).text);
     }
     for (const o of offs) {
-      const e = { id: `${o.key}|off|${now}`, key: o.key, kind: "off", at: now, day: o.day, caseText: o.hg.caseName, motion: o.hg.motion, reason: o.reason, status: o.status, newDay: o.newDay, sheet: o.hg.sheet, row: o.hg.row, caseName: o.hg.caseName, date: o.hg.date };
+      const e = { id: `${o.key}|off|${now}`, key: o.key, kind: "off", at: now, day: o.day, caseText: o.hg.caseName, caseNumber: o.hg.caseNumber || "", url: hearingLib.ecourtUrlOf(o.hg), motion: o.hg.motion, reason: o.reason, status: o.status, newDay: o.newDay, sheet: o.hg.sheet, row: o.hg.row, caseName: o.hg.caseName, date: o.hg.date };
       log.push(e);
       lines.push(calLib.changeText(e).text);
     }
@@ -2371,7 +2371,12 @@ function runCell(hg, placeName, runs, now) {
 /** The list of changes at the top of Hearings. */
 function renderCalendarChanges(box, sheet, briefing, now) {
   box.textContent = "";
-  const log = (calLog || []).filter((e) => !e.cleared && !e.resolved && (e.kind === "held" ? !e.undone : now - e.at < CAL_SHOWN_MS));
+  const rowOf = (e) => (e.sheet || e.caseName ? sheet.hearings.find((x) => x.sheet === e.sheet && x.caseName === e.caseName && x.date === e.date) : null) || null;
+  // A hearing to check whose row is marked off calendar (here, on its row, or
+  // in Excel) is no longer a conflict (the owner, 2026-11-24: "if I then click
+  // off calendar, that should remove it from calendar changes as there is no
+  // longer a conflict"); taken back on calendar, it is listed again.
+  const log = (calLog || []).filter((e) => !e.cleared && !e.resolved && (e.kind === "held" ? !e.undone && (rowOf(e) || {}).mark !== "off" : now - e.at < CAL_SHOWN_MS));
   const cal = briefing && !briefing.none ? briefing.calendar : null;
   const issues = [];
   if (calState.waiting && calState.why === "leave") issues.push({ text: `${calState.waiting} calendar change${calState.waiting === 1 ? "" : "s"} for ${sheet.name} waiting for your leave to write it.`, action: "Allow" });
@@ -2424,11 +2429,21 @@ function renderCalendarChanges(box, sheet, briefing, now) {
     txt.textContent = said.text + (e.undone ? " — undone" : "");
     p.title = said.title;
     p.appendChild(txt);
-    const btn = (label, title, fn) => { const b = document.createElement("button"); b.className = "link-btn"; b.textContent = label; b.title = title; b.addEventListener("click", fn); p.appendChild(b); };
+    const btn = (label, title, fn) => { const b = document.createElement("button"); b.className = "link-btn"; b.textContent = label; b.title = title; b.addEventListener("click", fn); p.appendChild(b); return b; };
+    // Each change carries its case's eCourt link (the owner, 2026-11-24: "the
+    // calendar changes should come with their own links to those cases in
+    // e-court"), opened as a hearing row's eCourt button opens it: a Chrome
+    // window of its own, the case's if one is open (caseWindowUrl).
+    const hg = rowOf(e);
+    const link = hearingLib.ecourtUrlOf(hg) || (hearingLib.isWebLink(e.url) ? e.url : "");
+    if (link) {
+      const who = hg || { caseName: e.caseName || e.caseText || "", caseNumber: e.caseNumber || "" };
+      const b = btn("eCourt", `Open ${who.caseNumber || who.caseName || "this case"} in eCourt`, (ev) => { ev.stopPropagation(); window.open(hearingLib.caseWindowUrl(link, who), "_blank", "noopener"); });
+      b.classList.add("cal-ecourt");
+    }
     if ((e.kind === "added" || e.kind === "off") && !e.undone) btn("Undo", e.kind === "added" ? "Take this row back out of the sheet; it will not be added again" : "Take the red off: on calendar again", () => undoCalendar(e));
     if (e.kind === "held") {
-      const hg = sheet.hearings.find((x) => x.sheet === e.sheet && x.caseName === e.caseName && x.date === e.date);
-      if (hg && !hg.mark) btn("Off calendar", "Mark it red in the sheet", async () => { e.resolved = true; log.push({ id: `${e.key}|off|${Date.now()}`, key: e.key, kind: "off", at: Date.now(), day: e.day, caseText: e.caseText, manual: true, cleared: true }); await calLogSave(); setHearingMark(hg, "off"); });
+      if (hg && !hg.mark) btn("Off calendar", "Mark it red in the sheet", async () => { e.resolved = true; calLog.push({ id: `${e.key}|off|${Date.now()}`, key: e.key, kind: "off", at: Date.now(), day: e.day, caseText: e.caseText, manual: true, cleared: true }); await calLogSave(); setHearingMark(hg, "off"); });
       btn("Keep", "It stays as it is; this is not asked again", async () => { e.resolved = true; calLog.push({ id: `${e.key}|kept|${Date.now()}`, key: e.key, kind: "kept", at: Date.now(), day: e.day, cleared: true }); await calLogSave(); hearingsShown = ""; renderCaseFolders(); });
     }
     box.appendChild(p);

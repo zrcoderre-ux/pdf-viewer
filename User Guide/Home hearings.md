@@ -240,11 +240,15 @@ and Home writes them into your hearings sheet:
   **Moved from Dec 2**. One taken off calendar turns red. The case needs its
   eCourt link (on the row, or one Home found for it) to be checked.
 - **Gone with no word why**: nothing changes in the sheet. Home lists it as
-  "Check …" with **Off calendar** and **Keep** buttons.
+  "Check …" with **Off calendar** and **Keep** buttons. Marking it off
+  calendar, there or on its own row, takes it off the list: there is no
+  longer anything to check.
 
 Nothing changes silently. Every change is listed in **Calendar changes** at
 the top of Hearings, with **Undo**: an added row is taken back out (and not
-added again), and a red mark is taken off. A Windows notification from PDF+
+added again), and a red mark is taken off. Each change has an **eCourt**
+button that opens its case, in the case's Chrome window as a hearing row's
+eCourt button does. A Windows notification from PDF+
 (and one from E-Court Suite when eCourt's calendar changes) says what changed.
 Rows you marked Done or Off calendar, and past days, are never touched. A day
 eCourt could not be read (signed out, a failed page) changes nothing.

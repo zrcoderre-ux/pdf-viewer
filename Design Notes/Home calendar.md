@@ -94,7 +94,23 @@ box at the top of Hearings (`renderCalendarChanges`): the last two days'
 changes with **Undo** (`undoCalendar`: `removeCalendarRow` takes an added row
 out with the blank row above it, and a date row left with no case; an off is
 marked "" again), and every held one with **Off calendar** and **Keep**.
-Clear takes the made changes off the list. **Refresh from eCourt** (was
+Clear takes the made changes off the list.
+
+The owner (2026-11-24): "the calendar changes should come with their own
+links to those cases in e-court and when a case is removed from e-court and
+Calendar changes flagges it, if I then click off calendar, that should remove
+it from calendar changes as there is no longer a conflcit." Each item now has
+an **eCourt** button (`.cal-ecourt`): the link of its sheet row
+(`ecourtUrlOf`, found as Off calendar finds it: sheet, case name, date), else
+the `url` the log entry now records (added, off and held entries carry `url`
+and `caseNumber`), opened through `caseWindowUrl` like a hearing row's eCourt
+button. A held item is not listed while its row reads off calendar
+(`hg.mark === "off"`, a mark still waiting for Excel included), however it
+was marked: the row's own Off calendar button left it listed before, with
+only its box button gone. Taken back on calendar, it is listed again unless
+it was decided in the box (`resolved`). The box's Off calendar also wrote its
+`off` decision into the filtered copy of the log rather than `calLog`, so it
+was never saved; it now goes into `calLog`. **Refresh from eCourt** (was
 Refresh briefing) opens `#lac-refresh-briefing`, which now reads the calendar
 too.
 
