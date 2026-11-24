@@ -5,7 +5,8 @@ each one, whether its case is downloaded yet.
 
 ## Linking the sheet
 
-Open the settings menu (the sliders button at the top right of Home) and
+Open the settings menu (the sliders button at the right of the tab strip, beside
+the light/dark button, while Home is shown) and
 choose **Link hearings sheet…**, then pick the workbook (`.xlsx` or `.xlsm`).
 **Link Downloads…** is in the same menu. While either still needs setting up,
 the button shows an orange dot, and the empty list offers the same button. You link it once. Home reads it again each time you save
@@ -51,8 +52,9 @@ the meantime.
 
 ## Notes
 
-Every hearing has a **sticky note** before the case number. An outlined note
-means there is no note yet; click it to write one. A yellow, filled-in note
+A hearing with a note has a yellow **sticky note** before its case number. On
+a hearing with none, an outlined note appears there when you point at the row
+or select it; click it to write one. A yellow, filled-in note
 means there is one; click it to read or change it, or **Remove note** to take
 it out. **Save** (or Ctrl+Enter) writes the note into the case's **Date** cell
 in your sheet, where you keep notes by hand. A row whose Date cell holds the
@@ -75,7 +77,7 @@ folders opened in the app, the hearing row *is* that folder:
   name: those are the ones left to file. (A case still being worked shows
   none.) Drag the row onto a folder on the left to file it.
 - The pill says what PDF-Linker has done in it (Not run yet, Running — ETA …,
-  Finished …), and the line under the name names the folder.
+  Finished …). Hover over the row for the folder's name and where it is.
 - The folder's buttons are on the row: **Word**, **Log to share**,
   **Prioritize** (or its place in PDF-Linker's line with ▲ ▼ ✕) and **Take
   over** when a run stopped part-way.
@@ -98,10 +100,12 @@ number for the surest match.
 
 ## A case's buttons
 
-Each row shows only what you want to see for every case at a glance: the sticky
-note, case number and name, the ✓ when done, the Downloads icon, the motion and
-folder, the briefing chips, PDF-Linker's status and the case's place in
-PDF-Linker's line.
+Each row shows only what you want to see for every case at a glance: the case
+number and name, the motion as a tag beside the name (under it when the line
+has no room for both), the sticky note where there is one, the ✓ when done,
+the Downloads icon, the briefing chips, PDF-Linker's status, the case's place
+in PDF-Linker's line and the Claude run. Every other case is shaded a little
+darker, starting again under each day, so a row is easy to follow across.
 
 **Click a case to select it.** Its buttons open in a bar under it, with their
 names: **Open case folder** (or **Find its folder…** when Home hasn't found
@@ -118,8 +122,20 @@ you don't have to press it again; ▲ ▼ ✕ change it at any time.
 PDF-Linker's status is spelled out at the right of the row ("Finished 2:40
 PM", "Running — ETA ~4.10PM"): green finished, amber something to answer or a
 run that looks stopped, blue (pulsing) running, grey not run yet. One too long
-for its column ends in "…"; hover over it to read it whole. A case name too
-long for the row is cut short the same way, so nothing is pushed off the edge.
+for its column ends in "…"; hover over it to read it whole. The status and
+Claude columns are only as wide as their widest row needs, so the case name
+gets the rest. A case name too long for the row wraps onto a second line and
+is cut short after that, so nothing is pushed off the edge.
+
+## The summary and the days
+
+The summary above the list counts what needs doing first (**not
+downloaded**, **with briefing not filed**, **Claude runs going**), then **to
+work up**, **downloaded** and **done**. Each count is a button: click it to
+list only those hearings, and click it again (or **to work up**) to list them
+all. Each day's heading says how far off it is and how many hearings it holds
+("Thu, Nov 26 · in 2 days · 2 hearings"); Today and Tomorrow are marked in
+blue.
 
 A red **LEAKS** tag by the case name means the case folder has a LEAKS.xlsx:
 PDF-Linker flagged values for you to answer in its Fix? column. It shows on
@@ -160,12 +176,16 @@ With E-Court Suite 3.49.29 or later, each hearing shows small **Mot**, **Opp**
 and **Rep** chips, each with its due date underneath ("Due 11/14"), coloured
 as the eCourt case page colours them:
 
-- green ✓ filed on time;
-- red ! filed late, red ✗ not filed;
-- amber ! late for electronic service but timely if personally served (check
-  the proof of service);
+- green outline ✓ filed on time;
+- solid red ! filed late, solid red ✗ not filed;
+- solid amber ! late for electronic service but timely if personally served
+  (check the proof of service);
 - plain: not due yet; dashed ?: nothing on file yet, but eCourt may not have
   posted it.
+
+A problem is filled in solid so it stands out; a paper in order is only
+outlined. Where every chip on a row is due the same day, the date is said once,
+after the chips.
 
 A case with more than one motion set the same day (eCourt and Copy All put
 them on one row) shows a line of chips for each, led by the motion's short name

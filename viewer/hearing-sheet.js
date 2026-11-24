@@ -942,6 +942,22 @@ export function dayText(at, now) {
   return t.toLocaleDateString(undefined, opts);
 }
 
+/** Whole calendar days from today to `at`: 0 today, 1 tomorrow, -3 three days ago. */
+export function daysAway(at, now) {
+  const a = new Date(at); a.setHours(12, 0, 0, 0);
+  const d = new Date(now); d.setHours(12, 0, 0, 0);
+  return Math.round((a.getTime() - d.getTime()) / 86400000);
+}
+
+/** "in 2 days", "3 days ago"; "" for today and tomorrow, which dayText names. */
+export function daysAwayText(at, now) {
+  if (!at) return "";
+  const n = daysAway(at, now);
+  if (n === 0 || n === 1) return "";
+  if (n === -1) return "yesterday";
+  return n > 0 ? `in ${n} days` : `${-n} days ago`;
+}
+
 /** "11/12" (this year) or "11/12/25": the Date Submitted as the row says it. */
 export function shortDate(at, now) {
   if (!at) return "";
