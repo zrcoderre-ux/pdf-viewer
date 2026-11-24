@@ -1297,3 +1297,122 @@ export function attachAreaDrag({ pageNumber, pageWrapper, getActive, onBox }) {
     document.addEventListener("mouseup", onUp, true);
   });
 }
+
+/**
+ * What a page DRAWS that its text layer does not say, read off its operator
+ * list (`ops`: { fnArray, argsArray }, pdf.js's OPS as `O`), in user space.
+ *
+ * The screenshot covers a PDF's names where the text layer says they stand
+ * (text-reader.js, pdfNamesOn). Three things on a page carry words the text
+ * layer does not, and a name in any of them went into the picture as it stood,
+ * under a toast saying the names were in their pseudonyms:
+ *
+ *   - `images`: every picture painted on the page (a scan, a letterhead, an
+ *     exhibit, a signature, a JBIG2 page drawn as image masks), the unit
+ *     square it is drawn into taken through the transform, as [x1, y1, x2, y2].
+ *     Words in a picture cannot be read to be covered, so the picture is.
+ *   - `annots`: every annotation whose appearance draws letters or digits or
+ *     a picture (a filled form field, a FreeText note, a stamp), as its rect.
+ *     pdf.js paints their appearances into the canvas and leaves them out of
+ *     the text layer. A checkbox's tick (no letter, no digit) is not one.
+ *   - `hiddenOutside`: text drawn INVISIBLY (render mode 3 or 7: an OCR layer)
+ *     somewhere no picture lies under it. An OCR layer over a scan is covered
+ *     with the scan; one over type drawn as outlines stands over words the
+ *     page draws as shapes, which the OCR may have read wrong, so the names
+ *     the key finds in that layer cannot vouch for what the shapes say.
+ *
+ * Followed through save / restore / transform, a form XObject's matrix and an
+ * annotation's; a text run's ends from the text matrix and its glyphs' widths.
+ */
+export function pictureRegions(ops, O) {
+  const out = { images: [], annots: [], hiddenOutside: false };
+  if (!ops || !O || !ops.fnArray) return out;
+  const I = [1, 0, 0, 1, 0, 0];
+  const mul = (a, b) => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3], a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
+  const pt = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+  const boxOf = (m) => {
+    const ps = [pt(m, 0, 0), pt(m, 1, 0), pt(m, 0, 1), pt(m, 1, 1)];
+    const xs = ps.map((p) => p[0]), ys = ps.map((p) => p[1]);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  };
+  const has = (k) => k != null;
+  const paint1 = new Set([O.paintImageXObject, O.paintInlineImageXObject, O.paintImageMaskXObject, O.paintJpegXObject, O.paintSolidColorImageMask].filter(has));
+  const show = new Set([O.showText, O.showSpacedText, O.nextLineShowText, O.nextLineSetSpacingShowText].filter(has));
+  let m = I.slice();
+  let st = { mode: 0, size: 0, leading: 0, cs: 0, ws: 0, hs: 1 };
+  const stack = [];
+  let tm = I.slice(), lx = 0, ly = 0, x = 0, y = 0;
+  let annot = null; // the annotation being drawn: { rect, text, image }
+  const hidden = []; // [x, y] ends of invisible runs, user space
+  const image = (bm) => {
+    if (annot) annot.image = true;
+    else out.images.push(boxOf(bm));
+  };
+  for (let k = 0; k < ops.fnArray.length; k++) {
+    const fn = ops.fnArray[k];
+    const a = ops.argsArray[k] || [];
+    if (fn === O.save) stack.push([m, { ...st }]);
+    else if (fn === O.restore) { const s = stack.pop(); if (s) { m = s[0]; st = s[1]; } else { m = I.slice(); } }
+    else if (fn === O.transform) m = mul(a, m);
+    else if (fn === O.paintFormXObjectBegin) { stack.push([m, { ...st }]); if (Array.isArray(a[0])) m = mul(a[0], m); }
+    else if (fn === O.paintFormXObjectEnd) { const s = stack.pop(); if (s) { m = s[0]; st = s[1]; } }
+    else if (has(O.beginAnnotation) && fn === O.beginAnnotation) {
+      stack.push([m, { ...st }]);
+      annot = { rect: Array.isArray(a[1]) ? a[1].slice(0, 4) : null, text: "", image: false };
+      m = I.slice();
+      if (Array.isArray(a[2])) m = mul(a[2], m);
+      if (Array.isArray(a[3])) m = mul(a[3], m);
+    } else if (has(O.endAnnotation) && fn === O.endAnnotation) {
+      if (annot && annot.rect && (annot.image || /[\p{L}\p{N}]/u.test(annot.text))) out.annots.push({ rect: annot.rect, text: annot.text, image: annot.image });
+      annot = null;
+      const s = stack.pop(); if (s) { m = s[0]; st = s[1]; }
+    }
+    else if (paint1.has(fn)) image(m);
+    else if (fn === O.paintImageXObjectRepeat) {
+      const [, sx, sy, pos] = a;
+      for (let j = 0; pos && j + 1 < pos.length; j += 2) image(mul([sx, 0, 0, sy, pos[j], pos[j + 1]], m));
+    } else if (fn === O.paintImageMaskXObjectRepeat) {
+      const [, sx, kx = 0, ky = 0, sy, pos] = a;
+      for (let j = 0; pos && j + 1 < pos.length; j += 2) image(mul([sx, kx, ky, sy, pos[j], pos[j + 1]], m));
+    } else if (fn === O.paintImageMaskXObjectGroup) {
+      for (const g of a[0] || []) image(Array.isArray(g && g.transform) ? mul(g.transform, m) : m);
+    } else if (fn === O.paintInlineImageXObjectGroup) {
+      for (const g of a[1] || []) image(Array.isArray(g && g.transform) ? mul(g.transform, m) : m);
+    }
+    else if (fn === O.beginText) { tm = I.slice(); lx = ly = x = y = 0; }
+    else if (fn === O.setTextMatrix) { tm = a.slice(0, 6); lx = ly = x = y = 0; }
+    else if (fn === O.moveText) { x = lx += a[0]; y = ly += a[1]; }
+    else if (fn === O.setLeadingMoveText) { st.leading = -a[1]; x = lx += a[0]; y = ly += a[1]; }
+    else if (fn === O.setLeading) st.leading = a[0];
+    else if (fn === O.nextLine) { x = lx; y = ly += st.leading; }
+    else if (fn === O.setFont) st.size = a[1] || 0;
+    else if (fn === O.setCharSpacing) st.cs = a[0] || 0;
+    else if (fn === O.setWordSpacing) st.ws = a[0] || 0;
+    else if (fn === O.setHScale) st.hs = (a[0] || 100) / 100;
+    else if (fn === O.setTextRenderingMode) st.mode = a[0];
+    else if (show.has(fn)) {
+      if (fn === O.nextLineShowText || fn === O.nextLineSetSpacingShowText) { x = lx; y = ly += st.leading; }
+      const glyphs = Array.isArray(a[0]) ? a[0] : a;
+      const startX = x;
+      let text = "";
+      for (const g of glyphs) {
+        if (typeof g === "number") { x -= (g * st.size / 1000) * st.hs; continue; }
+        if (!g || typeof g !== "object") continue;
+        text += g.unicode || "";
+        x += ((g.width || 0) * st.size / 1000 + st.cs + (g.isSpace ? st.ws : 0)) * st.hs;
+      }
+      const invisible = st.mode === 3 || st.mode === 7;
+      if (annot) { if (!invisible) annot.text += text + " "; }
+      else if (invisible && /\S/.test(text)) {
+        const tmc = mul(tm, m);
+        hidden.push(pt(tmc, startX, y), pt(tmc, x, y));
+      }
+    }
+  }
+  if (hidden.length) {
+    const slack = 3; // points: a glyph's origin a hair past the picture's edge
+    const inside = (p) => out.images.some((b) => p[0] >= b[0] - slack && p[0] <= b[2] + slack && p[1] >= b[1] - slack && p[1] <= b[3] + slack);
+    out.hiddenOutside = !hidden.every(inside);
+  }
+  return out;
+}

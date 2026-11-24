@@ -491,6 +491,13 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
   inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; white-space: normal;
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #555;
 }
+/* …and a picture, a filled field or a note on a sheet, whose words cannot be
+   read to be faked (pictureBlocks): covered whole, a shade off the paper so it
+   reads as covered and not as blank page. */
+.shot-cover.pic {
+  background: #eceff1; display: flex; align-items: center; justify-content: center; padding: 4px; text-align: center; white-space: normal;
+  font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #78838c;
+}
 body.redact-on .redactLayer .redact-rect { pointer-events: auto; }
 body.redact-on .redactLayer .redact-rect:hover { background: rgba(197, 34, 31, 0.5); }
 /* While the tool is on the drag belongs to it, in either mode, and the pointer
