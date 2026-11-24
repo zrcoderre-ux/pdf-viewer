@@ -499,6 +499,26 @@ largest factor the run fits at by search (to the thousandth, never more than
 fits). A numbered line with nothing after its number holds no room
 (`bare`): its number is in the margin.
 
+**A single-spaced block at the PDF's own spacing** (`pdfsync.ownRowTops`,
+`--gn-shift`; `test-own-row-spacing.mjs`; the owner, 2026-11-24: yes to "use
+the PDF's own row spacing there"). A proof of service set its 13-point
+paragraphs at 14 points' leading on 22-point paper, so the export wrote a line
+at each number and one between most of them; held at the numbers and the half
+lines, each line had 11 points and `fitRuns` took the block down to 0.7 of the
+PDF's size (9.2 pt for 13). Now, where `fitRuns` would take a run between two
+numbers down and every line of it holding room has its own PDF row by its
+words (`alignLines`, with no window round its number: a block drifts more
+than half a pitch from its numbers by its foot, and the row nearest a slot
+there is the line above's), set at least most of a line under the one before,
+the run's lines stand on those rows' tops, the PDF's leading, at their size.
+The block is decided whole: a run beside one so placed whose lines also have
+their rows joins it, and a run that would then stand over a line left on its
+slot is left on its numbers, so no line stands on another. Lines side by side
+(a caption's two columns, rows level) are no block and are left to `fitRuns`.
+The margin numbers stay on the grid: a numbered line moved to its row carries
+`--gn-shift`, the distance back to its slot, and its number is drawn there.
+The plan keeps the shifts (`gnShift`) through both of its cached paths.
+
 **…and a caption's `)` side is no type** (`typeTextOf` in `text-reader.js`;
 2026-10-28). The owner, of a complaint whose caption is boxed by a column of
 `)`s: "The PDF does not have these weird sizing inconsistencies. And the
@@ -629,7 +649,9 @@ The audit itself: `node audit/layout-audit.mjs CASE_FOLDER [--pages 1-12]
 origin-private folder of its own with its PDF and the key, side by side. The
 report names real text and stays on the machine. Residuals: lines on pleading
 paper stand on their numbers where the PDF sets a single-spaced block at its
-own leading, a few points off (by design: the numbers come first); a page whose
+own leading, a few points off (by design: the numbers come first; since
+2026-11-24 a block that could not stand there at its size stands on the PDF's
+rows instead: "A single-spaced block at the PDF's own spacing", below); a page whose
 export PDF-Linker scrambled (a four-column service list on a leaning scan)
 cannot be drawn better than its export.
 
