@@ -82,6 +82,13 @@ const EXPORT = [
   " 1  Plaintiff Odile Brackenbury moves to compel further responses.",
   " 2  The declaration of Odile Brackenbury is attached.",
 ].join("\n") + "\n";
+// An export page with no stand-in and no real name on it: the text side says the page holds none.
+const CLEAN = [
+  "====== Page 1 ======",
+  " 1  Plaintiff moves to compel further responses.",
+  " 2  The exhibit below is the invoice for the repairs.",
+].join("\n") + "\n";
+const UNREAD = "====== Page 1 ======\n[DID NOT OCR]\n";
 
 const srv = await startServer();
 const browser = await launchBrowser(chromium, CHROME);
@@ -98,7 +105,7 @@ try {
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
 
-  const open = async (kind) => {
+  const open = async (kind, EXPORT) => {
     await page.evaluate(async ({ kind, EXPORT, KEY }) => {
       const { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize,
         setTextRenderingMode, moveText, showText, setFillingColor } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
@@ -108,12 +115,20 @@ try {
       const black = rgb(0, 0, 0), red = rgb(1, 0, 0);
       pg.drawText("1", { x: 40, y: 700, size: 12, font, color: black });
       pg.drawText("2", { x: 40, y: 676, size: 12, font, color: black });
-      if (kind === "text" || kind === "late") {
+      if (kind === "text" || kind === "text2" || kind === "late") {
         pg.drawText("Plaintiff", { x: 72, y: 700, size: 12, font, color: black });
         pg.drawText("Nadia Quillfeather", { x: 72 + font.widthOfTextAtSize("Plaintiff ", 12), y: 700, size: 12, font, color: red });
         pg.drawText("moves to compel further responses.", { x: 230, y: 700, size: 12, font, color: black });
       } else {
         pg.drawText("Plaintiff moves to compel further responses.", { x: 72, y: 700, size: 12, font, color: black });
+      }
+      if (kind === "clean-image" || kind === "unread-image") {
+        // A picture with no name in it (an exhibit's heading), red as the rest are.
+        const c = document.createElement("canvas"); c.width = 600; c.height = 80;
+        const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, 600, 80);
+        g.fillStyle = "#f00"; g.font = "bold 44px serif"; g.fillText("EXHIBIT A", 10, 56);
+        const png = await doc.embedPng(await new Promise((r) => c.toBlob((b) => b.arrayBuffer().then(r), "image/png")));
+        pg.drawImage(png, { x: 72, y: 560, width: 300, height: 40 });
       }
       if (kind === "image") {
         // A letterhead or an exhibit: the name in a picture.
@@ -194,27 +209,37 @@ try {
     }, before || null);
   };
 
+  // [label, kind, export, run before the shot, what the covers should be, red pixels wanted in the picture]
   const cases = [
-    ["E. the name as the page's text", "text", null, (s) => s.fakes.some((t) => /Odile Brackenbury/.test(t)) && !s.whole.length],
-    ["A. the name in a picture", "image", null, (s) => s.pics >= 1 && !s.whole.length],
-    ["B. the name in a filled form field", "field", null, (s) => s.pics >= 1 && !s.whole.length],
-    ["C. type drawn as shapes under an OCR layer that misread the name", "outline", null, (s) => s.whole.length === 1],
-    ["D. the text layer not yet laid when the picture is taken", "late",
+    ["E. the name as the page's text", "text", EXPORT, null, (s) => s.fakes.some((t) => /Odile Brackenbury/.test(t)) && !s.whole.length],
+    ["A. the name in a picture", "image", EXPORT, null, (s) => s.pics >= 1 && !s.whole.length],
+    ["B. the name in a filled form field", "field", EXPORT, null, (s) => s.pics >= 1 && !s.whole.length],
+    ["C. type drawn as shapes under an OCR layer that misread the name", "outline", EXPORT, null, (s) => s.whole.length === 1],
+    ["D. the text layer not yet laid when the picture is taken", "late", EXPORT,
       "document.querySelector('#pdf-pane .pdf-slot').removeAttribute('data-text-for')", (s) => s.whole.length === 1],
+    // No name on either side: the page goes in as it stands, its picture uncovered.
+    ["F. no name in the text or on the PDF: the picture shown as it stands", "clean-image", CLEAN, null,
+      (s) => s.pics === 0 && !s.whole.length && !s.fakes.length, "some"],
+    // …but a page nobody read ([DID NOT OCR]) is no evidence: covered as before.
+    ["G. the same page where the export reads [DID NOT OCR]", "unread-image", UNREAD, null, (s) => s.pics >= 1 && !s.whole.length],
+    // …and a clean export does not let a name the PDF's own text holds through.
+    ["H. a clean export, the name in the PDF's text: faked", "text2", CLEAN, null, (s) => s.fakes.some((t) => /Odile Brackenbury/.test(t))],
   ];
-  for (const [label, kind, before, want] of cases) {
+  for (const [label, kind, exp, before, want, redWanted] of cases) {
     console.log(label);
-    await open(kind);
+    await open(kind, exp);
     const shotRed0 = await redIn(await page.screenshot());
     check("on the screen, the name is there in red", shotRed0 > 50, `red pixels: ${shotRed0}`);
     const r = await shoot(before);
     check("the picture was taken", !!r.seen && !!snap, JSON.stringify(r));
     if (!r.seen || !snap) continue;
     const red = await redIn(snap);
-    check("no red pixel of the name in the picture", red === 0, `red pixels: ${red}; ${JSON.stringify(r.seen)}`);
+    if (redWanted) check("the page in the picture as it stands, its red picture and all", red > 50, `red pixels: ${red}; ${JSON.stringify(r.seen)}`);
+    else check("no red pixel of the name in the picture", red === 0, `red pixels: ${red}; ${JSON.stringify(r.seen)}`);
     check("covered the way it should be", want(r.seen), JSON.stringify(r.seen));
     check("the screen put back after", r.after === 0);
-    if (kind === "image" || kind === "field") check("the toast says a picture or field was covered", /picture.*covered/.test(r.toast), r.toast);
+    if (kind === "clean-image") check("the toast says the page was shown as it stands", /shown as it stands/.test(r.toast), r.toast);
+    if (kind === "image" || kind === "field" || kind === "unread-image") check("the toast says a picture or field was covered", /picture.*covered/.test(r.toast), r.toast);
     if (kind === "outline" || kind === "late") check("the toast says a page was left out", /left out/.test(r.toast), r.toast);
   }
   check("no page errors", errors.length === 0, errors.join(" | "));

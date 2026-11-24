@@ -1058,6 +1058,7 @@ async function shareThisTab() {
 // declared with the small helpers, which read it: see toast.)
 let shotLeftOut = 0; // …and how many PDF pages it left out whole (pdfNamesOn), for the toast
 let shotPictures = 0; // …and how many pictures, filled fields and notes on them it covered (pictureBlocks)
+let shotClean = 0;    // …and how many PDF pages it took as they stand, no name on either side (textPageClean)
 let shotWithheld = new Set(); // …and the names it covered with WITHHELD (egressSwaps), for the toast
 let shotFlagged = new Set();  // …and the flagged values it covered (flaggedSwaps), folded, for the toast
 
@@ -1432,16 +1433,54 @@ function pdfNamesOn(sheet) {
   if (!el || !canvas || !(canvas.width > 0 && canvas.height > 0)) return null; // nothing drawn on it
   const whole = (why) => ({ sheet, names: [], whole: true, why });
   if (!el.dataset.rendered || el.dataset.textFor !== el.dataset.rendered || !el.__drawnPage || !el.__vp) return whole("its words were still being read");
+  const got = pdfNameCovers(sheet);
+  // NO NAME ON EITHER SIDE: the sheet goes in as it stands, pictures and all
+  // (the owner: "If there are no faked words on the text side, and no
+  // detected real words on the pdf side, it should let me screenshot the pdf
+  // side"). The text side is its export page, which PDF-Linker read off this
+  // same page, OCR and all: no stand-in, no real name the key binds and no
+  // flagged value on it (textPageClean). The PDF side is its text layer, read
+  // above and found holding none. A scan whose export page is [DID NOT OCR],
+  // or holds next to no words, was read by nobody, and is covered as before.
+  if (!got && textPageClean(sheetPageIndex(sheet))) { shotClean++; return null; }
+  if (got && got.whole) return got;
   const pics = sheet.__shotPics;
   if (!pics || pics.page !== el.__drawnPage || !pics.regions) return whole("what it draws could not be read");
   if (pics.regions.hiddenOutside) return whole("its words are drawn as shapes under an OCR layer, which may have read a name wrong");
-  const got = pdfNameCovers(sheet);
-  if (got && got.whole) return got;
   const blocks = pictureBlocks(sheet, el.__vp, pics.regions);
   const inside = (r) => blocks.some((b) => r.x >= b.x - 1 && r.y >= b.y - 1 && r.x + r.w <= b.x + b.w + 1 && r.y + r.h <= b.y + b.h + 1);
   const names = got ? got.names.filter((n) => !n.rects.every(inside)) : [];
   if (!names.length && !blocks.length) return null;
   return { sheet, names, blocks };
+}
+/** The text page a PDF sheet stands for: a pane slot's index, or the page an inline sheet sits in; null where neither. */
+function sheetPageIndex(sheet) {
+  const el = sheet && sheet.parentElement;
+  if (!el) return null;
+  if (el.classList.contains("pdf-slot")) return Number(el.dataset.index);
+  const sec = el.classList.contains("pdf-inline") ? el.closest(".tpage") : null;
+  return sec ? Number(sec.dataset.index) : null;
+}
+/** Below this many letters a text page is not taken as having read its PDF page (textPageClean). */
+const CLEAN_PAGE_MIN_LETTERS = 40;
+/**
+ * Whether text page `i` says its PDF page holds no name: words read off it
+ * (not [DID NOT OCR], not a page of next to no letters), and among them no
+ * stand-in the key reverses, no real value it binds standing unfaked and no
+ * flagged value. Read off the page as it stands (its body where it is built,
+ * else the document's lines), in the disk text, fakes and all.
+ */
+function textPageClean(i) {
+  if (i == null || !Number.isInteger(i) || !doc || !doc.pages[i]) return false;
+  const body = bodyForPage(i);
+  const text = body ? TD.serializeNodes(body) : doc.pages[i].lines.join("\n");
+  if (text.includes(TD.DID_NOT_OCR)) return false;
+  if ((text.match(/\p{L}/gu) || []).length < CLEAN_PAGE_MIN_LETTERS) return false;
+  if (rev && rev.rx && PK.translate(rev, text).count) return false;
+  if (fwd && fwd.rx && egressSwaps(text).length) return false;
+  const frx = flaggedMatcher();
+  if (frx) { frx.lastIndex = 0; const hit = frx.test(text); frx.lastIndex = 0; if (hit) return false; }
+  return true;
 }
 /** The pictures and the annotations drawing words (RD.pictureRegions), in the sheet's own pixels, a pixel past each all round. */
 function pictureBlocks(sheet, vp, regions) {
@@ -1745,7 +1784,7 @@ function shotHeldBack(popWas) {
  */
 async function withFakes(take) {
   // What the PDF sheets draw, read before anything changes on the screen (shotPdfPrep).
-  shotLeftOut = shotPictures = 0;
+  shotLeftOut = shotPictures = shotClean = 0;
   if ((fwd && fwd.rx) || flaggedMatcher()) await shotPdfPrep();
   document.body.classList.add("shot-flags");
   const back = fakesForShot();
@@ -1794,6 +1833,7 @@ $("shot-btn").addEventListener("click", async (e) => {
     toast((!key ? "Screenshot saved to Downloads."
       : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}`
         + (shotPictures ? `${shotLeftOut ? "," : " —"} ${shotPictures} picture${shotPictures === 1 ? "" : "s"} or filled field${shotPictures === 1 ? "" : "s"} on the PDF covered, since words in a picture cannot be read to be faked` : "")
+        + (shotClean ? `${shotLeftOut || shotPictures ? "," : " —"} ${shotClean} PDF page${shotClean === 1 ? "" : "s"} shown as ${shotClean === 1 ? "it stands" : "they stand"}, no name found on ${shotClean === 1 ? "it" : "them"} in the text or the PDF` : "")
         + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : ".")) + flagsSay,
       held.length ? { error: true } : undefined);
   } catch (err) {

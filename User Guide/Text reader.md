@@ -365,7 +365,12 @@ app, which routes it to the reader tab.
   it stands) and every filled form field or typed note, each as a grey box;
   and a PDF page whose words had not finished loading, or whose words are
   drawn as shapes under an OCR layer, is left out of the picture whole. The
-  message counts both. A page shown ⇄ Raw is
+  message counts both. But a PDF page with no name on either side is taken
+  as it stands, pictures and all: its text page has no pseudonym, no real
+  name and no flagged name on it, and nothing in the PDF's own text is a
+  name the key holds. A scanned page counts as read only through its text
+  page, so one that reads [DID NOT OCR], or has next to no words, is still
+  covered. A page shown ⇄ Raw is
   read whole, like the page itself, so
   a name wrapped down a caption's column is faked or covered as one name. The
   flag pop-up and the keep menu are taken off the screen for the picture and
