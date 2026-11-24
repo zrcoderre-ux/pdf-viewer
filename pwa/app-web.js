@@ -1531,7 +1531,7 @@ async function renderCaseFoldersNow() {
     const pill = b.querySelector(".ci-status");
     pill.textContent = st.text;
     pill.classList.add("tone-" + st.tone);
-    pill.title = st.text;
+    pill.title = st.title || st.text;
     b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "")
       + (sheet.state !== "none" ? `\nNo hearing on the list matched it (case numbers it carries: ${listingNumbers(r.listing).concat(hearingLib.caseNumbersIn(r.name)).filter((x, i, a) => a.indexOf(x) === i).join(", ") || "none"}).` : "");
     b.addEventListener("click", async () => {
@@ -3054,7 +3054,7 @@ async function renderHearings(sheet, hv, dlState, now, line) {
     // case folder is done, remove the not downloaded button").
     if (hg.mark === "done" && !st) pill.hidden = true;
     if (hg.waiting) pill.classList.add("waiting");
-    pill.title = said.text;
+    pill.title = said.title || said.text;
     const placeSaid = hearingLib.placeText(place);
     b.title = (folder ? `Case folder: ${folderSaid}\nClick for this case's buttons; double-click to open ${place.name}, the whole case folder.` : "Click for this case's buttons, Find its folder among them; double-click to look for it at once.")
       + `\n${placeSaid.title}` + (st && st.title ? "\n" + st.title : hg.mark ? "\n" + said.title : "") + `\nFrom the hearings sheet: ${hg.sheet}, row ${hg.row}; case number read: ${hg.caseNumber || "none"}.`

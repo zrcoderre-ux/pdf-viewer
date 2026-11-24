@@ -883,3 +883,11 @@ help readability." (Idea 8, moving Case folders below Hearings, was refused:
   above Home while the settings menu is open so the menu is not painted over,
   and the menu is `app-region: no-drag` in PDF+.
 
+### "Finished", the time on the hover (2026-11-24)
+
+The owner: "The pdf linker run can just show Finished with the date and time
+viewable on hover." `statusText` (case-folders.js) says a finished run as
+`Finished` plus what is left to answer (" · 2 held as .LEAK"), no time; its
+`title` ("PDF-Linker's last run finished at …") is now the pill's hover on
+hearing rows and in Case folders, which used to repeat the pill's words. Every
+other state says what it said. `test-case-folders.mjs`, `test-hearing-sheet.mjs`.

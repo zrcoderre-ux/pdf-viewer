@@ -513,7 +513,7 @@ async function browserPart() {
     // status, so lets make them full size again. Also you can cut off any case
     // name that runs too long to avoid anything being pushed off the edge."
     const acmePill = shell.locator('#hearing-list .hearing-row:has(.ri-name:has-text("25STCV12345 ACME HOLDINGS, LP vs TAYLOR ROE")) .ci-status');
-    check("PDF-Linker's status in its words, whole", await acmePill.evaluate((p) => [/^Finished /.test(p.textContent), p.scrollWidth <= p.clientWidth, p.getBoundingClientRect().width > 60]), [true, true, true]);
+    check("PDF-Linker's status in its words, whole", await acmePill.evaluate((p) => [p.textContent === "Finished" && /^PDF-Linker's last run finished at /.test(p.title), p.scrollWidth <= p.clientWidth, p.getBoundingClientRect().width > 60]), [true, true, true]);
     // Whether every row fits its width, and, with one row's name made very
     // long (set and measured at once, before any redraw), that the name is cut
     // short with an ellipsis and its status still whole.
@@ -665,7 +665,7 @@ async function browserPart() {
     await shell.waitForFunction(() => document.querySelector("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), null, { timeout: 10000 });
     check("Prioritize on the hearing puts its folder first in line", await shell.textContent("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), "1st");
     await etaIn(false);
-    await shell.waitForFunction(() => /^Finished /.test(document.querySelector("#hearing-list .hearing-row:nth-of-type(2) .ci-status").textContent), null, { timeout: 10000 });
+    await shell.waitForFunction(() => /^Finished\b/.test(document.querySelector("#hearing-list .hearing-row:nth-of-type(2) .ci-status").textContent), null, { timeout: 10000 });
     check("…and it keeps its place once the run is no longer going", await shell.textContent("#hearing-list .hearing-row:nth-of-type(2) .ci-place"), "1st");
     check("…written into the folder", await shell.evaluate(async () => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
@@ -1135,7 +1135,7 @@ async function browserPart() {
     const moved = (await acmeRow.locator(".hearing-item").getAttribute("title")).match(/^Case folder: (.*)$/m)[1];
     check("the hearing still carries its folder, at its new place", moved, "25STCV12345 ACME (in November)");
     await pick(acmeRow);
-    check("…with its status and its buttons", [/^Finished /.test(await acmeRow.locator(".ci-status").textContent()), await acmeRow.locator(".ci-line").count()], [true, 1]);
+    check("…with its status and its buttons", [/^Finished\b/.test(await acmeRow.locator(".ci-status").textContent()), await acmeRow.locator(".ci-line").count()], [true, 1]);
     check("…and the case folder shows in the list, closed", await shell.$$eval("#tree-list .tree-node.leaf .tree-name", (x) => x.map((e) => e.textContent)), ["25STCV12345 ACME"]);
     await shell.click("#move-bar .mb-cancel");
 
