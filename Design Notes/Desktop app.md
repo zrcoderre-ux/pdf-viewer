@@ -214,7 +214,11 @@ where there is none; a link's own fragment kept after `&then=`), put on by
 loads, and moves the tab into the window it last put that case in, if that
 window is still open, and brings it forward; the window `--new-window` made,
 left empty, closes. No window for the case yet, or it was closed: the tab stays
-in its new window, which becomes the case's. The case -> window map lives in
+in its new window, which becomes the case's. The case's window is always
+maximized (the owner, 2026-11-24: "the ecourt windows it opens should alwasy
+be full size"), when it is made and again when the other link's tab comes in;
+`--new-window` reuses Chrome's last window size and `--start-maximized` reaches
+only the first window of a Chrome not yet running, so the extension does it. The case -> window map lives in
 the extension's session storage, so it starts empty when Chrome restarts, and
 a window opened before this change is unknown to it. Without E-Court Suite (or
 an older one) every link still opens its own window, the mark left on.
