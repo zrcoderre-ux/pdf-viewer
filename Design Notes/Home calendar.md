@@ -110,7 +110,12 @@ was marked: the row's own Off calendar button left it listed before, with
 only its box button gone. Taken back on calendar, it is listed again unless
 it was decided in the box (`resolved`). The box's Off calendar also wrote its
 `off` decision into the filtered copy of the log rather than `calLog`, so it
-was never saved; it now goes into `calLog`. **Refresh from eCourt** (was
+was never saved; it now goes into `calLog`.
+
+The owner (2026-11-24): "calendar changes should show the motion type". Each
+item's text and its motion sit in a column (`.cal-main`), the motion under
+the case as a hearing row's tag (`.ci-motion.cal-motion`): the log entry's
+`motion`, else its sheet row's. **Refresh from eCourt** (was
 Refresh briefing) opens `#lac-refresh-briefing`, which now reads the calendar
 too.
 
