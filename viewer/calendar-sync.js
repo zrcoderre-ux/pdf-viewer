@@ -305,8 +305,9 @@ const shiftList = (v, at, n) => v.split(/\s+/).filter(Boolean).map((x) => shiftR
  * Why rows cannot be put in, or taken out of, the sheet at row `at` (what is
  * under it would need moving that PDF+ does not move), or "".
  */
-export function shiftBlocker(xml, at, { calcChain = false } = {}) {
-  if (/<tableParts\b[^>]*count="[1-9]/.test(xml) || /<tablePart\b/.test(xml)) return "the sheet holds an Excel table";
+export function shiftBlocker(xml, at, { calcChain = false, tables = false } = {}) {
+  // `tables`: the caller moves the sheet's tables with the rows (shiftTable).
+  if (!tables && (/<tableParts\b[^>]*count="[1-9]/.test(xml) || /<tablePart\b/.test(xml))) return "the sheet holds an Excel table";
   if (/<drawing\b/.test(xml)) return "the sheet holds a drawing or chart";
   if (/<legacyDrawing\b/.test(xml)) return "the sheet holds comments";
   for (const r of rowsOf(xml)) {
@@ -387,6 +388,85 @@ export function shiftRows(xml, at, n) {
   headOut = headOut.replace(/<selection\b[^>]*>/g, (t) => fixAttr(fixAttr(t, "sqref", true), "activeCell", false));
   headOut = headOut.replace(/<pane\b[^>]*>/g, (t) => fixAttr(t, "topLeftCell", false));
   return headOut + sheetData + tail;
+}
+
+// ---- Excel tables ---------------------------------------------------------------
+// The owner (2026-11-24), on "the sheet holds an Excel table, so rows cannot
+// be put in above it": a table keeps the range it covers in a part of its own
+// (xl/tables/tableN.xml, named by the sheet's <tablePart r:id>), so rows moved
+// under it must move that range too, or Excel finds the file corrupt.
+
+/** The zip names of the table parts a sheet names, or null where one cannot be found. */
+export function tablePartNames(xml, part, rels) {
+  const ids = [...String(xml).matchAll(/<tablePart\b[^>]*>/g)].map((m) => attrOf(m[0], "r:id"));
+  const map = parseRels(rels);
+  const dir = part.slice(0, part.lastIndexOf("/") + 1).split("/").filter(Boolean);
+  const names = [];
+  for (const id of ids) {
+    const target = id && map.get(id);
+    if (!target) return null;
+    if (target.startsWith("/")) { names.push(target.slice(1)); continue; }
+    const path = [...dir];
+    for (const seg of target.split("/")) { if (seg === "..") path.pop(); else if (seg && seg !== ".") path.push(seg); }
+    names.push(path.join("/"));
+  }
+  return names;
+}
+
+const tableRange = (xml) => {
+  const m = /<table\b[^>]*?\sref="\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)"/.exec(String(xml));
+  return m ? { c1: m[1], r1: +m[2], c2: m[3], r2: +m[4] } : null;
+};
+
+/**
+ * A table part with `n` rows put in at row `at` (n = -1: row `at` taken out),
+ * as shiftRows moves the sheet: every range in it (the table, its filter, its
+ * sort) moved or stretched by shiftRef. { xml } or { why } where the table
+ * cannot follow: its header row or totals row taken out, or its last data row.
+ */
+export function shiftTable(xml, at, n) {
+  const t = tableRange(xml);
+  if (!t) return { why: "the sheet holds an Excel table PDF+ could not read" };
+  if (n < 0 && at >= t.r1 && at <= t.r2) {
+    const head = +(attrOf(/<table\b[^>]*>/.exec(xml)[0], "headerRowCount") || 1);
+    const totals = +(attrOf(/<table\b[^>]*>/.exec(xml)[0], "totalsRowCount") || 0);
+    if (at < t.r1 + head) return { why: "the row is the Excel table's header" };
+    if (totals && at > t.r2 - totals) return { why: "the row is the Excel table's totals" };
+    if (t.r2 - t.r1 + 1 - head - totals <= 1) return { why: "the Excel table would be left with no rows" };
+  }
+  return { xml: String(xml).replace(/(\sref=")([^"]*)(")/g, (m, a, v, z) => {
+    const nv = shiftRef(v, at, n);
+    return nv == null ? m : a + nv + z;
+  }) };
+}
+
+/**
+ * A table that ends on the row just above `at`, or inside the rows at..last
+ * (empty rows of it taken over), stretched to row `last`, so rows added right
+ * under it join it, as typing under a table does in Excel.
+ * A table with a totals row is left as it is (the rows land under the totals).
+ */
+export function growTable(xml, at, last) {
+  const t = tableRange(xml);
+  if (!t || t.r2 < at - 1 || t.r2 >= last || t.r1 >= at) return xml;
+  if (+(attrOf(/<table\b[^>]*>/.exec(xml)[0], "totalsRowCount") || 0)) return xml;
+  return String(xml).replace(/(\sref="\$?[A-Z]+\$?\d+:\$?[A-Z]+\$?)(\d+)(")/g, (m, a, r, z) => (+r === t.r2 ? a + last + z : m));
+}
+
+/** The table parts of a sheet, read: Map name → xml, or a why. */
+async function readTables(xml, part, text) {
+  if (!/<tablePart\b/.test(xml)) return { tables: new Map() };
+  const names = tablePartNames(xml, part, await text(relsPartOf(part)));
+  const tables = new Map();
+  for (const name of names || []) { const x = await text(name); if (!x || !tableRange(x)) return { why: "the sheet holds an Excel table PDF+ could not read" }; tables.set(name, x); }
+  return names ? { tables } : { why: "the sheet holds an Excel table PDF+ could not read" };
+}
+
+/** Every table moved with the rows, or the first why. */
+function shiftTables(tables, at, n) {
+  const out = new Map();
+  for (const [name, x] of tables) { const r = shiftTable(x, at, n); if (r.why) return { why: r.why }; out.set(name, r.xml); }
+  return { tables: out };
 }
 
 // ---- writing the rows -----------------------------------------------------------------
@@ -475,6 +555,8 @@ export async function addCalendarRows(data, adds, now = Date.now()) {
   const part = dated.find((h) => h.sheet === sheetName).part;
   const shared = parseSharedStrings(await text("xl/sharedStrings.xml"));
   let xml = await text(part);
+  const tablesRead = await readTables(xml, part, text);
+  let tables = tablesRead.tables || new Map();
   const layout = sheetLayout(hearings, parseSheetCells(xml, shared, new Map()).cells, sheetName);
   const looks = { hearing: lookOf(xml, layout.tpl.hearing), heading: lookOf(xml, layout.tpl.heading), blank: lookOf(xml, layout.tpl.blank) };
   const { cols } = layout;
@@ -534,8 +616,11 @@ export async function addCalendarRows(data, adds, now = Date.now()) {
     const below = rows.filter((r) => r.n >= insertAt);
     const anythingBelow = below.some(hasValueRow) || new RegExp(`<(hyperlink|mergeCell)\\b[^>]*ref="[A-Z]+(\\d+)`).test(xml) && [...xml.matchAll(/<(?:hyperlink|mergeCell)\b[^>]*ref="[A-Z]+(\d+)/g)].some((m) => +m[1] >= insertAt);
     if (anythingBelow) {
-      const why = shiftBlocker(xml, insertAt, { calcChain });
+      let why = tablesRead.why || shiftBlocker(xml, insertAt, { calcChain, tables: true });
+      const moved = why ? null : shiftTables(tables, insertAt, block.length);
+      if (moved && moved.why) why = moved.why;
       if (why) { for (const a of list) refused.push({ key: a.key, why: `${why}, so rows cannot be put in above it` }); continue; }
+      tables = moved.tables;
       xml = shiftRows(xml, insertAt, block.length);
     } else {
       // Empty rows in the way go; the rest stay where they are.
@@ -556,6 +641,8 @@ export async function addCalendarRows(data, adds, now = Date.now()) {
       if (close >= 0) xml = xml.slice(0, close) + made + xml.slice(close);
       else xml = xml.replace(/<sheetData\s*\/>/, `<sheetData>${made}</sheetData>`);
     }
+    // Rows added right under a table join it.
+    for (const [name, x] of tables) tables.set(name, growTable(x, insertAt, insertAt + block.length - 1));
     // The links, and where each case landed.
     block.forEach((b, i) => {
       if (!b.a) return;
@@ -567,11 +654,12 @@ export async function addCalendarRows(data, adds, now = Date.now()) {
     const lastRow = Math.max(...rowsOf(xml).map((r) => r.n));
     xml = xml.replace(/<dimension\b([^>]*)\sref="([A-Z]+\d+):([A-Z]+)(\d+)"/, (m, a, s, c, r) => `<dimension${a} ref="${s}:${c}${Math.max(+r, lastRow)}"`);
     // The next day is placed against the sheet as it now stands.
-    bytes = await replaceParts(bytes, { [part]: xml });
+    bytes = await replaceParts(bytes, { [part]: xml, ...Object.fromEntries(tables) });
     hearings = (await readHearings(bytes, now)).hearings;
   }
   if (!placed.length) return { bytes: data, placed, refused };
-  bytes = relsNew ? await replaceParts(bytes, { [part]: xml }, { add: { [relsName]: rels } }) : await replaceParts(bytes, { [part]: xml, [relsName]: rels });
+  const parts = { [part]: xml, ...Object.fromEntries(tables) };
+  bytes = relsNew ? await replaceParts(bytes, parts, { add: { [relsName]: rels } }) : await replaceParts(bytes, { ...parts, [relsName]: rels });
   return { bytes, placed, refused, layout: { mode: layout.mode, gapWithin: layout.gapWithin, gapBetween: layout.gapBetween, templateMarked: layout.templateMarked } };
 }
 
@@ -593,25 +681,34 @@ export async function removeCalendarRow(data, rec, now = Date.now()) {
   const text = async (name) => { const e = byName.get(name); return e ? readEntry(data, e) : ""; };
   const shared = parseSharedStrings(await text("xl/sharedStrings.xml"));
   let xml = await text(hit.part);
-  const why = shiftBlocker(xml, hit.row, { calcChain: byName.has("xl/calcChain.xml") });
+  const tablesRead = await readTables(xml, hit.part, text);
+  const why = tablesRead.why || shiftBlocker(xml, hit.row, { calcChain: byName.has("xl/calcChain.xml"), tables: true });
   if (why) throw new Error(`${why}, so rows cannot be taken out above it`);
+  let tables = tablesRead.tables;
+  // Each row taken out takes the tables with it, or the Undo is refused.
+  const takeOut = (row) => {
+    const moved = shiftTables(tables, row, -1);
+    if (moved.why) throw new Error(`${moved.why}, so the row cannot be taken out`);
+    tables = moved.tables;
+    xml = shiftRows(xml, row, -1);
+  };
   const cellsNow = () => parseSheetCells(xml, shared, new Map()).cells;
   const empty = (cells, r) => { for (let c = 0; c < 40; c++) { const x = cells.get(`${r - 1},${c}`); if (x && String(x.v).trim() !== "") return false; } return true; };
-  xml = shiftRows(xml, hit.row, -1);
+  takeOut(hit.row);
   let r = hit.row - 1;
-  if (r > 1 && empty(cellsNow(), r)) { xml = shiftRows(xml, r, -1); r--; }
+  if (r > 1 && empty(cellsNow(), r)) { takeOut(r); r--; }
   // A date row with no case left under it.
   const others = hearings.filter((h) => h !== hit && h.sheet === hit.sheet && h.date === hit.date);
   if (!others.length && r > 1) {
     const cells = cellsNow();
     const dc = cells.get(`${r - 1},${hit.cols.date}`), nc = cells.get(`${r - 1},${hit.cols.caseName}`);
     if (dc && String(dc.v).trim() !== "" && !(nc && String(nc.v).trim() !== "")) {
-      xml = shiftRows(xml, r, -1);
+      takeOut(r);
       r--;
-      if (r > 1 && empty(cellsNow(), r)) xml = shiftRows(xml, r, -1);
+      if (r > 1 && empty(cellsNow(), r)) takeOut(r);
     }
   }
-  return replaceParts(data, { [hit.part]: xml });
+  return replaceParts(data, { [hit.part]: xml, ...Object.fromEntries(tables) });
 }
 
 /** The words of one change, for the list on Home and the notice: { text, title }. */

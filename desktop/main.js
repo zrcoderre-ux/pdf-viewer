@@ -196,6 +196,10 @@ const APP_SCHEMES = ["pdf-linker:"];
 // in) the same way (the owner, 2026-11-21: "Do the same thing for the claude
 // runs that you did for ecourt. New window"); the Claude button's bare
 // marker page (claude.ai/#…) stays a tab, which the Claude extension closes.
+// Both carry their case (#pdfplus-case=…, viewer/hearing-sheet.js
+// caseWindowUrl): E-Court Suite moves the tab into the window already open for
+// that case, where there is one, and the new window closes (the owner,
+// 2026-11-24: one window a case for its eCourt page and its Claude chat).
 const NEW_WINDOW_LINK = (u) => u.protocol === "https:" && (
   (/^civil\.lacourt\.org$/i.test(u.hostname) && /^\/ecourt\//i.test(u.pathname))
   || (/^claude\.ai$/i.test(u.hostname) && /^\/(chat|cowork|project)\//i.test(u.pathname)));

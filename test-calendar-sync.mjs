@@ -12,7 +12,7 @@
 import { makeZip } from "./viewer/zip.js";
 import { zipEntries, readEntry } from "./viewer/xlsx-read.js";
 import { readHearings, setHearingNote, splitNoteLead, dateToSerial, serialToDate, parseBriefingFile } from "./viewer/hearing-sheet.js";
-import { planCalendar, addCalendarRows, removeCalendarRow, sameCase, changeKey, shiftRef, shiftRows, shiftBlocker, sheetLayout, changeText, dayAt, sheetHearingsList, SHEET_HEARINGS_FILE } from "./viewer/calendar-sync.js";
+import { planCalendar, addCalendarRows, removeCalendarRow, sameCase, changeKey, shiftRef, shiftRows, shiftBlocker, shiftTable, growTable, tablePartNames, sheetLayout, changeText, dayAt, sheetHearingsList, SHEET_HEARINGS_FILE } from "./viewer/calendar-sync.js";
 
 let fails = 0, passes = 0;
 function check(label, got, want) {
@@ -37,8 +37,8 @@ const styles = `<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlfo
 const t = (ref, text, s = 0) => `<c r="${ref}"${s ? ` s="${s}"` : ""} t="inlineStr"><is><t>${text}</t></is></c>`;
 const n = (ref, v, s = 0) => `<c r="${ref}"${s ? ` s="${s}"` : ""}><v>${v}</v></c>`;
 const e = (ref, s) => `<c r="${ref}" s="${s}"/>`;
-async function book(rowsXml, { links = [], extra = "", rels = true } = {}) {
-  const sheet = `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:D30"/><sheetViews><sheetView workbookViewId="0"><selection activeCell="C9" sqref="C9"/></sheetView></sheetViews><sheetData>${rowsXml}</sheetData>${extra}${links.length ? `<hyperlinks>${links.map(([ref, id]) => `<hyperlink ref="${ref}" r:id="${id}"/>`).join("")}</hyperlinks>` : ""}<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>`;
+async function book(rowsXml, { links = [], extra = "", rels = true, tail = "", more = [], relsExtra = "" } = {}) {
+  const sheet = `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:D30"/><sheetViews><sheetView workbookViewId="0"><selection activeCell="C9" sqref="C9"/></sheetView></sheetViews><sheetData>${rowsXml}</sheetData>${extra}${links.length ? `<hyperlinks>${links.map(([ref, id]) => `<hyperlink ref="${ref}" r:id="${id}"/>`).join("")}</hyperlinks>` : ""}<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>${tail}</worksheet>`;
   const parts = [
     { name: "[Content_Types].xml", data: `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/></Types>` },
     { name: "xl/workbook.xml", data: `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Hearings" sheetId="1" r:id="rId1"/></sheets></workbook>` },
@@ -46,7 +46,8 @@ async function book(rowsXml, { links = [], extra = "", rels = true } = {}) {
     { name: "xl/styles.xml", data: styles },
     { name: "xl/worksheets/sheet1.xml", data: sheet },
   ];
-  if (rels) parts.push({ name: "xl/worksheets/_rels/sheet1.xml.rels", data: `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${links.map(([, id, url]) => `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${url.replace(/&/g, "&amp;")}" TargetMode="External"/>`).join("")}</Relationships>` });
+  if (rels) parts.push({ name: "xl/worksheets/_rels/sheet1.xml.rels", data: `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${links.map(([, id, url]) => `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${url.replace(/&/g, "&amp;")}" TargetMode="External"/>`).join("")}${relsExtra}</Relationships>` });
+  parts.push(...more);
   const z = await makeZip(parts);
   return z instanceof Uint8Array ? z : new Uint8Array(await z.arrayBuffer());
 }
@@ -241,6 +242,40 @@ check("off, taken off", changeText({ kind: "off", day: "2026-11-20", caseText: "
 check("added under its new day", changeText({ kind: "added", day: "2026-12-18", movedFrom: "2026-11-20", caseText: "DOE v. ROE" }).text, "Moved DOE v. ROE: Fri, Nov 20 → Fri, Dec 18");
 check("held", changeText({ kind: "held", day: "2026-11-23", caseText: "ROE v. INITECH" }).text, "Check ROE v. INITECH, Mon, Nov 23: not on that day's agenda");
 check("dayAt", dayAt("2026-11-20"), day(2026, 11, 20));
+
+console.log("12. an Excel table on the sheet moves with its rows");
+{
+  const tableXml = (ref) => `<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Hearings" displayName="Hearings" ref="${ref}"><autoFilter ref="${ref}"/><tableColumns count="4"><tableColumn id="1" name="Date"/><tableColumn id="2" name="Motion Type"/><tableColumn id="3" name="Case Name"/><tableColumn id="4" name="Date Submitted"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showRowStripes="1"/></table>`;
+  const withTable = (ref) => book(headingRows, { links: headingLinks, tail: `<tableParts count="1"><tablePart r:id="rIdT1"/></tableParts>`,
+    relsExtra: `<Relationship Id="rIdT1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>`,
+    more: [{ name: "xl/tables/table1.xml", data: tableXml(ref) }] });
+  check("the table part found off the sheet's rels", tablePartNames(`<tablePart r:id="rIdT1"/>`, "xl/worksheets/sheet1.xml", `<Relationships><Relationship Id="rIdT1" Target="../tables/table1.xml"/></Relationships>`), ["xl/tables/table1.xml"]);
+  check("rows put in inside stretch it, its filter too", shiftTable(tableXml("A1:D12"), 6, 2).xml, tableXml("A1:D14"));
+  check("rows put in above move it", shiftTable(tableXml("A5:D12"), 3, 2).xml, tableXml("A7:D14"));
+  check("rows put in under leave it", shiftTable(tableXml("A1:D12"), 13, 2).xml, tableXml("A1:D12"));
+  check("a row taken out shrinks it", shiftTable(tableXml("A1:D12"), 6, -1).xml, tableXml("A1:D11"));
+  check("its header row is never taken out", shiftTable(tableXml("A3:D12"), 3, -1).why, "the row is the Excel table's header");
+  check("nor its last data row", shiftTable(tableXml("A1:D2"), 2, -1).why, "the Excel table would be left with no rows");
+  check("rows added right under it join it", growTable(tableXml("A1:D12"), 13, 15), tableXml("A1:D15"));
+  check("…not with a totals row", growTable(tableXml("A1:D12").replace('ref="A1:D12">', 'ref="A1:D12" totalsRowCount="1">'), 13, 15).includes('ref="A1:D12"'), true);
+  check("…nor rows further down", growTable(tableXml("A1:D12"), 14, 15), tableXml("A1:D12"));
+
+  const tb = await withTable("A1:D12");
+  let r = await addCalendarRows(tb, [planCalendar({ hearings: (await readHearings(tb, NOW)).hearings, calendar: cal, now: NOW }).adds[0]], NOW);
+  check("a case added into a day: placed, nothing refused", [r.placed.map((p) => p.row), r.refused], [[7], []]);
+  check("…the table stretched over the two new rows", /<table\b[^>]*ref="A1:D14"><autoFilter ref="A1:D14"\/>/.test(await part(r.bytes, "xl/tables/table1.xml")), true);
+  check("…the rows below read as before", (await readHearings(r.bytes, NOW)).hearings.map((h) => [h.row, h.caseNumber]), [[3, "25STCV00001"], [5, "25STCV00002"], [7, "25STCV00009"], [11, "24STCV00003"]]);
+  const u = await removeCalendarRow(r.bytes, r.placed[0], NOW);
+  check("Undo: the table back to its old range", /ref="A1:D12"/.test(await part(u, "xl/tables/table1.xml")), true);
+  r = await addCalendarRows(tb, [{ key: "k", day: "2026-11-21", motion: "Demurrer", caseText: "26STCV00030 BETWEEN v. DAYS", url: URL(30) }], NOW);
+  check("a new day between two: placed inside the table, which grew by four", [r.refused.length, /ref="A1:D16"/.test(await part(r.bytes, "xl/tables/table1.xml"))], [0, true]);
+  const tEnd = await withTable("A1:D10");
+  r = await addCalendarRows(tEnd, [planCalendar({ hearings: (await readHearings(tEnd, NOW)).hearings, calendar: cal, now: NOW }).adds[1]], NOW);
+  check("a new day right under the table's last row joins it", [r.placed.map((p) => p.row), /ref="A1:D13"/.test(await part(r.bytes, "xl/tables/table1.xml"))], [[13], true]);
+  const lost = await book(headingRows, { links: headingLinks, tail: `<tableParts count="1"><tablePart r:id="rIdT9"/></tableParts>` });
+  r = await addCalendarRows(lost, [planCalendar({ hearings: (await readHearings(lost, NOW)).hearings, calendar: cal, now: NOW }).adds[0]], NOW);
+  check("a table whose part cannot be found still refuses", r.refused.map((x) => x.why), ["the sheet holds an Excel table PDF+ could not read, so rows cannot be put in above it"]);
+}
 
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

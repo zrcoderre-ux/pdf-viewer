@@ -65,8 +65,17 @@ day at the end moves nothing. Elsewhere the rows below are moved down
 (`shiftRows`: row and cell numbers, the dimension, hyperlinks, merged cells,
 conditional formats, validations, the selection and pane, filters, page
 breaks); formulas are not rewritten, so a sheet with formulas below (other
-than `HYPERLINK`), shared formulas, a table, a drawing or comments refuses
-rows there (`shiftBlocker`) and Home says "Not added: … Paste it by hand."
+than `HYPERLINK`), shared formulas, a drawing or comments refuses rows there
+(`shiftBlocker`) and Home says "Not added: … Paste it by hand." An Excel table
+(Format as Table) no longer refuses (owner, 2026-11-24): its range lives in a
+part of its own (`xl/tables/tableN.xml`, found through the sheet's
+`<tablePart r:id>`, `tablePartNames`), and `shiftTable` moves or stretches
+every range in it (the table, its filter, its sort) with the rows, as
+`shiftRows` moves the sheet; rows added right under a table, or over its empty
+last rows, join it (`growTable`; not past a totals row). Undo shrinks it back,
+and refuses where it would take out the table's header, totals or last data
+row. A table part that cannot be found or read still refuses, as before.
+A calculated column's formula is not copied into the new rows.
 Text goes in as inline strings, the date as a serial (1900 or 1904 system),
 and the Case Name gets a `<hyperlink>` with an external rel (a sheet with no
 rels part gets one: `replaceParts`'s `add`). Off is `markHearing(…, "off")`,
