@@ -256,6 +256,13 @@ check("…each one's hover says what and when", [chips[1].title, chips[2].title]
 check("not posted yet is unsure, not missing", briefingChips({ kind: "motion", reply: slot("pending", "Not Posted Yet") }).map((c) => [c.state, c.mark]), [["unposted", "?"]]);
 check("timely only if served personally", briefingChips({ kind: "motion", motion: slot("personal") })[0].state, "personal");
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
+{
+  // The owner, 2026-11-25: a minor's compromise petition expects no opposition.
+  const mc = (opp, motionType = "Petition to Confirm Minor's Compromise") => briefingChips({ kind: "motion", motionType, motion: slot("filed"), opp, reply: slot("missing", "Not Filed") }).map((c) => c.label);
+  check("a minor's compromise: no Opp or Rep chip with no opposition filed", [mc(slot("missing", "Not Filed")), mc(slot("pending")), mc(null), mc(slot("missing"), "PetitiontoApproveCompromiseofDisputedClaimforMinororPersonwithaDisability")], [["Mot"], ["Mot"], ["Mot"], ["Mot"]]);
+  check("…but both once an opposition is on file", mc(slot("filed")), ["Mot", "Opp", "Rep"]);
+  check("…and an ordinary motion, or a 998 offer to compromise, keeps them", [mc(slot("missing"), "Motion to Compel"), mc(slot("missing"), "Motion to Tax Costs re Offer to Compromise")], [["Mot", "Opp", "Rep"], ["Mot", "Opp", "Rep"]]);
+}
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
 check("an OSC with only Does left is amber, not red", briefingChips({ kind: "osc", osc: { text: "ⓘ Only Does not dismissed: Does 1 through 20", state: "note" } }).map((c) => [c.label, c.state, c.mark, c.title]), [["Defaults", "personal", "!", "ⓘ Only Does not dismissed: Does 1 through 20"]]);
 {
