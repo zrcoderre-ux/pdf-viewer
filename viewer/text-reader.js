@@ -21992,10 +21992,10 @@ const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
 
 // ── a page's TEXT LAYER marked bad, from the PDF side ──────────────────────────
 //
-// Right-click a PDF page the reader shows (the side-by-side pane, or a page
-// swapped ⇄ to its PDF): "text layer is bad" writes `/PDFLinkerBadTextLayer
-// true` on that page of the source PDF in the case folder (pdf-edit.js,
-// BAD_LAYER_KEY, the mark PDF+'s own right-click writes), and PDF-Linker's
+// Right-click a page of the side-by-side PDF pane: "text layer is bad" writes
+// `/PDFLinkerBadTextLayer true` on that page of the source PDF in the case
+// folder (pdf-edit.js, BAD_LAYER_KEY; the only control that sets it, PDF+'s
+// own right-click having been taken off), and PDF-Linker's
 // next run rebuilds the page's layer from what it shows and takes the mark
 // off. Only on the PDF side, by the owner's direction (2026-11-25: "It should
 // have me right click on the pdf side of the side by side, so I never see it
@@ -22009,15 +22009,10 @@ document.body.appendChild(pageMenu);
 function hidePageMenu() { pageMenu.hidden = true; pageMenu.replaceChildren(); }
 /** The PDF page a right-click on the PDF side stands on: { src, page } or null. */
 function pdfPageAtEvent(e) {
-  const el = e.target.closest && e.target.closest(".pdf-slot:not(.blank), .pdf-inline");
+  const el = e.target.closest && e.target.closest(".pdf-slot:not(.blank)");
   if (!el) return null;
-  if (el.classList.contains("pdf-slot")) {
-    const t = pdfTarget(Number(el.dataset.index));
-    return t ? { src: t.src, page: t.page, info: el.__pdfOf && el.__pdfOf.info } : null;
-  }
-  const src = el.dataset.src && pdfSourceFor(el.dataset.src);
-  const page = Number(el.dataset.page);
-  return src && page >= 1 ? { src, page, info: el.__pdfOf && el.__pdfOf.info } : null;
+  const t = pdfTarget(Number(el.dataset.index));
+  return t ? { src: t.src, page: t.page, info: el.__pdfOf && el.__pdfOf.info } : null;
 }
 async function badLayerMarkedOf(src) {
   try {
@@ -22080,8 +22075,10 @@ async function setBadLayerFromReader(at, on) {
       : `${where}: not marked — ${e && e.message ? e.message : e}`, { error: true, ms: 7000 });
   }
 }
+// The side-by-side pane only: not a page swapped ⇄ to its PDF in the text's
+// place, nor PDF mode (the viewer's own pages), where the page's text is not
+// on screen beside it (owner, 2026-11-25).
 pdfPane.addEventListener("contextmenu", onPdfSideMenu);
-pagesEl.addEventListener("contextmenu", (e) => { if (e.target.closest && e.target.closest(".pdf-inline")) onPdfSideMenu(e); });
 function onPdfSideMenu(e) {
   if (e.defaultPrevented || e.altKey) return;
   const at = pdfPageAtEvent(e);

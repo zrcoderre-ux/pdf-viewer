@@ -75,19 +75,15 @@ punctuation, so no garble test here catches it (`pageTextIsGarbled` counts
 private-use, control and replacement characters), and PDF-Linker's page-wide
 measures pass a short page or a garbled heading among sound lines.
 
-- **The control.** Right-click a page (not on selected text or an
-  annotation): **Page N: text layer is bad (read what the page shows)**, or
-  on a marked page **Page N: text layer is fine after all** (`setBadLayer`, a
-  listener on `pagesEl` that stands down only where the selection's menu, an
-  annotation's or Alt's browser menu took the event, and in Organize). It
-  first also stood down for any selection anywhere and for any tool on, and
-  the owner's right-click did nothing at all: a selection left standing
-  outside the pages (the name box, the sidebar) or the sticky highlight tool
-  left on is ordinary, and neither has a right-click of its own.
-- **The mark is in the file.** `saveEditedPdf({ badLayer })` writes
-  `/PDFLinkerBadTextLayer true` on the page's dictionary (or deletes it),
-  saving at once, unsaved comments and an on-screen rotation with it, as Save
-  does, behind the same check against a newer copy on disk. A page dictionary
+- **The control.** The text reader's side-by-side PDF pane only (below).
+  The viewer's own right-click offered **Page N: text layer is bad** at
+  first; the owner had it taken off (2026-11-25: "remove the text layer is
+  bad from pdf mode, where I cannot actually see it"), since here the page's
+  text layer is not on screen to judge. The viewer still READS the mark (the
+  render loop below) and a save keeps it.
+- **The mark is in the file.** `/PDFLinkerBadTextLayer true` on the page's
+  dictionary (`markBadLayerInBytes`; `saveEditedPdf({ badLayer })` can still
+  write or delete it, though no control of the viewer asks). A page dictionary
   is where PDF-Linker keeps its own page facts (`/PDFLinkerDidNotOCR`): it
   travels with the PDF and survives Organize and rotation, which move page
   dictionaries whole. A document carrying a mark is saved without object
@@ -103,8 +99,9 @@ measures pass a short page or a garbled heading among sound lines.
   `textPageClean` is asked: the page's layer, and the export page read off it,
   are no evidence that it holds no name. A PDF whose marks could not be read
   in time is left out the same way.
-- **The text reader, from the PDF side.** Right-click a PDF page the reader
-  shows (a slot of the side-by-side pane, or a page swapped ⇄ to its PDF):
+- **The text reader, from the PDF side.** Right-click a page of the
+  side-by-side PDF pane (not a page swapped ⇄ to its PDF in the text's
+  place, nor PDF mode):
   the reader's own small menu (`#page-menu`, styled as the keep menu) offers
   **Text layer is bad**, or **Text layer is fine after all** where the file
   already carries the mark (read fresh off the file each time). The reader

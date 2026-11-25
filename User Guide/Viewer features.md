@@ -188,15 +188,14 @@ In addition to citation linking, the viewer supports:
   the page shows. Ordinary text pages are never read.
   **A page that looks right but whose text is garbage** (it selects, copies or
   searches as symbols, or its export page in the text reader is nonsense):
-  right-click the page and choose **Page N: text layer is bad**. The mark is
-  saved into the PDF. PDF+ reads that page from what it shows from then on,
-  the reader's screenshot leaves the page out rather than trust its text, and
-  PDF-Linker's next run replaces the page's text layer with a reading of the
-  page and takes the mark off. **Text layer is fine after all** on the same
-  menu takes it off. In the text reader, right-click the page on the **PDF
-  side** of side by side (or a page swapped to its PDF) for the same mark;
-  the text side's right-click does not offer it. A LEAKS row whose value
-  stands only on that page is answered **no** when you mark it.
+  in the text reader, open side by side and right-click the page in the
+  **PDF pane**, then choose **Text layer is bad**. The mark is saved into the
+  PDF. PDF+ reads that page from what it shows from then on, the reader's
+  screenshot leaves the page out rather than trust its text, a LEAKS row
+  whose value stands only on that page is answered **no**, and PDF-Linker's
+  next run replaces the page's text layer with a reading of the page and
+  takes the mark off. **Text layer is fine after all** on the same menu takes
+  it off.
 - **Rotate pages** — the **⟳ Rotate pages** tool (or the **R** key) turns a
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
