@@ -75,11 +75,15 @@ punctuation, so no garble test here catches it (`pageTextIsGarbled` counts
 private-use, control and replacement characters), and PDF-Linker's page-wide
 measures pass a short page or a garbled heading among sound lines.
 
-- **The control.** Right-click a page with nothing selected (not on an
-  annotation, no tool on): **Page N: text layer is bad (read what the page
-  shows)**, or on a marked page **Page N: text layer is fine after all**
-  (`setBadLayer`, a listener on `pagesEl` that stands down where the
-  selection's menu, an annotation's or Alt's browser menu took the event).
+- **The control.** Right-click a page (not on selected text or an
+  annotation): **Page N: text layer is bad (read what the page shows)**, or
+  on a marked page **Page N: text layer is fine after all** (`setBadLayer`, a
+  listener on `pagesEl` that stands down only where the selection's menu, an
+  annotation's or Alt's browser menu took the event, and in Organize). It
+  first also stood down for any selection anywhere and for any tool on, and
+  the owner's right-click did nothing at all: a selection left standing
+  outside the pages (the name box, the sidebar) or the sticky highlight tool
+  left on is ordinary, and neither has a right-click of its own.
 - **The mark is in the file.** `saveEditedPdf({ badLayer })` writes
   `/PDFLinkerBadTextLayer true` on the page's dictionary (or deletes it),
   saving at once, unsaved comments and an on-screen rotation with it, as Save

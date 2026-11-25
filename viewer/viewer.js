@@ -4122,15 +4122,15 @@ document.addEventListener("contextmenu", (e) => {
 }, true);
 
 // Right-click on a page with nothing selected: mark its TEXT LAYER as bad, or
-// take the mark off (pdf-edit.js, BAD_LAYER_KEY). The selection's menu, an
-// annotation's and the browser's own (Alt) come first.
+// take the mark off (pdf-edit.js, BAD_LAYER_KEY). The selection's menu and an
+// annotation's come first (each takes the event, defaultPrevented), and Alt
+// gives the browser's own. Nothing else holds it back: a selection left
+// standing OUTSIDE the pages (the sidebar, the name box) or a markup tool left
+// on (highlight is sticky) made a right-click do nothing at all.
 pagesEl.addEventListener("contextmenu", (e) => {
-  if (e.defaultPrevented || e.altKey || !pdfBytes) return;
+  if (e.defaultPrevented || e.altKey || !pdfBytes || organizeMode) return;
   const wrapper = e.target.closest && e.target.closest(".page-wrapper");
   if (!wrapper) return;
-  const sel = window.getSelection();
-  if (sel && !sel.isCollapsed) return;
-  if (Annots.currentTool() || redactMode || cropMode || organizeMode) return;
   const pn = Number(wrapper.dataset.pageNumber);
   if (!(pn >= 1)) return;
   e.preventDefault();
