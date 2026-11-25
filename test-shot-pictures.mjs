@@ -108,7 +108,7 @@ try {
   const open = async (kind, EXPORT) => {
     await page.evaluate(async ({ kind, EXPORT, KEY }) => {
       const { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize,
-        setTextRenderingMode, moveText, showText, setFillingColor } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+        setTextRenderingMode, moveText, showText, setFillingColor, PDFName, PDFBool } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
       const doc = await PDFDocument.create();
       const font = await doc.embedFont(StandardFonts.TimesRoman);
       const pg = doc.addPage([612, 792]);
@@ -122,7 +122,9 @@ try {
       } else {
         pg.drawText("Plaintiff moves to compel further responses.", { x: 72, y: 700, size: 12, font, color: black });
       }
-      if (kind === "clean-image" || kind === "unread-image") {
+      // A page the owner marked as having a BAD TEXT LAYER (pdf-edit.js BAD_LAYER_KEY).
+      if (kind === "marked") pg.node.set(PDFName.of("PDFLinkerBadTextLayer"), PDFBool.True);
+      if (kind === "clean-image" || kind === "unread-image" || kind === "marked") {
         // A picture with no name in it (an exhibit's heading), red as the rest are.
         const c = document.createElement("canvas"); c.width = 600; c.height = 80;
         const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, 600, 80);
@@ -224,6 +226,8 @@ try {
     ["G. the same page where the export reads [DID NOT OCR]", "unread-image", UNREAD, null, (s) => s.pics >= 1 && !s.whole.length],
     // …and a clean export does not let a name the PDF's own text holds through.
     ["H. a clean export, the name in the PDF's text: faked", "text2", CLEAN, null, (s) => s.fakes.some((t) => /Odile Brackenbury/.test(t))],
+    // …and F's page marked as having a BAD TEXT LAYER: its layer vouches for nothing, so it is left out whole.
+    ["I. F's page, its text layer marked bad: left out whole", "marked", CLEAN, null, (s) => s.whole.length === 1 && /marked bad/.test(s.whole[0])],
   ];
   for (const [label, kind, exp, before, want, redWanted] of cases) {
     console.log(label);
@@ -240,7 +244,7 @@ try {
     check("the screen put back after", r.after === 0);
     if (kind === "clean-image") check("the toast says the page was shown as it stands", /shown as it stands/.test(r.toast), r.toast);
     if (kind === "image" || kind === "field" || kind === "unread-image") check("the toast says a picture or field was covered", /picture.*covered/.test(r.toast), r.toast);
-    if (kind === "outline" || kind === "late") check("the toast says a page was left out", /left out/.test(r.toast), r.toast);
+    if (kind === "outline" || kind === "late" || kind === "marked") check("the toast says a page was left out", /left out/.test(r.toast), r.toast);
   }
   check("no page errors", errors.length === 0, errors.join(" | "));
 } finally {

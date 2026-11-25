@@ -30,6 +30,7 @@ import {
   PDFRef,
   PDFStream,
   PDFHexString,
+  PDFBool,
   PageSizes,
 } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
 import { readAnnotations, writeAnnotations, flattenAnnotations } from "./annot-pdf.js";
@@ -44,8 +45,11 @@ import { applyTextEdits } from "./pdf-text-edit.js";
 //   appendBytes: Array<Uint8Array> of further PDFs to merge in (Combine).
 //   insertAt:    0-based page index the merged pages go in at (default: end).
 // Returns a Uint8Array of the saved PDF.
-export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes = [], insertAt = null, report = null }) {
+//   badLayer:    { set: [0-based pages], clear: [0-based pages] } — the pages
+//                to mark as having a BAD TEXT LAYER, or to unmark (below).
+export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes = [], insertAt = null, report = null, badLayer = null }) {
   const doc = await PDFDocument.load(srcBytes);
+  if (badLayer) setBadLayerMarks(doc, badLayer);
   if (annotations) {
     // Paragraphs edited in place are not annotations: their old glyphs come
     // out of the page and the new text goes in (pdf-text-edit.js).
@@ -64,7 +68,81 @@ export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes
     const copied = await doc.copyPages(other, other.getPageIndices());
     for (const p of copied) doc.insertPage(at++, p);
   }
-  return doc.save();
+  // A marked page's dictionary is written where a plain search of the bytes
+  // finds it (hasBadLayerName): never packed into an object stream.
+  return doc.save(badLayerPagesOf(doc).size ? { useObjectStreams: false } : undefined);
+}
+
+// ── A page whose TEXT LAYER IS BAD ──────────────────────────────────────────
+//
+// The owner (2026-11-25): "I need a way to indicate that the visible text for
+// a page is good, but that the original text layer for that page is garbage
+// … This should work inside PDF+ and go into PDF Linker." The mark is a key
+// on the page's own dictionary, `/PDFLinkerBadTextLayer true`, the way
+// PDF-Linker keeps its own per-page facts (`/PDFLinkerDidNotOCR` and the
+// rest): it travels with the file, every other viewer ignores it, and it
+// survives a reorder or a rotation, which move page dictionaries whole.
+//
+//   - PDF+ (viewer.js) reads the page from its picture instead of its text
+//     layer (Recognize text's reading), so Find, selection and copy get the
+//     words the page shows; the reader's screenshot never takes the page's
+//     layer as proof it holds no name (text-reader.js, pdfNamesOn).
+//   - PDF-Linker's next full run rebuilds the page's text layer from its
+//     render with no test of its own (`_reocr_garbled_pages`, its notes
+//     "OCR.md"), then takes the mark off: the layer is new, and the page
+//     reads as any OCR'd page does from then on.
+//
+// The name is a format both programs read; it changes only in step.
+export const BAD_LAYER_KEY = "PDFLinkerBadTextLayer";
+
+/** The 0-based pages of a pdf-lib document carrying the bad-text-layer mark. */
+export function badLayerPagesOf(doc) {
+  const out = new Set();
+  const name = PDFName.of(BAD_LAYER_KEY);
+  doc.getPages().forEach((pg, i) => {
+    let v = null;
+    try { v = pg.node.get(name); } catch { v = null; }
+    if (v instanceof PDFBool ? v.asBoolean() : (v && String(v) === "true")) out.add(i);
+  });
+  return out;
+}
+
+/** Put the mark on `set` and take it off `clear` (0-based pages) of a pdf-lib document. */
+export function setBadLayerMarks(doc, { set = [], clear = [] } = {}) {
+  const pages = doc.getPages();
+  const name = PDFName.of(BAD_LAYER_KEY);
+  for (const i of clear) if (pages[i]) pages[i].node.delete(name);
+  for (const i of set) if (pages[i]) pages[i].node.set(name, PDFBool.True);
+}
+
+const BAD_LAYER_BYTES = new TextEncoder().encode(BAD_LAYER_KEY);
+const OBJSTM_BYTES = new TextEncoder().encode("/ObjStm");
+function bytesHave(bytes, needle) {
+  let at = bytes.indexOf(needle[0]);
+  while (at !== -1 && at + needle.length <= bytes.length) {
+    let k = 1;
+    while (k < needle.length && bytes[at + k] === needle[k]) k++;
+    if (k === needle.length) return true;
+    at = bytes.indexOf(needle[0], at + 1);
+  }
+  return false;
+}
+/**
+ * Whether a file's bytes can hold the mark at all: its name written out, or
+ * an object stream, which packs page dictionaries out of a plain search's
+ * sight. False settles it without a parse.
+ */
+export function mayHaveBadLayer(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return bytesHave(b, BAD_LAYER_BYTES) || bytesHave(b, OBJSTM_BYTES);
+}
+/** The 1-based pages a file marks as having a bad text layer (an empty set where it cannot be read). */
+export async function readBadLayerPages(bytes) {
+  if (!mayHaveBadLayer(bytes)) return new Set();
+  try {
+    const doc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
+    return new Set([...badLayerPagesOf(doc)].map((i) => i + 1));
+  } catch { return new Set(); }
 }
 
 // Reorder / rotate / delete pages in one pass. `plan` is the desired final page
@@ -110,7 +188,7 @@ export async function applyPagePlan({ srcBytes, plan }) {
     doc.addPage(pg);
   }
   if (used.size < pageCount) pruneOutline(doc, new Set(order.map((o) => o.pg.ref.toString())));
-  return doc.save();
+  return doc.save(badLayerPagesOf(doc).size ? { useObjectStreams: false } : undefined);
 }
 
 /**
@@ -413,7 +491,9 @@ export async function inspectDocument(bytes) {
   try { annotations = await readAnnotations(doc); } catch (e) { console.warn("[pdf-edit] annotations unreadable:", e); }
   let attachments = [];
   try { attachments = listAttachments(doc); } catch { attachments = []; }
-  return { hasForm, annotations, attachments, info: readInfo(doc), pageCount: doc.getPageCount() };
+  let badLayer = new Set();
+  try { badLayer = new Set([...badLayerPagesOf(doc)].map((i) => i + 1)); } catch { badLayer = new Set(); }
+  return { hasForm, annotations, attachments, info: readInfo(doc), pageCount: doc.getPageCount(), badLayer };
 }
 
 function infoText(doc, key) {

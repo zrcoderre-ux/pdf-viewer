@@ -63,3 +63,48 @@ text has garbled characters at all, or is a scrap. Tests:
 `test-ocr-button.mjs` (a plain scan, a stamped scan, a garbled invisible
 layer, visibly garbled text left, an ordinary page left, and the weighing).
 
+
+## A page marked as having a bad text layer (`pdf-edit.js`, `BAD_LAYER_KEY`)
+
+The owner (2026-11-25): "I need a way to indicate that the visible text for a
+page is good, but that the original text layer for that page is garbage …
+This should work inside PDF+ and go into PDF Linker." His example: a heading
+that shows AMERICAN BAR ASSOCIATION over a layer reading
+`-0&,$%-!'-,?$#,-#$"!'-@@"%$-#$"!`. That is a cipher of printable
+punctuation, so no garble test here catches it (`pageTextIsGarbled` counts
+private-use, control and replacement characters), and PDF-Linker's page-wide
+measures pass a short page or a garbled heading among sound lines.
+
+- **The control.** Right-click a page with nothing selected (not on an
+  annotation, no tool on): **Page N: text layer is bad (read what the page
+  shows)**, or on a marked page **Page N: text layer is fine after all**
+  (`setBadLayer`, a listener on `pagesEl` that stands down where the
+  selection's menu, an annotation's or Alt's browser menu took the event).
+- **The mark is in the file.** `saveEditedPdf({ badLayer })` writes
+  `/PDFLinkerBadTextLayer true` on the page's dictionary (or deletes it),
+  saving at once, unsaved comments and an on-screen rotation with it, as Save
+  does, behind the same check against a newer copy on disk. A page dictionary
+  is where PDF-Linker keeps its own page facts (`/PDFLinkerDidNotOCR`): it
+  travels with the PDF and survives Organize and rotation, which move page
+  dictionaries whole. A document carrying a mark is saved without object
+  streams (`buildEditedPdf`, `applyPagePlan`), so the name stands in the
+  bytes where `mayHaveBadLayer` finds it without a parse.
+- **The viewer.** `inspectDocument` reads the marks (`badLayerPagesOf`) into
+  `docBadLayer`, and the render loop sends a marked page to the recognizer
+  whatever Recognize text is set to, with no stamp kept: its text, for Find,
+  selection, copy, links and naming, is what the page shows.
+- **The reader's screenshot.** `shotPdfPrep` reads each PDF's marks once
+  (`readBadLayerPages`, off the file `openPdfNow` keeps on the info), and
+  `pdfNamesOn` leaves a marked page out of the picture whole, before
+  `textPageClean` is asked: the page's layer, and the export page read off it,
+  are no evidence that it holds no name. A PDF whose marks could not be read
+  in time is left out the same way.
+- **PDF-Linker.** The next full run rebuilds a marked page's text layer from
+  its render with none of its own tests, then takes the mark off
+  (`_reocr_garbled_pages`, its notes "OCR.md"). Saving the mark changes the
+  PDF, so ▶ Re-run's `--auto` takes the full run. After it the page reads as
+  any rebuilt page does, here and in the export (its REBUILT banner).
+
+The key's name is a format the two programs share and changes only in step.
+`test-bad-text-layer.mjs` pins the viewer's side; `test-shot-pictures.mjs`
+case I the screenshot's.
