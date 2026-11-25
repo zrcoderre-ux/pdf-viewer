@@ -475,7 +475,7 @@ export function parseKey(sheets, name) {
     // "we" the run wrote, so reversing it painted the real name over every
     // "we" in the case. The forward direction keeps it (`warn`), so a real
     // name typed is still written as the key says.
-    if (isCommonReal(e.fake)) { wordFakes.push({ fake: e.fake, real: e.real }); continue; }
+    if (isWordFake(e.fake)) { wordFakes.push({ fake: e.fake, real: e.real }); continue; }
     pairs.push({ fake: e.fake, real: e.real });
   }
 
@@ -1118,6 +1118,39 @@ export function isCommonReal(value) {
   return f.length < 2 || (COMMON_WORDS.has(f) && f.indexOf(" ") === -1);
 }
 
+// Letters a court filing writes ON THEIR OWN as an abbreviation: a state's
+// postal code ("Los Angeles, CA 90012"), a caption's "Re:", a code's or a
+// reporter's short name, a corporate suffix, a title, a street type. An older
+// PDF-Linker drew an acronym's stand-in off its company's fake ("Sentinel
+// Highland" -> "Cobalt Arclight", so "SH" -> "CA"), and since a fake is
+// reversed wherever it stands, case-blind, every state code of the case read
+// "SH" and every "Re:" the initials whose stand-in was "RE" (the owner,
+// 2026-11-24). Such a stand-in is retired from the display like an ordinary
+// word (parseKey's wordFakes): nothing tells the run's "CA" from the state's.
+// PDF-Linker draws none now and its full run redraws an older key's; its
+// `_PN_STAND_IN_ABBREVS` is this list, pinned to it under node.
+export const ABBREV_FAKES = new Set(
+  (
+    "al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt " +
+    "ne nv nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc pr " +
+    "gu vi as mp " +
+    "re cf ibid ex exh vs et al aka dba fka nka fbo no nos pp pg ch sec ss cv cal " +
+    "app usc ccp crc ccr cfr evid fam gov lab pen veh civ bus prof hsc wic rpc us " +
+    "usa am pm dob ssn tel fax ext po apt ste dept rm esq esqs jr sr ii iii iv vii " +
+    "viii ix xi xii dds phd rn cpa jd llm mr mrs ms mx dr hon llc inc lp llp pc plc " +
+    "pllc apc corp ltd assn fsb na ad bc sf nyc cc bcc attn atty st rd ave blvd hwy " +
+    "ln nw sw osc msj msa rfa rfp rjn poc pos cmc fsc tro ud udc lasc cd ed wd est " +
+    "pst pdt"
+  ).split(/\s+/).filter(Boolean)
+);
+
+/** A fake the display retires: an ordinary word, or an abbreviation's letters (two to five). */
+export function isWordFake(value) {
+  if (isCommonReal(value)) return true;
+  const letters = String(value == null ? "" : value).replace(/[^A-Za-z]/g, "").toLowerCase();
+  return letters.length >= 2 && letters.length <= 5 && ABBREV_FAKES.has(letters);
+}
+
 // PDF-Linker's bare-token categories (`_PN_TOKEN_CATS`): a word split out of a
 // longer name, or a document's one-word short form for one. It never matches
 // an occurrence written in lower case there (`_pn_term_is_cap_only`).
@@ -1169,7 +1202,7 @@ export function capOnlyMiss(compiled, matched, hit) {
 export function wordFakesOf(key) {
   if (!key) return [];
   const words = Array.isArray(key.wordFakes) && key.wordFakes.length ? key.wordFakes
-    : (key.pairs || []).filter((p) => isCommonReal(p.fake)).map((p) => ({ fake: p.fake, real: p.real }));
+    : (key.pairs || []).filter((p) => isWordFake(p.fake)).map((p) => ({ fake: p.fake, real: p.real }));
   return readsControls(key) ? words : words.filter((p) => p && keyCellKind(p.fake, p.real) === "fake");
 }
 
@@ -1219,7 +1252,7 @@ function warnRows(key) {
 export function compile(key) {
   // (A street's word, `cap`, reverses where it is capitalised only, so an
   // ordinary word may be one: parseKey.)
-  const pairs = pairRows(key).filter((p) => p.cap || !isCommonReal(p.fake));
+  const pairs = pairRows(key).filter((p) => p.cap || !isWordFake(p.fake));
   const map = new Map(pairs.map((p) => [fold(p.fake), p.real]));
   const capOnly = new Set(pairs.filter((p) => p.cap).map((p) => fold(p.fake)));
   // The fake as the key spells it, for the casing (keySpelled).
@@ -1266,7 +1299,7 @@ export function compileForward(key) {
  */
 export function compilePinnedFakes(key) {
   const live = new Set(pairRows(key).map((p) => fold(p.fake)));
-  const rows = warnRows(key).filter((w) => w.pinned && w.fake && !w.control && !w.ocr && !isCommonReal(w.fake) && !live.has(fold(w.fake)));
+  const rows = warnRows(key).filter((w) => w.pinned && w.fake && !w.control && !w.ocr && !isWordFake(w.fake) && !live.has(fold(w.fake)));
   if (!rows.length) return null;
   const map = new Map();
   for (const w of rows) if (!map.has(fold(w.fake))) map.set(fold(w.fake), w.real);
