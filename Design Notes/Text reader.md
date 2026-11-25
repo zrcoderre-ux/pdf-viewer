@@ -4058,3 +4058,13 @@ there are and opens the review at the first. The guard covers only the
 button. A launcher double-clicked in the folder, or a sheet answered in
 Excel, still runs, and PDF-Linker still applies an untouched pre-fill there,
 as its own rule says. `test-leaks.mjs` pins what counts as a suggestion.
+
+**Typing the suggestion out is accepting it (`decideRow`; owner,
+2026-11-25).** A pre-filled `*Smith` typed into the bar as `*Smith` left the
+cell what it arrived as, so the row was still a suggestion: the typed answer
+wrote the correction into the text (`writeOcrFix`), yet the walk, the count
+and the Re-run guard kept treating the row as unreviewed, and with the run
+refused the row stayed in LEAKS.xlsx and in the bar, the typo it asks about
+already gone from the text. An answer that folds to the cell's own
+suggestion now marks the row accepted (`ok`), as accept does; anything else
+typed, or a cleared cell, is unchanged.

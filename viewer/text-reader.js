@@ -19665,7 +19665,8 @@ function decideLeak(text, opts) { return asDecision(() => decideLeakNow(text, op
 function decideLeakNow(text, { advance = false } = {}) {
   if (!leaks || leaks.at < 0) return;
   const row = leakRows()[leaks.at];
-  row.fix = String(text == null ? "" : text).trim();
+  // Typed as PDF-Linker pre-filled it, the answer is its acceptance (LK.decideRow).
+  LK.decideRow(row, text);
   decidedHere++;
   persistLeaks();
   // A scan error's correction goes into the text now, not at the run.
