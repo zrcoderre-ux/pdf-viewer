@@ -1183,6 +1183,20 @@ export function motionTag(motionType) {
   return words ? words[0].toUpperCase() + words.slice(1) : "Motion";
 }
 
+/**
+ * A petition to approve a minor's (or a person with a disability's)
+ * compromise, as eCourt names it: "Petition to Confirm Minor's Compromise",
+ * "Petition to Approve Compromise of Disputed Claim … for Minor or Person
+ * with a Disability", or a cut-off "Petition … Compromise". Letters only, as
+ * E-Court Suite's isMinorsCompromiseMotion reads it; a CCP 998 offer to
+ * compromise is not one.
+ */
+export function isMinorsCompromise(motionType) {
+  const s = String(motionType || "").replace(/^\s*hearing on\s+/i, "").toLowerCase().replace(/[^a-z]/g, "");
+  if (!/compromise/.test(s) || /offertocompromise/.test(s)) return false;
+  return /minor|disabilit|incompeten/.test(s) || /^(?:verified|amended|expedited|supplemental)*petition/.test(s);
+}
+
 const SLOT_NAMES = { motion: "Motion", opp: "Opposition", reply: "Reply" };
 const STATE_WORDS = {
   filed: "filed on time",
@@ -1240,9 +1254,13 @@ function ownBriefingChips(entry) {
     return [{ label: "Defaults", state: warn ? "missing" : "filed", mark: warn ? "!" : "✓", title }];
   }
   const out = [];
+  // No opposition is expected on a minor's compromise petition, so with none
+  // filed there is no Opp or Rep chip (the owner, 2026-11-25). E-Court Suite
+  // 3.49.46+ already sends none; this covers entries written before it.
+  const noOpp = isMinorsCompromise(entry.motionType) && !(entry.opp && entry.opp.filed != null);
   for (const [k, label] of [["motion", "Mot"], ["opp", "Opp"], ["reply", "Rep"]]) {
     const s = entry[k];
-    if (!s) continue;
+    if (!s || (noOpp && k !== "motion")) continue;
     let state = s.state, mark = "";
     if (s.note === "Not Posted Yet") { state = "unposted"; mark = "?"; }
     else if (state === "filed") mark = "✓";

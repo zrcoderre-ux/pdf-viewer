@@ -982,3 +982,13 @@ Documents tab is a case page, which reports at once, so only a paper fetched
 some other way) is counted in the "then", and the flag stands until dismissed.
 Tests: `test-hearing-sheet.mjs` 6b (the rule) and 14d2 (the tag, cleared by a
 PDF, not back after one is removed, the broad case, dismissed by a click).
+
+**No opposition expected on a minor's compromise** (the owner, 2026-11-25).
+A petition to approve a minor's (or a person with a disability's) compromise
+is the guardian's request for the court's approval, and nobody is expected to
+oppose it. `briefingChips` shows only its Mot chip until an opposition is on
+file (`isMinorsCompromise`, which reads the Motion Type letters only, as E-Court
+Suite's `isMinorsCompromiseMotion` does). E-Court Suite 3.49.46 sends such an
+entry with `opp` and `reply` null in the first place; the check here covers
+entries written before that. Once an opposition is filed, both chips return,
+so the new-filing flag still sees it.
