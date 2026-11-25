@@ -1144,9 +1144,12 @@ export const ABBREV_FAKES = new Set(
   ).split(/\s+/).filter(Boolean)
 );
 
-/** A fake the display retires: an ordinary word, or an abbreviation's letters (two to five). */
+/** A fake the display retires: an ordinary word, or an abbreviation's letters (two to five) in a fake with no digit. */
 export function isWordFake(value) {
   if (isCommonReal(value)) return true;
+  // A fake with a digit is no abbreviation: a date of birth's "DOB: 03/12/1961"
+  // spells "dob" in its letters, a docket's "CA-1234" "ca".
+  if (/[0-9]/.test(String(value == null ? "" : value))) return false;
   const letters = String(value == null ? "" : value).replace(/[^A-Za-z]/g, "").toLowerCase();
   return letters.length >= 2 && letters.length <= 5 && ABBREV_FAKES.has(letters);
 }
