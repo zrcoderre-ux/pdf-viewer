@@ -1252,7 +1252,30 @@ line's text, or forward from its end, is refused with the "line numbers are
 fixed" toast. Mid-line the word goes as before. `test-typed-cites.mjs` case
 5: Ctrl+Backspace at the head of line 3 and Ctrl+Delete at the end of line 2
 are refused and said, Ctrl+Backspace mid-line deletes, and the file keeps
-every number.
+every number. (Since 2026-11-25 they are not refused but run Backspace's and
+Delete's own join, `backspaceAtCaret` / `deleteAtCaret`: see the next
+paragraph.)
+
+**A selection across lines on pleading paper deletes and joins**
+(`deleteAcrossLines`). It was refused whole (`selectionCrossesGutter`, the
+"line numbers are fixed" toast), because the browser's deletion takes the
+margin's numbers with the text between them. The owner, 2026-11-25: "It
+should let me backspace over multiple lines on pleding paper, it just
+shouldnt delete the number margins". Now Backspace, Delete (any `delete*`
+input type), Ctrl+X, typing (`insertText`, then typed again by
+`execCommand`), a paste and Enter over such a selection cut each line's
+selected part out of its `.lt` (never the gutter), then join each line from
+the last up into the one above (`joinInto`, the join `joinLineUp` makes): a
+half line goes, a numbered line keeps its number and the run below comes up
+as far as the first empty slot (`pullUp`). So it lands where holding
+Backspace at the selection's end would. A pseudonym the selection reaches
+into goes whole; Esc'd names ride with their nodes (`escHold`, `escCutAt`,
+`escCarry`); a numbered line it leaves empty is written " 3", not " 3  "
+(its `.gs` cleared). A selection whose start lies in a number counts from the
+head of that line's text (`pointInLt` read the gutter element itself as past
+the text). One snapshot, so one Ctrl+Z. Still refused: a drop over such a
+selection, and a selection the page's lines cannot place.
+`test-select-across-lines.mjs`.
 
 **What was typed is told the same way** (`TD.editedSpans`, `slidPoint`). The
 save's measure of what was typed had the same head-first bias: a slide

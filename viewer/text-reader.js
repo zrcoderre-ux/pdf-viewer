@@ -2118,7 +2118,7 @@ document.addEventListener("cut", (e) => {
   // the questions it answers are asked here: the margin numbers stay, the
   // screenshot's fakes are not the page's, and the cut is one undo step.
   if (shotPut) return;
-  if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
+  if (selectionCrossesGutter(body)) { if (!deleteAcrossLines(body)) toast(GUTTER_FIXED, { error: true }); return; }
   snapshot(body, true);
   // …and the names Esc left noted for it, as beforeinput notes them for the
   // browser's own edits: an Esc'd name the cut takes goes with it, settled by
@@ -6926,12 +6926,10 @@ function joinLineUp(body, line) {
   escHold(body); // the names Esc left go up with their nodes (enterAtCaret)
   const plt = ltOf(prev);
   const joinAt = plt.textContent.length;
-  plt.appendChild(extractAll(ltOf(line)));
   // A line with no number of its own (a half line) joined away is gone, as on
   // a page with no numbers: the number below it is not pulled up into its
   // place. A numbered line keeps its number, and the slots below come up.
-  if (!body.classList.contains("numbered") || !line.classList.contains("num")) line.remove();
-  else pullUp(line);
+  joinInto(body, prev, line);
   dressBody(body);
   fixGutterSpacing(body);
   escCarry(body);
@@ -7049,7 +7047,117 @@ function deleteAtCaret(body) {
   }
   return joinLineUp(body, next);
 }
-const GUTTER_FIXED = "The line numbers are fixed: edit within a line, or join lines with Backspace at a line's start.";
+const GUTTER_FIXED = "The line numbers are fixed: that edit would take a number with it.";
+/**
+ * A selection running across lines on pleading paper, deleted (Backspace,
+ * Delete, a cut, typing or a paste over it) the way an editor deletes one:
+ * the selected text goes, the text after the selection joins the line it
+ * began on, and the numbers stay where they are. The owner, in chat: "It
+ * should let me backspace over multiple lines on pleding paper, it just
+ * shouldnt delete the number margins". It used to be refused whole, with
+ * "the line numbers are fixed", because the browser's own deletion takes the
+ * margin's numbers with the text between them.
+ *
+ * Done as the reader's own keys do it, so it lands exactly where holding
+ * Backspace from the end of the selection would: each line's selected part
+ * is cut out of its text (never the gutter), then each line from the last up
+ * is joined to the one above it (joinInto, joinLineUp's join): a half line
+ * goes, a numbered line keeps its number and the run of text below it comes
+ * up a slot, as far as the first empty slot. A pseudonym the selection only
+ * reaches into goes whole, as a column's deletion takes it (deleteColSel).
+ * Whether it did: false where the selection is not one page's lines (it is
+ * then refused as before).
+ */
+function selectionLinePoint(body, container, offset, isStart) {
+  const line = lineOfNode(body, container);
+  const el = container.nodeType === 1 ? container : container.parentElement;
+  // In a line's number (the gutter itself too, which pointInLt reads as past it): the head of its text.
+  if (line && el && el.closest(".gutter")) return { line, pt: { container: ltOf(line), offset: 0 } };
+  if (line) return { line, pt: pointInLt(line, { container, offset }) };
+  if (container !== body) return null;
+  const kids = [...body.childNodes];
+  const isLine = (k) => k.nodeType === 1 && k.classList.contains("line");
+  const hit = isStart ? kids.slice(offset).find(isLine) : kids.slice(0, offset).reverse().find(isLine);
+  if (!hit) return null;
+  const lt = ltOf(hit);
+  return { line: hit, pt: isStart ? { container: lt, offset: 0 } : { container: lt, offset: lt.childNodes.length } };
+}
+function joinInto(body, prev, line) {
+  ltOf(prev).appendChild(extractAll(ltOf(line)));
+  if (!body.classList.contains("numbered") || !line.classList.contains("num")) line.remove();
+  else pullUp(line);
+}
+function deleteAcrossLines(body, { snap = true } = {}) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+  const r = sel.getRangeAt(0).cloneRange();
+  if (!body.contains(r.startContainer) || !body.contains(r.endContainer)) return false;
+  // A pseudonym reached into is taken whole.
+  const atomAt = (n) => (n.nodeType === 3 ? atomOf(n) : n.nodeType === 1 && n.closest ? n.closest(".pn, [data-here]") : null);
+  const a0 = atomAt(r.startContainer), a1 = atomAt(r.endContainer);
+  if (a0 && body.contains(a0)) r.setStartBefore(a0);
+  if (a1 && body.contains(a1)) r.setEndAfter(a1);
+  const s = selectionLinePoint(body, r.startContainer, r.startOffset, true);
+  const e = selectionLinePoint(body, r.endContainer, r.endOffset, false);
+  if (!s || !e) return false;
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  const si = lines.indexOf(s.line), ei = lines.indexOf(e.line);
+  if (si < 0 || ei < si) return false;
+  const hadText = new Set(lines.filter((l) => ltOf(l).textContent.length));
+  if (snap) snapshot(body, true);
+  noteTyping(body);
+  // The names Esc left go with their nodes (enterAtCaret): the cut points are
+  // made node boundaries first, so what stands either side moves whole.
+  escHold(body);
+  const r2 = document.createRange();
+  r2.setStart(s.pt.container, s.pt.offset);
+  r2.setEnd(e.pt.container, e.pt.offset);
+  if (ei > si || r2.collapsed === false) {
+    const eb = escCutAt(body, { container: r2.endContainer, offset: r2.endOffset });
+    r2.setEnd(eb.container, eb.offset);
+    const sb = escCutAt(body, { container: r2.startContainer, offset: r2.startOffset });
+    r2.setStart(sb.container, sb.offset);
+  }
+  const sLt = ltOf(s.line), eLt = ltOf(e.line);
+  const cut = (lt, from, to) => {
+    const x = document.createRange();
+    if (from) x.setStart(from.container, from.offset); else x.setStart(lt, 0);
+    if (to) x.setEnd(to.container, to.offset); else x.setEnd(lt, lt.childNodes.length);
+    if (!x.collapsed) x.deleteContents();
+  };
+  const from = { container: r2.startContainer, offset: r2.startOffset }, to = { container: r2.endContainer, offset: r2.endOffset };
+  if (si === ei) cut(sLt, from, to);
+  else {
+    cut(eLt, null, to);
+    for (let k = ei - 1; k > si; k--) cut(ltOf(lines[k]), null, null);
+    cut(sLt, from, null);
+  }
+  for (const br of [...sLt.querySelectorAll("br")]) br.remove(); // the placeholder of a line the join gives text again (placeholderIn)
+  const joinAt = sLt.textContent.length;
+  for (let cur = lines[ei]; cur && cur !== s.line;) {
+    const prev = cur.previousElementSibling;
+    if (!prev || !prev.classList.contains("line")) break;
+    joinInto(body, prev, cur);
+    cur = prev;
+  }
+  for (const l of lines.slice(si, ei + 1)) if (l.isConnected) placeholderIn(ltOf(l));
+  // A numbered line this left empty is written as an empty numbered line is,
+  // " 3", not " 3  " with the two spaces (or the indent) its text had.
+  for (const l of lines) {
+    if (!l.isConnected || !l.classList.contains("num") || ltOf(l).textContent.length || !(hadText.has(l) || (lines.indexOf(l) >= si && lines.indexOf(l) <= ei))) continue;
+    const gs = l.querySelector(":scope > .gutter > .gs");
+    if (gs && !gs.textContent.trim()) gs.textContent = "";
+  }
+  dressBody(body);
+  fixGutterSpacing(body);
+  escCarry(body);
+  const pt = pointAtOffset(ltOf(s.line), joinAt);
+  placeCaret(pt.node, pt.offset);
+  lastSnapPage = -1; // what is typed next is its own step
+  setDirty(true, pageIndexOf(body));
+  afterTextChange();
+  return true;
+}
 /** A selection reaching across a line number: an edit over it would take the number with it, so it is refused. */
 function selectionCrossesGutter(body) {
   const sel = document.getSelection();
@@ -7095,7 +7203,12 @@ pagesEl.addEventListener("keydown", (e) => {
   if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && boxKey(body, e.key)) { e.preventDefault(); return; }
   // In a caption's cell, on any page, a line break and a join stay in its column (captionKey).
   if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && captionKey(body, e.key)) { e.preventDefault(); hideTypeTip(); return; }
-  if (e.key === "Enter") { e.preventDefault(); hideTypeTip(); enterAtCaret(body); }
+  if (e.key === "Enter") {
+    e.preventDefault(); hideTypeTip();
+    // Over a selection across lines: it goes first (deleteAcrossLines), then the break, one step back.
+    if (selectionCrossesGutter(body)) { if (deleteAcrossLines(body)) enterAtCaret(body, { snap: false }); else toast(GUTTER_FIXED, { error: true }); return; }
+    enterAtCaret(body);
+  }
   else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
   else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
 });
@@ -7786,10 +7899,13 @@ pagesEl.addEventListener("paste", (e) => {
   const escs = own && lastCopy.esc ? lastCopy.esc : [];
   e.preventDefault();
   if (!text) return;
-  if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
+  const crossing = selectionCrossesGutter(body);
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   noteTyping(body);
   snapshot(body, true);
+  // Pasted over lines on pleading paper: the selection is deleted as a
+  // Backspace would delete it (deleteAcrossLines), then the paste goes in.
+  if (crossing && !deleteAcrossLines(body, { snap: false })) { toast(GUTTER_FIXED, { error: true }); return; }
   // Where the first line goes in: the selection's start, which the text before it keeps.
   let first = -1;
   const laid = [];
@@ -9127,7 +9243,27 @@ pagesEl.addEventListener("beforeinput", (e) => {
   if (!body) return;
   if (shotPut) { e.preventDefault(); return; } // the screenshot's fakes are on the page, not in it
   if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
-  if (selectionCrossesGutter(body) || caretDeletesGutter(body, e)) { e.preventDefault(); toast(GUTTER_FIXED, { error: true }); return; }
+  // A deletion over lines on pleading paper joins them, the numbers staying
+  // (deleteAcrossLines); typing over such a selection deletes it first and
+  // then types. Ctrl+Backspace at the head of a numbered line's text (and
+  // Ctrl+Delete at its end, and the line-wide deletions) is Backspace's join,
+  // not the browser's deletion, which took the number with the word.
+  if (selectionCrossesGutter(body)) {
+    e.preventDefault();
+    const t = e.inputType || "";
+    const typed = (t === "insertText" || t === "insertReplacementText") && e.data;
+    if ((/^delete/.test(t) || typed) && deleteAcrossLines(body)) {
+      if (typed) document.execCommand("insertText", false, e.data);
+      return;
+    }
+    toast(GUTTER_FIXED, { error: true });
+    return;
+  }
+  if (caretDeletesGutter(body, e)) {
+    e.preventDefault();
+    if (/Backward$/.test(e.inputType)) backspaceAtCaret(body); else deleteAtCaret(body);
+    return;
+  }
   noteTyping(body);
   // A deletion after typing, or typing after a deletion, is its own step.
   const kind = /delete/i.test(e.inputType) ? "del" : "ins";
