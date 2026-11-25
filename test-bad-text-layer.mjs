@@ -17,6 +17,10 @@
 //   5. the helpers: which pages are marked, a file that cannot hold the mark
 //      settled without a parse, a mark inside an object stream still found.
 //
+//   6. a selection left standing outside the pages, or a markup tool left on,
+//      does not stop the right-click menu (it did, and the right-click did
+//      nothing at all).
+//
 // Run: node test-bad-text-layer.mjs   (from the repo root). Needs Playwright
 // (/opt/node-tools), Chromium (/opt/pw-browsers/chromium) and a free port in
 // 8130-8199; exits 0 with SKIP where any is missing. Every PDF is built in the
@@ -125,8 +129,17 @@ try {
   let t = await textOf();
   check("the cipher, not the scan's words", [hasCipher(t), hasBody(t)], [true, false]);
 
-  console.log("2. right-click: text layer is bad");
+  console.log("2. right-click: text layer is bad (a selection left outside the pages, the highlight tool on)");
+  // Either of these made a right-click do nothing at all.
+  await page.evaluate(() => {
+    const el = document.getElementById("filename");
+    const r = document.createRange(); r.selectNodeContents(el);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  });
+  await page.evaluate(() => document.getElementById("highlight-toggle").click());
+  check("the highlight tool is on", await page.evaluate(() => document.getElementById("highlight-toggle").getAttribute("aria-pressed")), "true");
   const items = await menu("text layer is bad");
+  await page.evaluate(() => { if (document.getElementById("highlight-toggle").getAttribute("aria-pressed") === "true") document.getElementById("highlight-toggle").click(); });
   check("the menu offers it", items.some((x) => /Page 1: text layer is bad/.test(x)), true);
   await settle();
   let raw = await fileText();
