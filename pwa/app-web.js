@@ -1972,6 +1972,10 @@ async function askClaude(hg, r, wf = null) {
     hearingDate: hg.date ? iso(hg.date) : "",
     folderName: r.name,
     folderPath,
+    // The case's eCourt page: the Claude extension opens the run's chats in
+    // the window it is open in, else a window of their own (never whatever
+    // window was used last).
+    ecourtUrl: (hearingLib && hearingLib.ecourtUrlOf(hg)) || "",
     ...(wf ? { workflowId: wf.id, workflowName: wf.name } : {}),
   };
   try {

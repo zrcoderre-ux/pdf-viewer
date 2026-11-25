@@ -223,6 +223,14 @@ the extension's session storage, so it starts empty when Chrome restarts, and
 a window opened before this change is unknown to it. Without E-Court Suite (or
 an older one) every link still opens its own window, the mark left on.
 
+A Claude chat link is any claude.ai page but the root (2026-11-25): a run's
+chat can sit at `/code/…` or another address the old `/chat|cowork|project/`
+list left out, and such a link opened as a tab of the current window. The run
+itself, started from Home's Claude button, carries the case's eCourt page in
+`Claude Run Request.json` (`ecourtUrl`): the Claude extension opens the run's
+chats in the window that page is open in, else in a window of its own, never
+in whichever window was last used (its `runTab`, `caseEcourtWindow`).
+
 New window and a tab pulled out of the strip use `window.open` with the
 opener kept; `setWindowOpenHandler` allows app URLs as a window like the
 first. Electron shows no dialog for `beforeunload`: the close is simply

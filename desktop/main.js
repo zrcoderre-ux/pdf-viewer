@@ -202,7 +202,12 @@ const APP_SCHEMES = ["pdf-linker:"];
 // 2026-11-24: one window a case for its eCourt page and its Claude chat).
 const NEW_WINDOW_LINK = (u) => u.protocol === "https:" && (
   (/^civil\.lacourt\.org$/i.test(u.hostname) && /^\/ecourt\//i.test(u.pathname))
-  || (/^claude\.ai$/i.test(u.hostname) && /^\/(chat|cowork|project)\//i.test(u.pathname)));
+  // Any claude.ai page but the root (the Claude button's marker): a run's chat
+  // may sit at /chat/, /cowork/, /code/ or an address claude.ai has not used
+  // yet, and one left out opened as a tab of the current window (the owner,
+  // 2026-11-25: Claude runs "open in an existing … window when they should
+  // get their own").
+  || (/^claude\.ai$/i.test(u.hostname) && u.pathname.length > 1));
 function chromePath() {
   if (process.platform !== "win32") return "";
   const bases = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean);

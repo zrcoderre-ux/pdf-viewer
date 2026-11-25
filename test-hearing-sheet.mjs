@@ -965,6 +965,7 @@ async function browserPart() {
     await shell.waitForFunction((n) => window.__opened.length > n, opened0, { timeout: 10000 });
     const req = await shell.evaluate(async () => JSON.parse(await (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getFileHandle("Claude Run Request.json")).getFile()).text()));
     check("the request left in Downloads: the case, its hearing, the folder and its place", [req.version, req.caseNumber, req.motion, req.hearingDate === iso(inDays(2)), req.folderName, req.folderPath], [1, "25STCV12345", "Demurrer", true, "25STCV12345 ACME", "C:\\Users\\Clerk\\Downloads\\25STCV12345 ACME"]);
+    check("…and its eCourt page, so the run's chats open in the case's window", /^https:\/\/civil\.lacourt\.org\/ecourt\//.test(req.ecourtUrl || ""), true);
     check("…the place asked of PDF+ by the folder's own file", await shell.evaluate(() => [window.__asked.root, window.__asked.chain, typeof window.__asked.launcher.size]), ["Downloads", ["25STCV12345 ACME"], "number"]);
     check("claude.ai opened with the marker only, never the case", (await shell.evaluate(() => window.__opened)).slice(opened0), ["https://claude.ai/#cum-pdfplus-run"]);
     check("…with no workflow named where the Claude extension lists none", req.workflowId, undefined);
