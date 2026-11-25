@@ -10,7 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, applyCase, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes, capOnlyReal, streetWord,
+  wordFakesOf, isWordFake, keyCellKind, contactValue, boundRows, compilePinnedFakes, capOnlyReal, streetWord,
   nameWordPairs, nameWordsForward, nameWordsBack, nameWordClashes,
 } from "./viewer/pseudo-key.js";
 import { findRealsInPlain, fakeFor } from "./viewer/textdoc.js";
@@ -689,6 +689,26 @@ console.log("a fake that is an ordinary word");
   const old = { ...k, wordFakes: undefined, pairs: k.pairs.concat([{ fake: "We", real: "Dax" }]) };
   check("a key kept from before is guarded too", [wordFakesOf(old), translate(compile(old), "we agree").text], [[{ fake: "We", real: "Dax" }], "we agree"]);
   check("an ordinary key has none", wordFakesOf(keyOf([["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 1]])), []);
+}
+
+console.log("a fake that is an abbreviation a filing writes (CA, Re)");
+{
+  // An older PDF-Linker drew the acronym "SH" of "Sentinel Highland, LLC" off
+  // its fake "Cobalt Arclight, LLC", so "SH" -> "CA"; and a set of initials
+  // "JJ" -> "RE". Reversed case-blind, every state code read "SH" and every
+  // "Re:" read "JJ" (the owner, 2026-11-24).
+  const k = keyOf([
+    ["entity", "Sentinel Highland, LLC", "Cobalt Arclight, LLC", "…", "", "spreadsheet", 3],
+    ["short-name", "SH", "CA", "…", "", "document", 2],
+    ["person", "J.J.", "R.E.", "…", "", "document", 1],
+    ["short-name", "JJ", "RE", "…", "", "document", 1],
+  ]);
+  check("retired from the display, and said", [k.pairs.some((p) => /^(CA|RE|R\.E\.)$/.test(p.fake)), k.wordFakes.map((w) => w.fake).sort()],
+    [false, ["CA", "R.E.", "RE"]]);
+  const t = translate(compile(k), "Re: Motion. Los Angeles, CA 90012. Cobalt Arclight, LLC signed.").text;
+  check("the state code and Re: read as written; the company still reverses", t, "Re: Motion. Los Angeles, CA 90012. Sentinel Highland, LLC signed.");
+  check("isWordFake: abbreviations and words, never a surname", ["CA", "c.a.", "Re", "LLC", "we", "Arclight", "QX", "Ko"].map(isWordFake),
+    [true, true, true, true, true, false, false, false]);
 }
 
 // ---- control words in the Replacement cell ---------------------------------------
