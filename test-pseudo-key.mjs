@@ -707,8 +707,8 @@ console.log("a fake that is an abbreviation a filing writes (CA, Re)");
     [false, ["CA", "R.E.", "RE"]]);
   const t = translate(compile(k), "Re: Motion. Los Angeles, CA 90012. Cobalt Arclight, LLC signed.").text;
   check("the state code and Re: read as written; the company still reverses", t, "Re: Motion. Los Angeles, CA 90012. Sentinel Highland, LLC signed.");
-  check("isWordFake: abbreviations and words, never a surname", ["CA", "c.a.", "Re", "LLC", "we", "Arclight", "QX", "Ko"].map(isWordFake),
-    [true, true, true, true, true, false, false, false]);
+  check("isWordFake: abbreviations and words, never a surname", ["CA", "c.a.", "Re", "LLC", "we", "Arclight", "QX", "Ko", "DOB: 03/12/1961", "CA-1234"].map(isWordFake),
+    [true, true, true, true, true, false, false, false, false, false]);
 }
 
 // ---- control words in the Replacement cell ---------------------------------------
