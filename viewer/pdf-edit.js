@@ -145,6 +145,22 @@ export async function readBadLayerPages(bytes) {
   } catch { return new Set(); }
 }
 
+/**
+ * A file's bytes with the bad-text-layer mark put on (`on`) or taken off the
+ * 1-based `pages`, saved without object streams so mayHaveBadLayer finds it.
+ * For the text reader, which has no document open to save: it reads the file
+ * fresh and writes this back. Refuses an encrypted file (the viewer, which
+ * puts its protection back on a save, is the place to mark one).
+ */
+export async function markBadLayerInBytes(bytes, pages, on) {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true });
+  if (doc.isEncrypted) throw Object.assign(new Error("the PDF is encrypted"), { encrypted: true });
+  const idx = [...pages].map((n) => n - 1).filter((i) => i >= 0 && i < doc.getPageCount());
+  if (!idx.length) throw new Error("the PDF has no such page");
+  setBadLayerMarks(doc, on ? { set: idx } : { clear: idx });
+  return doc.save({ useObjectStreams: false });
+}
+
 // Reorder / rotate / delete pages in one pass. `plan` is the desired final page
 // list: an array of { srcIndex, rotate } where srcIndex is the 0-based page in
 // the source and rotate is extra clockwise rotation in degrees (0/90/180/270).

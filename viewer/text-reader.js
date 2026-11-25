@@ -67,7 +67,7 @@ import * as LK from "./leaks.js";
 import { folderStatus, opensInPdfMode, runLooksStalled } from "./case-folders.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
-import { buildRedactedPdf, readBadLayerPages } from "./pdf-edit.js";
+import { buildRedactedPdf, readBadLayerPages, markBadLayerInBytes } from "./pdf-edit.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
@@ -15820,6 +15820,7 @@ pagesEl.addEventListener("contextmenu", (e) => {
   showKeepMenu(target, e.clientX, e.clientY);
 });
 document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });
+
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   hideKeepMenu();
@@ -21984,6 +21985,101 @@ let pickedPdfs = new Map(); // PDFs picked by hand for a combined file, by name:
 let pickedByMember = new Map(); // …and the member each was matched to by ORDER, where names could not
 let swaps = new Set();      // "<pdf name>|<page>" swapped in
 const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
+
+// ── a page's TEXT LAYER marked bad, from the PDF side ──────────────────────────
+//
+// Right-click a PDF page the reader shows (the side-by-side pane, or a page
+// swapped ⇄ to its PDF): "text layer is bad" writes `/PDFLinkerBadTextLayer
+// true` on that page of the source PDF in the case folder (pdf-edit.js,
+// BAD_LAYER_KEY, the mark PDF+'s own right-click writes), and PDF-Linker's
+// next run rebuilds the page's layer from what it shows and takes the mark
+// off. Only on the PDF side, by the owner's direction (2026-11-25: "It should
+// have me right click on the pdf side of the side by side, so I never see it
+// by accident"): the text side's right-click is the keep menu's and nothing
+// else's. The file is read fresh and written back whole, as the viewer's
+// Save writes it; an encrypted PDF is left to the viewer.
+const pageMenu = document.createElement("div");
+pageMenu.id = "page-menu";
+pageMenu.hidden = true;
+document.body.appendChild(pageMenu);
+function hidePageMenu() { pageMenu.hidden = true; pageMenu.replaceChildren(); }
+/** The PDF page a right-click on the PDF side stands on: { src, page } or null. */
+function pdfPageAtEvent(e) {
+  const el = e.target.closest && e.target.closest(".pdf-slot:not(.blank), .pdf-inline");
+  if (!el) return null;
+  if (el.classList.contains("pdf-slot")) {
+    const t = pdfTarget(Number(el.dataset.index));
+    return t ? { src: t.src, page: t.page, info: el.__pdfOf && el.__pdfOf.info } : null;
+  }
+  const src = el.dataset.src && pdfSourceFor(el.dataset.src);
+  const page = Number(el.dataset.page);
+  return src && page >= 1 ? { src, page, info: el.__pdfOf && el.__pdfOf.info } : null;
+}
+async function badLayerMarkedOf(src) {
+  try {
+    const file = src.handle ? await src.handle.getFile() : src.file;
+    return file ? await readBadLayerPages(await file.arrayBuffer()) : new Set();
+  } catch { return new Set(); }
+}
+async function showPageMenu(at, x, y) {
+  const marked = (await badLayerMarkedOf(at.src)).has(at.page);
+  const where = `${at.src.name}, PDF p. ${at.page}`;
+  const head = document.createElement("div");
+  head.className = "km-head";
+  head.textContent = where;
+  const go = document.createElement("button");
+  go.textContent = marked ? "Text layer is fine after all" : "Text layer is bad (PDF-Linker reads what the page shows)";
+  go.title = marked
+    ? "Take the mark off this page of the PDF: PDF-Linker leaves its text layer as it is."
+    : "The page shows good text but its text layer is garbage. Marks this page of the PDF; PDF-Linker's next run replaces the layer with a reading of the page, and the export page with it.";
+  go.addEventListener("click", () => { hidePageMenu(); setBadLayerFromReader(at, !marked); });
+  const cancel = document.createElement("button");
+  cancel.className = "secondary";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", hidePageMenu);
+  pageMenu.replaceChildren(head, go, cancel);
+  pageMenu.hidden = false;
+  pageMenu.style.left = Math.max(4, Math.min(window.innerWidth - pageMenu.offsetWidth - 4, x)) + "px";
+  pageMenu.style.top = Math.max(4, Math.min(window.innerHeight - pageMenu.offsetHeight - 4, y)) + "px";
+}
+async function setBadLayerFromReader(at, on) {
+  const where = `${at.src.name}, PDF p. ${at.page}`;
+  const h = at.src.handle;
+  if (!h || !h.createWritable) {
+    toast(`${where}: this PDF was not opened from the case folder, so it cannot be marked here — open it in PDF+ and right-click the page.`, { error: true, ms: 7000 });
+    return;
+  }
+  try {
+    if (h.requestPermission && (await h.requestPermission({ mode: "readwrite" })) !== "granted") {
+      toast(`${where}: not marked — writing the PDF was not allowed.`, { error: true });
+      return;
+    }
+    const bytes = await markBadLayerInBytes(new Uint8Array(await (await h.getFile()).arrayBuffer()), [at.page], on);
+    const w = await h.createWritable();
+    await w.write(bytes);
+    await w.close();
+    if (at.info) at.info.badLayer = null; // read again when next asked (shotPdfPrep)
+    toast(on
+      ? `${where} marked: its text layer is bad. PDF-Linker's next run (Re-run) replaces the layer with a reading of the page, and this export page with it.`
+      : `${where}: the mark is off — PDF-Linker leaves its text layer as it is.`, { ms: 7000 });
+  } catch (e) {
+    toast(e && e.encrypted
+      ? `${where}: not marked — the PDF is encrypted. Open it in PDF+ and right-click the page there.`
+      : `${where}: not marked — ${e && e.message ? e.message : e}`, { error: true, ms: 7000 });
+  }
+}
+pdfPane.addEventListener("contextmenu", onPdfSideMenu);
+pagesEl.addEventListener("contextmenu", (e) => { if (e.target.closest && e.target.closest(".pdf-inline")) onPdfSideMenu(e); });
+function onPdfSideMenu(e) {
+  if (e.defaultPrevented || e.altKey) return;
+  const at = pdfPageAtEvent(e);
+  if (!at) return;
+  e.preventDefault();
+  hideKeepMenu();
+  showPageMenu(at, e.clientX, e.clientY);
+}
+document.addEventListener("mousedown", (e) => { if (!pageMenu.hidden && !pageMenu.contains(e.target)) hidePageMenu(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pageMenu.hidden) hidePageMenu(); });
 const pdfInView = new Set(); // text pages whose PDF page an observer says is on screen
 // Every page's size, by PDF name, KEPT AFTER THE PDF IS CLOSED. Two numbers a
 // page: what a slot needs to stand at the right height is nothing beside what

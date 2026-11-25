@@ -103,6 +103,20 @@ measures pass a short page or a garbled heading among sound lines.
   `textPageClean` is asked: the page's layer, and the export page read off it,
   are no evidence that it holds no name. A PDF whose marks could not be read
   in time is left out the same way.
+- **The text reader, from the PDF side.** Right-click a PDF page the reader
+  shows (a slot of the side-by-side pane, or a page swapped ⇄ to its PDF):
+  the reader's own small menu (`#page-menu`, styled as the keep menu) offers
+  **Text layer is bad**, or **Text layer is fine after all** where the file
+  already carries the mark (read fresh off the file each time). The reader
+  has no document open to save, so `markBadLayerInBytes` reads the PDF in
+  the case folder fresh, sets or deletes the key and saves it whole without
+  object streams, written back through the folder's handle (an encrypted PDF
+  is refused: the viewer, which puts its protection back on a save, is where
+  to mark one). Only the PDF side, by the owner's direction ("It should have
+  me right click on the pdf side of the side by side, so I never see it by
+  accident"): the text side's right-click stays the keep menu's alone. The
+  owner had first right-clicked the text side and found nothing there.
+  `test-reader-bad-layer.mjs`.
 - **PDF-Linker.** The next full run rebuilds a marked page's text layer from
   its render with none of its own tests, then takes the mark off
   (`_reocr_garbled_pages`, its notes "OCR.md"). Saving the mark changes the

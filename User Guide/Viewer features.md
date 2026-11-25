@@ -193,7 +193,9 @@ In addition to citation linking, the viewer supports:
   the reader's screenshot leaves the page out rather than trust its text, and
   PDF-Linker's next run replaces the page's text layer with a reading of the
   page and takes the mark off. **Text layer is fine after all** on the same
-  menu takes it off.
+  menu takes it off. In the text reader, right-click the page on the **PDF
+  side** of side by side (or a page swapped to its PDF) for the same mark;
+  the text side's right-click does not offer it.
 - **Rotate pages** — the **⟳ Rotate pages** tool (or the **R** key) turns a
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
