@@ -478,6 +478,23 @@ export function isPrefilledFix(row) {
   const own = String(row && row.fix0 != null ? row.fix0 : "").trim();
   return own[0] === "*" && own[1] !== "*" && String((row && row.notes) || "").includes(PREFILL_NOTE);
 }
+/**
+ * The operator's own answer on a row: `text` into its Fix? cell. Typed out to
+ * read as PDF-Linker's pre-filled suggestion (the same `*Smith` or `~Smith`
+ * it arrived with) it is the operator ACCEPTING that suggestion, and is
+ * remembered as accept remembers it (`ok`). Without that the row stayed a
+ * suggestion however often the answer was typed: the review came back to it,
+ * Re-run refused for it, and the `*` correction the typing had already
+ * written into the text kept coming back as a row to answer (owner,
+ * 2026-11-25).
+ */
+export function decideRow(row, text) {
+  if (!row) return row;
+  row.fix = String(text == null ? "" : text).trim();
+  // The cell keeps its own spelling of it, so the save has nothing to write.
+  if (isSuggested(row)) { row.fix = String(row.fix0).trim(); row.ok = true; }
+  return row;
+}
 /** Rows PDF-Linker answered for the operator that the operator has not accepted or changed. */
 export function unreviewedSuggestions(rows) {
   return (rows || []).filter(isSuggested);

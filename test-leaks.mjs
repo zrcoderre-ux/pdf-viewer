@@ -9,7 +9,7 @@
 import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
-  packDecisions, unpackDecisions, decisionsKey, rowIdentity, wholeContextIdentity, leakPages, CONTEXT_RULE, isSuggested, isPending, isPrefilledFix, unreviewedSuggestions,
+  packDecisions, unpackDecisions, decisionsKey, rowIdentity, wholeContextIdentity, leakPages, CONTEXT_RULE, isSuggested, isPending, isPrefilledFix, unreviewedSuggestions, decideRow,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps, masterWithdrawEdits,
   walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
@@ -327,6 +327,19 @@ check("…nor is a ~ the operator typed over the sheet's own cell",
   check("…changed here, it is the operator's answer", isSuggested({ fix: "*Smyth", fix0: "*Smith", notes: note }), false);
   check("…cleared here, it is a row still to answer, not a suggestion", [isSuggested({ fix: "", fix0: "*Smith", notes: note }), isPending({ fix: "", fix0: "*Smith", notes: note })], [false, true]);
   check("…accepted, it is reviewed", isSuggested({ ...pre, ok: true }), false);
+  // Typing the suggestion out as it stands is accepting it (owner, 2026-11-25):
+  // it stayed a suggestion, so the row, its typo already corrected in the
+  // text, kept coming back to be answered and Re-run kept refusing.
+  const typed = decideRow({ fix: "*Smith", fix0: "*Smith", notes: note }, " *smith ");
+  check("…typed out as it stands, it is accepted", [typed.ok, isSuggested(typed), isPending(typed), unreviewedSuggestions([typed]).length], [true, false, false, 0]);
+  check("…and remembered as an acceptance, with nothing for the sheet", packDecisions([{ ...typed, n: 2, value: "Smlth", file: "a.txt", context: "" }])[2].ok, true);
+  const other = decideRow({ fix: "*Smith", fix0: "*Smith", notes: note }, "*Smyth");
+  check("…typed as something else, it is that answer, not an acceptance", [!!other.ok, isSuggested(other), isPending(other)], [false, false, false]);
+  const cleared = decideRow({ fix: "*Smith", fix0: "*Smith", notes: note }, "");
+  check("…cleared, still to answer", [!!cleared.ok, isPending(cleared)], [false, true]);
+  const tilde = decideRow({ fix: "~Vazquez", fix0: "~Vazquez" }, "~Vazquez");
+  check("…a pre-filled ~ typed out is accepted too", [tilde.ok, isPending(tilde)], [true, false]);
+  check("…and a * typed in Excel is an answer either way", !!decideRow({ fix: "*Smith", fix0: "*Smith", notes: "" }, "*Smith").ok, false);
   check("unreviewedSuggestions lists only those", unreviewedSuggestions([pre, { ...pre, ok: true }, { fix: "no", fix0: "" }]).length, 1);
 }
 check("…nor one already accepted", isSuggested({ fix: "~Vazquez", fix0: "~Vazquez", ok: true }), false);
