@@ -1752,7 +1752,9 @@ function adoptSavedFile(handle) {
 }
 
 // Save: the annotation set (and any rotation on screen) into the file.
-async function saveEditedPdf() {
+// `badLayer` ({ set, clear }, 0-based pages) also marks or unmarks pages as
+// having a bad text layer (setBadLayer).
+async function saveEditedPdf({ badLayer = null, said = "Saved" } = {}) {
   if (!saveEditsEl) return false;
   if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return false; }
   saveEditsEl.disabled = true;
@@ -1763,6 +1765,7 @@ async function saveEditedPdf() {
       srcBytes: pdfBytes.slice(0),
       annotations: annotationSaveData(),
       report,
+      badLayer,
     });
     if (report.covered) {
       toast(`${report.covered} edited paragraph${report.covered === 1 ? "'s" : "s'"} old text could not be found in the file's text (it may be drawn as shapes) and was painted over instead.`, { timeout: 8000 });
@@ -1777,7 +1780,7 @@ async function saveEditedPdf() {
       // and the rotation is in the pages. OCR'd pages follow their pages.
       await reloadEditedBytes(edited, rotated ? rotationPlan(pageRotation.deltas()) : null, { keepPlace: true });
       Annots.markSaved();
-      toast("Saved", { kind: "success" });
+      toast(said, { kind: "success", timeout: said === "Saved" ? undefined : 9000 });
     }
     statusEl.textContent = "";
     return ok;
@@ -1846,7 +1849,7 @@ function pickFiles({ multiple = false, accept = {}, description = "Files" } = {}
   });
 }
 
-if (saveEditsEl) saveEditsEl.addEventListener("click", saveEditedPdf);
+if (saveEditsEl) saveEditsEl.addEventListener("click", () => saveEditedPdf());
 if (combineEl)   combineEl.addEventListener("click", combinePdfs);
 
 // Toolbar naming-mode dropdown writes a per-document override. The
@@ -2029,6 +2032,7 @@ function resetForNewDocument() {
 let docInfo = null;         // { title, author, … } from /Info
 let docAttachments = [];    // [{ id, name, size, desc, page? }]
 let docSecurity = null;     // { needsPassword, password, permissions, … } when it arrived encrypted
+let docBadLayer = new Set(); // 1-based pages the file marks as having a bad text layer (pdf-edit.js, BAD_LAYER_KEY)
 let sourceBytes = null;     // the file exactly as it came (Download hands out this)
 // Past this size the parse is skipped: the document still opens and shows its
 // annotations (pdf.js paints them), they just are not editable.
@@ -2042,6 +2046,7 @@ async function inspectAndImport() {
   docInfo = found ? found.info : null;
   docAttachments = found ? found.attachments : [];
   docHasForm = !!(found && found.hasForm);
+  docBadLayer = found && found.badLayer ? found.badLayer : new Set();
   const list = found ? found.annotations : [];
   try {
     for (const a of list) if (a.origRef) pdfDoc.annotationStorage.setValue(a.origRef, { noView: true, noPrint: true });
@@ -2459,6 +2464,10 @@ async function renderAllPages() {
     // characters at all.
     const garbled = pageTextIsGarbled(refs.textContent) && (await invisibleTextGarbled(refs.page, pdfjsLib.OPS));
     if (signal.aborted) return;
+    // A page marked as having a BAD TEXT LAYER (the page's menu, setBadLayer)
+    // is read from its picture whatever Recognize text is set to: the owner
+    // said the words it shows are right and the words under them are not.
+    if (docBadLayer.has(refs.pageNumber)) { refs.keepText = null; refs.textContent = null; ocrQueue.push(refs); continue; }
     if (ocrEnabled) {
       if (pageNeedsOcr(refs.textContent) || garbled) { refs.keepText = null; refs.textContent = null; ocrQueue.push(refs); continue; }
       if (sparseText(refs.textContent) && (await pageIsScan(refs.page, pdfjsLib.OPS))) {
@@ -4111,6 +4120,43 @@ document.addEventListener("contextmenu", (e) => {
     { label: "Find in document", icon: "search", action: () => Find.open(text.replace(/\s+/g, " ").trim().slice(0, 200)) },
   ]);
 }, true);
+
+// Right-click on a page with nothing selected: mark its TEXT LAYER as bad, or
+// take the mark off (pdf-edit.js, BAD_LAYER_KEY). The selection's menu, an
+// annotation's and the browser's own (Alt) come first.
+pagesEl.addEventListener("contextmenu", (e) => {
+  if (e.defaultPrevented || e.altKey || !pdfBytes) return;
+  const wrapper = e.target.closest && e.target.closest(".page-wrapper");
+  if (!wrapper) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;
+  if (Annots.currentTool() || redactMode || cropMode || organizeMode) return;
+  const pn = Number(wrapper.dataset.pageNumber);
+  if (!(pn >= 1)) return;
+  e.preventDefault();
+  const marked = docBadLayer.has(pn);
+  contextMenu(e.clientX, e.clientY, [
+    marked
+      ? { label: `Page ${pn}: text layer is fine after all`, icon: "undo", action: () => setBadLayer(pn, false) }
+      : { label: `Page ${pn}: text layer is bad (read what the page shows)`, icon: "ocr", action: () => setBadLayer(pn, true) },
+  ]);
+});
+
+/**
+ * Mark page `pn` (1-based) as having a bad text layer, or take the mark off,
+ * and save the file: the mark is a key on the page's dictionary, so it is in
+ * the PDF for PDF-Linker's next run to find. A marked page is read from its
+ * picture here from then on (the render loop), its layer left in the file for
+ * PDF-Linker to replace.
+ */
+async function setBadLayer(pn, on) {
+  if (on === docBadLayer.has(pn)) return;
+  const i = pn - 1;
+  const said = on
+    ? `Page ${pn} marked: its text layer is bad. PDF+ reads the page as it shows it, and PDF-Linker's next run replaces the layer with a reading of the page.`
+    : `Page ${pn}: the bad-text-layer mark is off, and its own text layer is used again.`;
+  await saveEditedPdf({ badLayer: on ? { set: [i] } : { clear: [i] }, said });
+}
 
 // A comment on a passage: the passage highlighted, and its note open to type in.
 function commentOnSelection() {

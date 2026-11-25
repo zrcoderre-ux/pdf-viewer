@@ -67,7 +67,7 @@ import * as LK from "./leaks.js";
 import { folderStatus, opensInPdfMode, runLooksStalled } from "./case-folders.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
-import { buildRedactedPdf } from "./pdf-edit.js";
+import { buildRedactedPdf, readBadLayerPages } from "./pdf-edit.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
@@ -1433,6 +1433,13 @@ function pdfNamesOn(sheet) {
   if (!el || !canvas || !(canvas.width > 0 && canvas.height > 0)) return null; // nothing drawn on it
   const whole = (why) => ({ sheet, names: [], whole: true, why });
   if (!el.dataset.rendered || el.dataset.textFor !== el.dataset.rendered || !el.__drawnPage || !el.__vp) return whole("its words were still being read");
+  // A page marked as having a BAD TEXT LAYER (pdf-edit.js, BAD_LAYER_KEY):
+  // the owner said its words are not the words it shows, so they vouch for
+  // nothing, and its export page was read off that layer. Left out whole;
+  // and so is a page of a PDF whose marks could not be read in time.
+  const of = el.__pdfOf;
+  if (of && of.info && of.info.file && !of.info.badLayer) return whole("whether its text layer is marked bad could not be read");
+  if (of && of.info && of.info.badLayer && of.info.badLayer.has(of.page)) return whole("its text layer is marked bad, so its words cannot vouch for it");
   const got = pdfNameCovers(sheet);
   // NO NAME ON EITHER SIDE: the sheet goes in as it stands, pictures and all
   // (the owner: "If there are no faked words on the text side, and no
@@ -1513,6 +1520,19 @@ function pictureBlocks(sheet, vp, regions) {
 const shotPicsMemo = new WeakMap(); // page proxy -> its regions
 async function shotPdfPrep() {
   const sheets = [...document.querySelectorAll(".pdf-sheet")].filter((s) => nearWindow(s.getBoundingClientRect(), 0));
+  // …and which of their PDFs' pages are marked as having a BAD TEXT LAYER
+  // (pdf-edit.js, BAD_LAYER_KEY), read once a PDF: such a page's layer is no
+  // evidence of what it shows (pdfNamesOn).
+  const infos = new Set(sheets.map((s) => s.parentElement && s.parentElement.__pdfOf && s.parentElement.__pdfOf.info).filter(Boolean));
+  await Promise.all([...infos].map(async (info) => {
+    if (info.badLayer || !info.file) return;
+    try {
+      info.badLayer = await Promise.race([
+        info.file.arrayBuffer().then(readBadLayerPages),
+        new Promise((_, no) => setTimeout(() => no(new Error("too slow")), 6000)),
+      ]);
+    } catch { info.badLayer = null; }
+  }));
   await Promise.all(sheets.map(async (sheet) => {
     sheet.__shotPics = null;
     const el = sheet.parentElement;
@@ -22161,7 +22181,7 @@ async function openPdfNow(src) {
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), worker: sharedPdfWorker(), ownerDocument: fontDocument(), fontExtraProperties: true }).promise;
   const n = pdf.numPages;
   const hole = () => new Array(n).fill(null);
-  const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true };
+  const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true, file };
   info.closed = new Promise((res) => { info.markClosed = res; });
   // The same array the measuring fills, so a slot sized from it later gets
   // the pages as they land — and keeps them after the PDF itself is closed.

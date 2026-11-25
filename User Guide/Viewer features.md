@@ -186,6 +186,14 @@ In addition to citation linking, the viewer supports:
   fine), whose text is replaced by what the page shows. A page whose garbled
   text you can **see** on the page is left as it is, so its text matches what
   the page shows. Ordinary text pages are never read.
+  **A page that looks right but whose text is garbage** (it selects, copies or
+  searches as symbols, or its export page in the text reader is nonsense):
+  right-click the page and choose **Page N: text layer is bad**. The mark is
+  saved into the PDF. PDF+ reads that page from what it shows from then on,
+  the reader's screenshot leaves the page out rather than trust its text, and
+  PDF-Linker's next run replaces the page's text layer with a reading of the
+  page and takes the mark off. **Text layer is fine after all** on the same
+  menu takes it off.
 - **Rotate pages** — the **⟳ Rotate pages** tool (or the **R** key) turns a
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
