@@ -106,13 +106,20 @@ export function caseWindowKey(h) {
   if (!h) return "";
   return String(h.caseNumber || h.caseName || "").replace(/\s+/g, " ").trim().toUpperCase();
 }
-export function caseWindowUrl(url, h) {
+// `chats`: an eCourt link also names the case's Claude run chats (`&chat=`,
+// the newest few), so that E-Court Suite, with no window of the case's own
+// yet, opens it in the window one of those chats is open in (the owner,
+// 2026-11-25: "a later E-court click should open in that existant window if
+// it is still open" … "Only if that specific case rune is still open").
+export function caseWindowUrl(url, h, chats = []) {
   const key = caseWindowKey(h);
   if (!key || !isWebLink(url)) return String(url || "");
   try {
     const u = new URL(String(url));
     const own = u.hash.replace(/^#/, "");
-    u.hash = CASE_WINDOW_MARK + encodeURIComponent(key) + (own ? "&then=" + encodeURIComponent(own) : "");
+    const chat = [...new Set((chats || []).map((c) => String(c || "").split("#")[0]).filter((c) => /^https:\/\/claude\.ai\/./i.test(c)))].slice(0, 3)
+      .map((c) => "&chat=" + encodeURIComponent(c)).join("");
+    u.hash = CASE_WINDOW_MARK + encodeURIComponent(key) + chat + (own ? "&then=" + encodeURIComponent(own) : "");
     return u.href;
   } catch { return String(url); }
 }

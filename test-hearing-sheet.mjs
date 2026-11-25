@@ -327,6 +327,7 @@ console.log("1c. an eCourt link for a hearing the sheet gives none");
   check("…else the case name", caseWindowKey({ caseName: "Doe  v. Globex" }), "DOE V. GLOBEX");
   check("…marked on the link", caseWindowUrl("https://civil.lacourt.org/ecourt/ecms/case?id=111", hg), "https://civil.lacourt.org/ecourt/ecms/case?id=111#pdfplus-case=24STCV00777");
   check("…a link's own fragment kept after it", caseWindowUrl("https://claude.ai/chat/abc#x=1", hg), "https://claude.ai/chat/abc#pdfplus-case=24STCV00777&then=x%3D1");
+  check("…the case's run chats named, newest few, their own fragment off", caseWindowUrl("https://civil.lacourt.org/ecourt/ecms/case?id=111", hg, ["https://claude.ai/chat/aaa#x", "https://claude.ai/chat/aaa", "https://example.com/chat/z", "https://claude.ai/code/bbb"]), "https://civil.lacourt.org/ecourt/ecms/case?id=111#pdfplus-case=24STCV00777&chat=https%3A%2F%2Fclaude.ai%2Fchat%2Faaa&chat=https%3A%2F%2Fclaude.ai%2Fcode%2Fbbb");
   check("…no case: the link as it was", caseWindowUrl("https://claude.ai/chat/abc", {}), "https://claude.ai/chat/abc");
   check("…not a web link: as it was", caseWindowUrl("mailto:a@example.com", hg), "mailto:a@example.com");
 }

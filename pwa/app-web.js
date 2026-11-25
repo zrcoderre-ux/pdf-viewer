@@ -2538,7 +2538,7 @@ function renderCalendarChanges(box, sheet, briefing, now) {
     const link = hearingLib.ecourtUrlOf(hg) || (hearingLib.isWebLink(e.url) ? e.url : "");
     if (link) {
       const who = hg || { caseName: e.caseName || e.caseText || "", caseNumber: e.caseNumber || "" };
-      const b = btn("eCourt", `Open ${who.caseNumber || who.caseName || "this case"} in eCourt`, (ev) => { ev.stopPropagation(); window.open(hearingLib.caseWindowUrl(link, who), "_blank", "noopener"); });
+      const b = btn("eCourt", `Open ${who.caseNumber || who.caseName || "this case"} in eCourt`, (ev) => { ev.stopPropagation(); window.open(hearingLib.caseWindowUrl(link, who, caseRunChats(who)), "_blank", "noopener"); });
       b.classList.add("cal-ecourt");
     }
     if ((e.kind === "added" || e.kind === "off") && !e.undone) btn("Undo", e.kind === "added" ? "Take this row back out of the sheet; it will not be added again" : "Take the red off: on calendar again", () => undoCalendar(e));
@@ -2671,7 +2671,12 @@ function openEcourt(hg) {
   if (!url) return;
   // Marked with its case: E-Court Suite puts it in the window the case's
   // Claude chat is in, if one is open (hearing-sheet.js caseWindowUrl).
-  window.open(hearingLib.caseWindowUrl(url, hg), "_blank", "noopener");
+  window.open(hearingLib.caseWindowUrl(url, hg, caseRunChats(hg)), "_blank", "noopener");
+}
+/** The chats of a case's recent Claude runs (newest first), for its eCourt link (caseWindowUrl). */
+function caseRunChats(hg) {
+  if (!runsLib || !runsSeen || !hg || !hg.caseNumber) return [];
+  try { return runsLib.runsForHearing(hg, runsSeen.runs, "", Date.now()).map((r) => r.url).filter(Boolean); } catch { return []; }
 }
 
 /**

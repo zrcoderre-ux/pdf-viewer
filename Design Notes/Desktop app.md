@@ -230,6 +230,13 @@ itself, started from Home's Claude button, carries the case's eCourt page in
 `Claude Run Request.json` (`ecourtUrl`): the Claude extension opens the run's
 chats in the window that page is open in, else in a window of its own, never
 in whichever window was last used (its `runTab`, `caseEcourtWindow`).
+And the other way round (2026-11-25: "a later E-court click should open in
+that existant window if it is still open" … "Only if that specific case rune
+is still open"): an eCourt link also names the case's recent run chats
+(`caseWindowUrl`'s `chats`, `&chat=`, from `caseRunChats` over Claude Run
+Status.json), and E-Court Suite, with no window kept for the case, puts the
+page in the window one of those chats is open in (its `runWindow`); none open,
+a window of its own.
 
 New window and a tab pulled out of the strip use `window.open` with the
 opener kept; `setWindowOpenHandler` allows app URLs as a window like the
