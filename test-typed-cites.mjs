@@ -498,18 +498,24 @@ async function run() {
     }
 
     // ── 5. Ctrl+Backspace and the line numbers ────────────────────────────
-    console.log("5. Ctrl+Backspace and Ctrl+Delete never take a line's number");
+    console.log("5. Ctrl+Backspace and Ctrl+Delete never take a line's number: at a line's edge they join as Backspace and Delete do");
     {
       const r = await newReader("N Declaration.txt");
       const p = r.page;
+      const moved = ["DECLARATION", "Nothing else.", "The vehicle was sold.", "", "End."];
       await caretAt(p, 0, 2, { head: true });
       await p.keyboard.press("Control+Backspace");
+      await p.waitForTimeout(300);
+      check("Ctrl+Backspace at the head of 3: up to 2.5, as Backspace, 3's number kept", await screenLines(p, 0), moved);
+      await p.keyboard.press("Control+z");
       await p.waitForTimeout(300);
       await caretAt(p, 0, 1);
       await p.keyboard.press("Control+Delete");
       await p.waitForTimeout(300);
-      check("both refused: every line as it was", await screenLines(p, 0), ["DECLARATION", "Nothing else.", "The vehicle was sold.", "End."]);
-      truthy("…and said", r.log.toasts.some((t) => /line numbers are fixed/.test(t)));
+      check("Ctrl+Delete at the end of 2: 3 up to 2.5, as Delete", await screenLines(p, 0), moved);
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(300);
+      check("Ctrl+Z: every line as it was", await screenLines(p, 0), ["DECLARATION", "Nothing else.", "The vehicle was sold.", "End."]);
       // Inside a line the word goes as before.
       await caretAt(p, 0, 2);
       await p.keyboard.press("Control+Backspace");

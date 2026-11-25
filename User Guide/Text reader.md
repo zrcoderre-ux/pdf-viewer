@@ -1099,12 +1099,15 @@ app, which routes it to the reader tab.
   rest laid into the slots below in a single pass, the text below moving
   down once. So where the export left line 7 empty and the PDF has text on it,
   click line 7 and type: the file gets ` 7  ` and your text, and PDF-Linker's
-  next run reads it as line 7. A selection that reaches across a number is
-  refused an edit, and the numbers never take a keystroke — nor a
-  **Ctrl+Backspace** at the head of a numbered line's text or a
-  **Ctrl+Delete** at its end, which would delete a word across the number:
-  each is refused with the same note (within the line they delete a word as
-  usual).
+  next run reads it as line 7. **A selection across lines** deletes as in any
+  editor — Backspace, Delete, Ctrl+X, typing or a paste over it takes the
+  selected text and joins what is left of the last line to the first — but the
+  numbers stay: each line keeps its number, and the text below comes up as
+  Backspace brings it up. The numbers never take a keystroke. A
+  **Ctrl+Backspace** at the head of a numbered line's text, or a
+  **Ctrl+Delete** at its end, joins the lines as Backspace and Delete do
+  rather than deleting a word across the number (within the line they delete
+  a word as usual).
 - **The documents with leaks in them are ready before you open them.** Open a
   case folder with a `LEAKS.xlsx` in it and the reader starts getting the
   documents its rows name — whichever document you came in on, and whether or
