@@ -7,13 +7,18 @@
 //      "Text layer is bad"; picked, the PDF in the case folder carries
 //      `/PDFLinkerBadTextLayer true` on that page, findable in its bytes;
 //   2. right-click it again: "Text layer is fine after all" takes it off;
-//   3. right-click on the TEXT side offers no such thing.
+//   3. right-click on the TEXT side offers no such thing;
+//   4. marked bad, a LEAKS row whose value stands only on that page's text is
+//      answered no, and one standing on another page too is left (the owner,
+//      2026-11-25: "any leaks flagged on that corresponding text page should
+//      be marked no (if they appear only there)").
 //
 // Run: node test-reader-bad-layer.mjs   (from the repo root). Needs Playwright
 // (/opt/node-tools), Chromium (/opt/pw-browsers/chromium) and a free port in
 // 8130-8199; exits 0 with SKIP where any is missing. Every word is invented.
 
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import os from "node:os";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -46,8 +51,25 @@ for (let k = 0; k < 80; k++) {
   await new Promise((r) => setTimeout(r, 100));
 }
 
-const EXPORT = ["====== Page 1 ======", " 1  Plaintiff moves to compel further responses.",
-  "====== Page 2 ======", " 1  -0&,$%-!'-,?$#,-#$\"!'-@@\"%$-#$\"!"].join("\n") + "\n";
+const EXPORT = ["====== Page 1 ======", " 1  Plaintiff Tamsin Orrell moves to compel further responses.",
+  "====== Page 2 ======", " 1  -0&,$%-!'-,?$#,-#$\"!'-@@\"%$ Brannoc Ivesdale ~~ Tamsin Orrell"].join("\n") + "\n";
+function buildLeaks(rows) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reader-bad-layer-"));
+  const out = path.join(dir, "LEAKS.xlsx");
+  const py = `
+import json, sys, openpyxl
+wb = openpyxl.Workbook(); ws = wb.active; ws.title = "LEAKS"
+ws.append(["Value", "Fix? (yes/no)", "Context", "File", "Type", "Where (page:line)", "Notes"])
+for r in json.loads(sys.argv[2]): ws.append(r)
+wb.save(sys.argv[1])
+`;
+  try { execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows)]); } catch { skip("python3 with openpyxl is needed to build LEAKS.xlsx"); }
+  return Array.from(fs.readFileSync(out));
+}
+const LEAKS = buildLeaks([
+  ["Brannoc Ivesdale", "", "$ Brannoc Ivesdale ~~", "Motion.txt", "LEAK", "p.2:1", ""],
+  ["Tamsin Orrell", "", "Plaintiff Tamsin Orrell moves", "Motion.txt", "LEAK", "p.1:1, p.2:1", ""],
+]);
 const browser = await launchBrowser(chromium, CHROME);
 try {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
@@ -55,7 +77,7 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${port}/viewer/text-reader.html`);
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  await page.evaluate(async (EXPORT) => {
+  await page.evaluate(async ({ EXPORT, LEAKS }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.TimesRoman);
@@ -67,11 +89,12 @@ try {
     window.__case = dir;
     const put = async (d, name, data) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
     await put(dir, "Motion.pdf", await doc.save());
+    await put(dir, "LEAKS.xlsx", new Uint8Array(LEAKS));
     await put(await dir.getDirectoryHandle("Text Files", { create: true }), "Motion.txt", EXPORT);
     await window.__textReaderAdoptFolder(dir);
-  }, EXPORT);
+  }, { EXPORT, LEAKS });
   await page.evaluate(() => window.__textReaderOpenDoc("Motion.txt"));
-  await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
+  await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0 && window.__textReaderLeaks && window.__textReaderLeaks());
   const sbs = await page.$("#sbs-toggle");
   if (!(await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true"))) await sbs.click();
   await page.waitForFunction(() => document.querySelectorAll("#pdf-pane .pdf-slot:not(.blank)").length >= 2, null, { timeout: 15000 });
@@ -102,6 +125,9 @@ try {
   await page.waitForTimeout(800);
   check("the PDF carries the mark, findable in its bytes", await fileHas(), true);
   check("on page 2 only", await marks(), [2]);
+  await page.waitForTimeout(2000);
+  const fixes = () => page.evaluate(() => Object.fromEntries(window.__textReaderLeaks().rows.map((r) => [r.value, r.fix])));
+  check("the leak only on that page is answered no; the one on page 1 too is left", await fixes(), { "Brannoc Ivesdale": "no", "Tamsin Orrell": "" });
 
   console.log("2. right-click it again: fine after all");
   items = await rightClick('#pdf-pane .pdf-slot[data-index="1"]');

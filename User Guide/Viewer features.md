@@ -195,7 +195,8 @@ In addition to citation linking, the viewer supports:
   page and takes the mark off. **Text layer is fine after all** on the same
   menu takes it off. In the text reader, right-click the page on the **PDF
   side** of side by side (or a page swapped to its PDF) for the same mark;
-  the text side's right-click does not offer it.
+  the text side's right-click does not offer it. A LEAKS row whose value
+  stands only on that page is answered **no** when you mark it.
 - **Rotate pages** — the **⟳ Rotate pages** tool (or the **R** key) turns a
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate

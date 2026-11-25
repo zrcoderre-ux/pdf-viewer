@@ -19731,11 +19731,11 @@ function acceptLeakNow() {
 // would un-fake the name wherever its pseudonym stands. Such a row is left as
 // it is and said, since the value being gone is its whole answer anyway: the
 // next run, finding it nowhere, does not ask again.
-/** The open document's text as Save would write it, its DID NOT OCR pages left out. */
-function liveTextOfDoc() {
+/** The open document's text as Save would write it, its DID NOT OCR pages left out (and the pages in `skip`). */
+function liveTextOfDoc(skip = null) {
   if (!doc) return "";
   return doc.pages.map((p, i) => {
-    if (pageReadsDidNotOcr(i)) return "";
+    if (pageReadsDidNotOcr(i) || (skip && skip.has(i))) return "";
     const body = bodyForPage(i);
     return body ? TD.serializeNodes(body) : (p.lines || []).join("\n");
   }).join("\n");
@@ -19752,13 +19752,17 @@ function valueStandsIn(value, text) {
   return rx.test(text);
 }
 let goneRunning = false;
-async function answerGoneRows(why) {
+async function answerGoneRows(why, skip = null) {
   if (!leaks || !doc || goneRunning) return;
   const sheet = leaks;
   const rows = leakRows();
   // The documents on screen, by their file names.
   const here = new Set((reel.length > 1 ? reel.map((m) => m.name) : [fileName]).filter(Boolean).map((n) => LK.fold(n)));
-  const live = liveTextOfDoc();
+  // `skip`: pages whose text no longer counts, though it still stands until
+  // PDF-Linker's next run (a page whose text layer was just marked bad: the
+  // owner, 2026-11-25, "any leaks flagged on that corresponding text page
+  // should be marked no (if they appear only there)").
+  const live = liveTextOfDoc(skip);
   const cand = [];
   rows.forEach((r, i) => {
     if (String(r.fix || "").trim() || r.ok) return; // answered, or PDF-Linker's own reading accepted
@@ -22059,6 +22063,14 @@ async function setBadLayerFromReader(at, on) {
     await w.write(bytes);
     await w.close();
     if (at.info) at.info.badLayer = null; // read again when next asked (shotPdfPrep)
+    // …and a LEAKS row whose value stands only on that page's text is
+    // answered no, as for a page marked DID NOT OCR (answerGoneRows): the
+    // page's text is garbage the next run replaces.
+    if (on && leaks && doc) {
+      const skip = new Set();
+      doc.pages.forEach((_p, i) => { const t = pdfTarget(i); if (t && t.src.name === at.src.name && t.page === at.page) skip.add(i); });
+      if (skip.size) setTimeout(() => answerGoneRows("only the page whose text layer is marked bad carried it", skip), 0);
+    }
     toast(on
       ? `${where} marked: its text layer is bad. PDF-Linker's next run (Re-run) replaces the layer with a reading of the page, and this export page with it.`
       : `${where}: the mark is off — PDF-Linker leaves its text layer as it is.`, { ms: 7000 });

@@ -116,7 +116,12 @@ measures pass a short page or a garbled heading among sound lines.
   me right click on the pdf side of the side by side, so I never see it by
   accident"): the text side's right-click stays the keep menu's alone. The
   owner had first right-clicked the text side and found nothing there.
-  `test-reader-bad-layer.mjs`.
+  Marked bad, a LEAKS row whose value stands only on that page's text is
+  answered **no**, as for a page marked DID NOT OCR (`answerGoneRows` with
+  the page's text left out, `liveTextOfDoc(skip)`; one the key fakes
+  elsewhere in the case is still left and said; Ctrl+Z takes the answers
+  back): the owner, "any leaks flagged on that corresponding text page should
+  be marked no (if they appear only there)". `test-reader-bad-layer.mjs`.
 - **PDF-Linker.** The next full run rebuilds a marked page's text layer from
   its render with none of its own tests, then takes the mark off
   (`_reocr_garbled_pages`, its notes "OCR.md"). Saving the mark changes the
