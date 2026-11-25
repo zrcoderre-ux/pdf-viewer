@@ -1,5 +1,5 @@
 // Browser test for a page marked as having a BAD TEXT LAYER (viewer/pdf-edit.js
-// BAD_LAYER_KEY, viewer/viewer.js setBadLayer, viewer/text-reader.js
+// BAD_LAYER_KEY, viewer/viewer.js render loop, viewer/text-reader.js
 // pdfNamesOn). The owner (2026-11-25): "I need a way to indicate that the
 // visible text for a page is good, but that the original text layer for that
 // page is garbage … This should work inside PDF+ and go into PDF Linker."
@@ -7,19 +7,13 @@
 //   1. a scan under an invisible layer of PRINTABLE garble (a cipher of
 //      punctuation, which the viewer's own garble test passes) keeps that
 //      layer under Recognize text;
-//   2. right-click on the page, "text layer is bad": the file on disk gets
-//      `/PDFLinkerBadTextLayer true` on that page, written where a plain
-//      search of the bytes finds it, and the page's text is now the scan's
-//      words, read with Recognize text never pressed;
-//   3. opened again, the mark is read off the file and the page read again;
-//   4. right-click, "text layer is fine after all": the key is gone from the
-//      file and the layer's own text is back;
+//   2. the viewer's right-click does NOT offer the mark (it is set from the
+//      text reader's side-by-side pane only; test-reader-bad-layer.mjs);
+//   3. the file marked as that pane marks it, opened again, the page's text
+//      is the scan's words, read with Recognize text never pressed;
+//   4. with the mark taken off, the layer's own text is back;
 //   5. the helpers: which pages are marked, a file that cannot hold the mark
 //      settled without a parse, a mark inside an object stream still found.
-//
-//   6. a selection left standing outside the pages, or a markup tool left on,
-//      does not stop the right-click menu (it did, and the right-click did
-//      nothing at all).
 //
 // Run: node test-bad-text-layer.mjs   (from the repo root). Needs Playwright
 // (/opt/node-tools), Chromium (/opt/pw-browsers/chromium) and a free port in
@@ -129,39 +123,39 @@ try {
   let t = await textOf();
   check("the cipher, not the scan's words", [hasCipher(t), hasBody(t)], [true, false]);
 
-  console.log("2. right-click: text layer is bad (a selection left outside the pages, the highlight tool on)");
-  // Either of these made a right-click do nothing at all.
-  await page.evaluate(() => {
-    const el = document.getElementById("filename");
-    const r = document.createRange(); r.selectNodeContents(el);
-    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-  });
-  await page.evaluate(() => document.getElementById("highlight-toggle").click());
-  check("the highlight tool is on", await page.evaluate(() => document.getElementById("highlight-toggle").getAttribute("aria-pressed")), "true");
-  const items = await menu("text layer is bad");
-  await page.evaluate(() => { if (document.getElementById("highlight-toggle").getAttribute("aria-pressed") === "true") document.getElementById("highlight-toggle").click(); });
-  check("the menu offers it", items.some((x) => /Page 1: text layer is bad/.test(x)), true);
-  await settle();
-  let raw = await fileText();
-  check("the file carries the mark, findable in its bytes", /\/PDFLinkerBadTextLayer\s+true/.test(raw), true);
-  t = await textOf();
-  check("the page reads as it shows: the scan's words, no cipher", [hasBody(t), hasCipher(t)], [true, false]);
+  // The mark is set from the text reader's side-by-side pane only (owner,
+  // 2026-11-25: "remove the text layer is bad from pdf mode, where I cannot
+  // actually see it"); here it is written into the file as that pane writes it.
+  const markFile = (on) => page.evaluate(async (on) => {
+    const E = await import("./pdf-edit.js");
+    const h = await window.__case.getFileHandle("Exhibit A.pdf");
+    const bytes = await E.markBadLayerInBytes(new Uint8Array(await (await h.getFile()).arrayBuffer()), [1], on);
+    const w = await h.createWritable(); await w.write(bytes); await w.close();
+  }, on);
+  const reopen = async () => {
+    await page.reload();
+    await page.waitForFunction(() => typeof window.__pdfViewerLoadLocal === "function");
+    await page.evaluate(async () => { const top = await navigator.storage.getDirectory(); window.__case = await top.getDirectoryHandle("Bad Layer Case"); });
+    await load();
+    await settle();
+  };
 
-  console.log("3. opened again (Recognize text not pressed), the mark is read off the file");
-  await page.reload();
-  await page.waitForFunction(() => typeof window.__pdfViewerLoadLocal === "function");
-  await page.evaluate(async () => { const top = await navigator.storage.getDirectory(); window.__case = await top.getDirectoryHandle("Bad Layer Case"); });
-  await load();
-  await settle();
-  t = await textOf();
-  check("the scan's words again", [hasBody(t), hasCipher(t)], [true, false]);
+  console.log("2. right-click on the page offers no text-layer mark here");
+  const items = await menu(null);
+  await page.keyboard.press("Escape");
+  check("not on the viewer's menu", items.some((x) => /text layer is/.test(x)), false);
 
-  console.log("4. right-click: text layer is fine after all");
-  const back = await menu("fine after all");
-  check("the menu offers the undo", back.some((x) => /Page 1: text layer is fine after all/.test(x)), true);
-  await settle();
-  raw = await fileText();
-  check("the mark is off the file", /PDFLinkerBadTextLayer/.test(raw), false);
+  console.log("3. marked in the file, opened again (Recognize text not pressed): the page reads as it shows");
+  await markFile(true);
+  check("the file carries the mark, findable in its bytes", /\/PDFLinkerBadTextLayer\s+true/.test(await fileText()), true);
+  await reopen();
+  t = await textOf();
+  check("the scan's words, no cipher", [hasBody(t), hasCipher(t)], [true, false]);
+
+  console.log("4. taken off, the layer's own text is back");
+  await markFile(false);
+  check("the mark is off the file", /PDFLinkerBadTextLayer/.test(await fileText()), false);
+  await reopen();
   t = await textOf();
   check("the layer's own text is back", hasCipher(t), true);
 

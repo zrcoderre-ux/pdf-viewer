@@ -1753,7 +1753,8 @@ function adoptSavedFile(handle) {
 
 // Save: the annotation set (and any rotation on screen) into the file.
 // `badLayer` ({ set, clear }, 0-based pages) also marks or unmarks pages as
-// having a bad text layer (setBadLayer).
+// having a bad text layer (no control of this viewer sets it now; the text
+// reader's PDF pane does, through markBadLayerInBytes).
 async function saveEditedPdf({ badLayer = null, said = "Saved" } = {}) {
   if (!saveEditsEl) return false;
   if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return false; }
@@ -2464,7 +2465,7 @@ async function renderAllPages() {
     // characters at all.
     const garbled = pageTextIsGarbled(refs.textContent) && (await invisibleTextGarbled(refs.page, pdfjsLib.OPS));
     if (signal.aborted) return;
-    // A page marked as having a BAD TEXT LAYER (the page's menu, setBadLayer)
+    // A page marked as having a BAD TEXT LAYER (the text reader's PDF pane)
     // is read from its picture whatever Recognize text is set to: the owner
     // said the words it shows are right and the words under them are not.
     if (docBadLayer.has(refs.pageNumber)) { refs.keepText = null; refs.textContent = null; ocrQueue.push(refs); continue; }
@@ -4121,42 +4122,11 @@ document.addEventListener("contextmenu", (e) => {
   ]);
 }, true);
 
-// Right-click on a page with nothing selected: mark its TEXT LAYER as bad, or
-// take the mark off (pdf-edit.js, BAD_LAYER_KEY). The selection's menu and an
-// annotation's come first (each takes the event, defaultPrevented), and Alt
-// gives the browser's own. Nothing else holds it back: a selection left
-// standing OUTSIDE the pages (the sidebar, the name box) or a markup tool left
-// on (highlight is sticky) made a right-click do nothing at all.
-pagesEl.addEventListener("contextmenu", (e) => {
-  if (e.defaultPrevented || e.altKey || !pdfBytes || organizeMode) return;
-  const wrapper = e.target.closest && e.target.closest(".page-wrapper");
-  if (!wrapper) return;
-  const pn = Number(wrapper.dataset.pageNumber);
-  if (!(pn >= 1)) return;
-  e.preventDefault();
-  const marked = docBadLayer.has(pn);
-  contextMenu(e.clientX, e.clientY, [
-    marked
-      ? { label: `Page ${pn}: text layer is fine after all`, icon: "undo", action: () => setBadLayer(pn, false) }
-      : { label: `Page ${pn}: text layer is bad (read what the page shows)`, icon: "ocr", action: () => setBadLayer(pn, true) },
-  ]);
-});
-
-/**
- * Mark page `pn` (1-based) as having a bad text layer, or take the mark off,
- * and save the file: the mark is a key on the page's dictionary, so it is in
- * the PDF for PDF-Linker's next run to find. A marked page is read from its
- * picture here from then on (the render loop), its layer left in the file for
- * PDF-Linker to replace.
- */
-async function setBadLayer(pn, on) {
-  if (on === docBadLayer.has(pn)) return;
-  const i = pn - 1;
-  const said = on
-    ? `Page ${pn} marked: its text layer is bad. PDF+ reads the page as it shows it, and PDF-Linker's next run replaces the layer with a reading of the page.`
-    : `Page ${pn}: the bad-text-layer mark is off, and its own text layer is used again.`;
-  await saveEditedPdf({ badLayer: on ? { set: [i] } : { clear: [i] }, said });
-}
+// The TEXT LAYER mark (pdf-edit.js, BAD_LAYER_KEY) is set from the text
+// reader's side-by-side PDF pane only, where the page's text and its picture
+// stand together (owner, 2026-11-25: "remove the text layer is bad from pdf
+// mode, where I cannot actually see it"). A marked page is still read from
+// its picture here (the render loop), and a save keeps the mark.
 
 // A comment on a passage: the passage highlighted, and its note open to type in.
 function commentOnSelection() {
