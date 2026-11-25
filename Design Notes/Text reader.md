@@ -3976,6 +3976,21 @@ term, or, open already, moves it there; `showKeyBar(true, { at })` and
 where the reader is looking. Right-click is still the keep menu. Test:
 `test-key-answers.mjs` case 5.
 
+**…on a RIGHT click, beside the keep menu** (`keyFromRightClick`,
+2026-11-25). The owner: "change clicking on the faked value to open the key
+menu from left click to right click to prevent inadvertent clicks." The left
+click handler is gone; a left click on a `.pn` is an ordinary click in the
+text. `pagesEl`'s contextmenu (the keep menu's) calls `keyFromRightClick`
+before `showKeepMenu`, so a right click on a pseudonym opens or moves the walk
+there (marks on, not on a page label, link, button or raw sheet: the old
+left click's screens) and the keep menu stands at the pointer as before. The
+two do not overlap: the walk answers the name for the case (yes, no, never,
+phrase, typed), the menu keeps one occurrence or takes a name off the Master
+Keep, which the walk does not offer; Esc or a press elsewhere shuts the menu
+and leaves the walk. A spot keep (`[data-here]`) and a leak still get the menu
+alone. The PDF pane's right-click ("Text layer is bad") is untouched. Test:
+`test-key-answers.mjs` cases 5 and 6.
+
 **…and an answer there stays on that name** (`keyClickHold`, 2026-11-03).
 The owner: "when I click on a real value and it opens up the key walk
 through, it shouldn't advance to the next one automatically like it does when

@@ -727,8 +727,9 @@ app, which routes it to the reader tab.
   longer matching its export) is not written back to apply — mark the page
   again once the next full run has written the export again.
 - **The key, term by term.** **🗝 Key terms** in the tools panel (or a click
-  on the pseudonym count in the status bar, or on a highlighted name in the
-  text, which opens it on that name where it stands) puts a bar over the text that
+  on the pseudonym count in the status bar, or a right click on a highlighted
+  name in the text, which opens it on that name where it stands beside the
+  keep menu; a left click on a name is an ordinary click) puts a bar over the text that
   walks the pseudonym key as it stands on the page. A **term** is one row of
   the key — its real name and the pseudonym the file carries, however the case
   is written — and the terms come in the order each first appears; the list on

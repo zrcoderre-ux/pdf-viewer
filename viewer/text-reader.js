@@ -12230,7 +12230,7 @@ function setKeyAnswer(value, answer) {
  * `no`/`never` keep it as the right-click does (setKeep: un-marked here at
  * once, handed to PDF-Linker as its line), and `phrase` or anything typed
  * goes to PDF-Linker as `fix: VALUE | ANSWER`, read there as the value's
- * Fix? cell. Then on to the next term — unless a click on the name opened
+ * Fix? cell. Then on to the next term — unless a right click on the name opened
  * the walk on it and nothing has been stepped by hand since (keyClickHold):
  * then it stays on the name answered.
  */
@@ -12333,7 +12333,7 @@ function keyAppearanceOf(terms, span) {
   return null;
 }
 /**
- * A pseudonym clicked on the page: the walk opened (or moved) to that term, at
+ * A pseudonym right-clicked on the page: the walk opened (or moved) to that term, at
  * that appearance (the owner: "clicking on the highlighted real value should
  * open the key stepthrough to that entry"). Not scrolled: it is where the
  * reader is looking.
@@ -12401,19 +12401,19 @@ keyBar.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { e.preventDefault(); showKeyBar(false); }
 });
 $("key-walk-btn").addEventListener("click", () => showKeyBar(keyBar.hidden));
-// A plain click on a highlighted pseudonym opens the walk on it. Not a drag
-// that selected, not with a key held (Shift extends a selection, Ctrl adds
-// to it), and not where a comment is under the click: that opens the comment.
-pagesEl.addEventListener("click", (e) => {
-  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !settings.marks) return;
+// A right click on a highlighted pseudonym opens the walk on it (the keep
+// menu's contextmenu handler calls keyFromRightClick). It was a plain left
+// click until the owner moved it (2026-11-25: "change clicking on the faked
+// value to open the key menu from left click to right click to prevent
+// inadvertent clicks"); a left click on a name is now an ordinary click in
+// the text.
+function keyFromRightClick(e) {
+  if (!settings.marks) return;
   const t = e.target && e.target.nodeType === 1 ? e.target : null;
   const pn = t && t.closest(".pn");
   if (!pn || t.closest(".page-label, a, button, .raw-sheet")) return;
-  const sel = document.getSelection();
-  if (sel && !sel.isCollapsed) return;
-  if (commentMarks.length && commentAtPoint(e.clientX, e.clientY)) return;
   openKeyAt(pn);
-});
+}
 // The count of pseudonyms opens the walk on the name at the reading; once it
 // is open, it steps on through the term.
 function keyFromCount(e) {
@@ -15817,6 +15817,10 @@ pagesEl.addEventListener("contextmenu", (e) => {
   if (!target) return;
   e.preventDefault();
   hideTip();
+  // On a pseudonym the key walk opens on it as well (keyFromRightClick), and
+  // the keep menu stands at the pointer over it: the walk answers the name
+  // for the case, the menu keeps it here or takes it off the Master Keep.
+  keyFromRightClick(e);
   showKeepMenu(target, e.clientX, e.clientY);
 });
 document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });

@@ -4,7 +4,7 @@
 // no never, phrase and type replacement options that I get for leaks." No and
 // never keep the name as the right-click does; phrase and a typed answer go to
 // PDF-Linker as `fix: VALUE | ANSWER` lines of New Real Values.txt; yes takes
-// an answer back. Opened by a click on a name, an answer stays on that name
+// an answer back. Opened by a right click on a name, an answer stays on that name
 // (keyClickHold) until a step by hand lets the walk go on.
 //
 // Run: node test-key-answers.mjs   (from the repo root)
@@ -209,38 +209,45 @@ async function run() {
     check("no page errors", r.log.errors, []);
     await r.close();
 
-    console.log("5. a click on a highlighted name opens the walk on it");
+    console.log("5. a right click on a highlighted name opens the walk on it; a left click does not");
     const r2 = await newReader();
     const q = r2.page;
     const pnBox = (i) => q.evaluate((i) => { const b = document.querySelectorAll("#pages .pn")[i].getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }, i);
     const top = () => q.evaluate(() => document.getElementById("stage").scrollTop);
+    const menuShown = () => q.evaluate(() => !document.getElementById("keep-menu").hidden);
     check("the walk is shut", await q.evaluate(() => document.getElementById("key-bar").hidden), true);
     let at = await pnBox(1);
     await q.mouse.click(at.x, at.y);
     await q.waitForTimeout(500);
-    check("clicked: the walk is open, on the name clicked", [await q.evaluate(() => document.getElementById("key-bar").hidden), (await bar(q)).term.startsWith("Pelham Grantwick → Dorian Fane")], [false, true]);
+    check("a left click on a name: the walk stays shut, no menu", [await q.evaluate(() => document.getElementById("key-bar").hidden), await menuShown()], [true, false]);
+    await q.mouse.click(at.x, at.y, { button: "right" });
+    await q.waitForTimeout(500);
+    check("right-clicked: the walk is open, on the name clicked", [await q.evaluate(() => document.getElementById("key-bar").hidden), (await bar(q)).term.startsWith("Pelham Grantwick → Dorian Fane")], [false, true]);
+    check("…and the keep menu stands at the pointer, for that name", [await menuShown(), await q.evaluate(() => document.getElementById("keep-menu-value").textContent)], [true, "Pelham Grantwick"]);
+    await q.keyboard.press("Escape");
+    check("Esc shuts the menu", await menuShown(), false);
     const t0 = await top();
     at = await pnBox(0);
-    await q.mouse.click(at.x, at.y);
+    await q.mouse.click(at.x, at.y, { button: "right" });
     await q.waitForTimeout(500);
-    check("open, another name clicked: the walk moves to it", (await bar(q)).term.startsWith("Orla Vantreese → Mira Holt"), true);
+    check("open, another name right-clicked: the walk moves to it", (await bar(q)).term.startsWith("Orla Vantreese → Mira Holt"), true);
     check("…without scrolling the page", await top(), t0);
-    await q.evaluate(() => document.getElementById("kb-close").click());
+    await q.keyboard.press("Escape");
     at = await pnBox(1);
-    await q.keyboard.down("Shift");
     await q.mouse.click(at.x, at.y);
-    await q.keyboard.up("Shift");
     await q.waitForTimeout(400);
-    check("a Shift+click extends a selection; it does not open the walk", await q.evaluate(() => document.getElementById("key-bar").hidden), true);
+    check("open, another name LEFT-clicked: the walk stays where it was", (await bar(q)).term.startsWith("Orla Vantreese → Mira Holt"), true);
+    await q.evaluate(() => document.getElementById("kb-close").click());
     check("no page errors", r2.log.errors, []);
     await r2.close();
 
-    console.log("6. opened by a click, an answer stays on the name; a step by hand lets the walk go on");
+    console.log("6. opened by a right click, an answer stays on the name; a step by hand lets the walk go on");
     const r3 = await newReader();
     const w = r3.page;
     const pnAt = (i) => w.evaluate((i) => { const b = document.querySelectorAll("#pages .pn")[i].getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }, i);
     let pt = await pnAt(0);
-    await w.mouse.click(pt.x, pt.y);
+    await w.mouse.click(pt.x, pt.y, { button: "right" });
+    await w.keyboard.press("Escape");
     await w.waitForTimeout(500);
     check("clicked: on the name clicked", (await bar(w)).term.startsWith("Orla Vantreese"), true);
     await w.click('#key-bar button[data-kfix="phrase"]');
@@ -268,11 +275,12 @@ async function run() {
     await w.waitForTimeout(500);
     check("opened from the side bar: an answer goes on", (await bar(w)).term.startsWith("Pelham Grantwick"), true);
     pt = await pnAt(0);
-    await w.mouse.click(pt.x, pt.y);
+    await w.mouse.click(pt.x, pt.y, { button: "right" });
+    await w.keyboard.press("Escape");
     await w.waitForTimeout(500);
     await w.click('#key-bar button[data-kfix="yes"]');
     await w.waitForTimeout(500);
-    check("open, a name clicked: an answer stays on that name", (await bar(w)).term.startsWith("Orla Vantreese"), true);
+    check("open, a name right-clicked: an answer stays on that name", (await bar(w)).term.startsWith("Orla Vantreese"), true);
     check("no page errors", r3.log.errors, []);
     await r3.close();
   } finally {
