@@ -992,3 +992,13 @@ Suite's `isMinorsCompromiseMotion` does). E-Court Suite 3.49.46 sends such an
 entry with `opp` and `reply` null in the first place; the check here covers
 entries written before that. Once an opposition is filed, both chips return,
 so the new-filing flag still sees it.
+
+**No opposition filed, no reply expected** (the owner, 2026-11-26: "If no
+opposition is filed, then no reply is expected so it doesn't need to be marked
+late or missing"). On every motion, `briefingChips` drops the Rep chip when no
+opposition is on file and the reply is unfiled and past its date (missing,
+late, a note) or the opposition's date has passed with nothing filed. A reply
+not yet due keeps its plain chip, a reply actually filed still shows, and the
+Opp chip keeps its own late or missing state. E-Court Suite 3.49.47 sends such
+an entry with `reply` null once the opposition's date passes, as its widget
+already drops the reply (`oppAbsent`); the check here covers older entries.
