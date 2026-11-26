@@ -464,6 +464,23 @@ text opening "10 days…" beside line 10 keeps its 10. The line keeps its
 indent. Not handled: a doubled number more than a line away from its own.
 `test-textdoc.mjs` pins each rule.
 
+### A real is never read across a pseudonym
+
+Every reading that decides what stands in the clear (the orange marks and
+`standingSpans` through `seekable`, textdoc's `clearReading` for the folder
+sweep, `pageScan` for which pages a save builds) masks the keeps and then
+blanks the run's fakes and the spot keeps to NUL. They used to stay spaces, a
+gap like any other, so a real whose blank fell where a pseudonym stands
+("5321 Wrenfield Fakeins Road #115" under a key binding "5321  Fakeins Road
+#115") was counted, settled and owed, while `forwardSwaps`, which never writes
+over a fake, could not write it. The owner, 2026-11-26, got "1 name you said
+to fake is still unfaked in 1 document off the screen, where the save could
+not write a pseudonym … Nothing to save." The words on either side are now
+found by their own rows (an `address_street` row, a name token) and written
+by them. The cited-decision reading still runs over the spaced text. The
+warning that remains for a decided name the save cannot write names the
+documents. `test-folder-save.mjs` case 42 covers this.
+
 ### What is never done
 
 - The bar never writes a file; nothing but Save writes an export.
