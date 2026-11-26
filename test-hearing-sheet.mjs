@@ -253,7 +253,15 @@ check("chips as the case page colours them", chips.map((c) => [c.label, c.state,
 check("…each with its due date to show under it", chips.map((c) => c.due), ["Due 11/1", "Due 11/1", "Due 11/1"]);
 check("…none where the file gives none; an OSC has none", [briefingChips({ kind: "motion", motion: slot("filed", "", { due: null }) })[0].due, briefingChips(entries[2])[0].due], ["", undefined]);
 check("…each one's hover says what and when", [chips[1].title, chips[2].title], ["Opposition: filed late, due 11/1, filed 11/2", "Reply: not filed, due 11/1"]);
-check("not posted yet is unsure, not missing", briefingChips({ kind: "motion", reply: slot("pending", "Not Posted Yet") }).map((c) => [c.state, c.mark]), [["unposted", "?"]]);
+check("not posted yet is unsure, not missing", briefingChips({ kind: "motion", opp: slot("filed"), reply: slot("pending", "Not Posted Yet") }).map((c) => [c.state, c.mark]), [["filed", "✓"], ["unposted", "?"]]);
+{
+  // The owner, 2026-11-26: no opposition on file, no reply expected, on any motion.
+  const rep = (opp, reply) => briefingChips({ kind: "motion", motionType: "Motion to Compel", motion: slot("filed"), opp, reply }).map((c) => c.label);
+  check("no opposition filed: no Rep chip for a reply past its date", [rep(slot("missing", "Not Filed"), slot("missing", "Not Filed")), rep(slot("missing"), slot("pending", "Not Posted Yet")), rep(null, slot("missing", "Not Filed")), rep(slot("pending", "Not Posted Yet"), slot("missing"))], [["Mot", "Opp"], ["Mot", "Opp"], ["Mot"], ["Mot", "Opp"]]);
+  check("…a reply not yet due keeps its plain chip", rep(slot("pending"), slot("pending")), ["Mot", "Opp", "Rep"]);
+  check("…and a reply actually filed still shows", rep(slot("missing", "Not Filed"), slot("filed")), ["Mot", "Opp", "Rep"]);
+  check("…once the opposition is filed, a missing reply is flagged again", [rep(slot("filed"), slot("missing", "Not Filed")), rep(slot("late"), slot("missing", "Not Filed"))], [["Mot", "Opp", "Rep"], ["Mot", "Opp", "Rep"]]);
+}
 check("timely only if served personally", briefingChips({ kind: "motion", motion: slot("personal") })[0].state, "personal");
 check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slot("filed", "", { manual: true }) })[0].title.endsWith("(picked by hand in E-Court Suite)"), true);
 {
@@ -261,7 +269,7 @@ check("a paper picked by hand says so", briefingChips({ kind: "motion", opp: slo
   const mc = (opp, motionType = "Petition to Confirm Minor's Compromise") => briefingChips({ kind: "motion", motionType, motion: slot("filed"), opp, reply: slot("missing", "Not Filed") }).map((c) => c.label);
   check("a minor's compromise: no Opp or Rep chip with no opposition filed", [mc(slot("missing", "Not Filed")), mc(slot("pending")), mc(null), mc(slot("missing"), "PetitiontoApproveCompromiseofDisputedClaimforMinororPersonwithaDisability")], [["Mot"], ["Mot"], ["Mot"], ["Mot"]]);
   check("…but both once an opposition is on file", mc(slot("filed")), ["Mot", "Opp", "Rep"]);
-  check("…and an ordinary motion, or a 998 offer to compromise, keeps them", [mc(slot("missing"), "Motion to Compel"), mc(slot("missing"), "Motion to Tax Costs re Offer to Compromise")], [["Mot", "Opp", "Rep"], ["Mot", "Opp", "Rep"]]);
+  check("…and an ordinary motion, or a 998 offer to compromise, keeps its Opp (no Rep with no opposition filed)", [mc(slot("missing"), "Motion to Compel"), mc(slot("missing"), "Motion to Tax Costs re Offer to Compromise")], [["Mot", "Opp"], ["Mot", "Opp"]]);
 }
 check("an OSC is one chip", briefingChips(entries[2]).map((c) => [c.label, c.state, c.mark]), [["Defaults", "missing", "!"]]);
 check("an OSC with only Does left is amber, not red", briefingChips({ kind: "osc", osc: { text: "ⓘ Only Does not dismissed: Does 1 through 20", state: "note" } }).map((c) => [c.label, c.state, c.mark, c.title]), [["Defaults", "personal", "!", "ⓘ Only Does not dismissed: Does 1 through 20"]]);

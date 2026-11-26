@@ -1257,10 +1257,20 @@ function ownBriefingChips(entry) {
   // No opposition is expected on a minor's compromise petition, so with none
   // filed there is no Opp or Rep chip (the owner, 2026-11-25). E-Court Suite
   // 3.49.46+ already sends none; this covers entries written before it.
-  const noOpp = isMinorsCompromise(entry.motionType) && !(entry.opp && entry.opp.filed != null);
+  const oppFiled = !!(entry.opp && entry.opp.filed != null);
+  const noOpp = isMinorsCompromise(entry.motionType) && !oppFiled;
+  // With no opposition on file, no reply is expected on any motion, so an
+  // unfiled reply is never late or missing (the owner, 2026-11-26: "If no
+  // opposition is filed, then no reply is expected so it doesn't need to be
+  // marked late or missing"). E-Court Suite 3.49.47+ sends none once the
+  // opposition's date has passed; this covers entries written before it. A
+  // reply not yet due keeps its plain chip, and one actually filed still shows.
+  const replyMoot = (s) => !oppFiled && s.filed == null
+    && (s.state === "missing" || s.state === "late" || !!s.note
+      || !!(entry.opp && entry.opp.due && entry.opp.due < Date.now() && (entry.opp.note || entry.opp.state === "missing")));
   for (const [k, label] of [["motion", "Mot"], ["opp", "Opp"], ["reply", "Rep"]]) {
     const s = entry[k];
-    if (!s || (noOpp && k !== "motion")) continue;
+    if (!s || (noOpp && k !== "motion") || (k === "reply" && replyMoot(s))) continue;
     let state = s.state, mark = "";
     if (s.note === "Not Posted Yet") { state = "unposted"; mark = "?"; }
     else if (state === "filed") mark = "✓";
