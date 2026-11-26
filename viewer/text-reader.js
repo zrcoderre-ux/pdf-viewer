@@ -2540,6 +2540,24 @@ function diskReading(text, held, pns, next = "") {
   return { flat, blank, cited: TD.citedNameSpans(flat, { next }) };
 }
 /**
+ * The page's disk reading as the names in the clear are looked for in it: the
+ * keeps masked, then the fakes and the spot keeps (`blank`) NUL again, so no
+ * real is read ACROSS one. Blanked to spaces they were a gap like any other,
+ * and a real whose blank between two words is where a pseudonym stands
+ * ("5321 Wrenfield Fakeins Road #115" under a key binding "5321  Fakeins Road
+ * #115") was marked, counted off the screen and settled — a name the save
+ * could never write, since writing it would write over the run's fake
+ * (forwardSwaps blanks them with NUL). The owner, 2026-11-26: "1 name you said
+ * to fake is still unfaked in 1 document off the screen, where the save could
+ * not write a pseudonym … Nothing to save." Read this way, the words standing
+ * either side of the fake are found by their own rows, as the save writes
+ * them. The same reading as textdoc's clearReading and pageScan.
+ */
+function seekable(flat, text, blank) {
+  const masked = maskKept(flat, text);
+  return blank && blank.length ? TD.blankRanges(masked, blank) : masked;
+}
+/**
  * The opening of the page after page `i`, where a cite whose name closes page
  * `i` has its year (TD.citedNameSpans' `next`): "" after the last page, and
  * where the next page is another document's (a reel's next member).
@@ -2618,8 +2636,8 @@ function forwardSwaps(text, held, pns, spare, opts) {
  */
 function standingSpans(text, held, pns, next = "") {
   if (!reals) return [];
-  const { flat, cited } = diskReading(text, held, pns, next);
-  return PK.findRealSpans(reals, maskKept(flat, text), { layout: text }).filter((h) => !TD.insideCited(cited, h));
+  const { flat, blank, cited } = diskReading(text, held, pns, next);
+  return PK.findRealSpans(reals, seekable(flat, text, blank), { layout: text }).filter((h) => !TD.insideCited(cited, h));
 }
 
 // WHAT LEAVES THE ROOM WITHHOLDS A NAME IT HAS NO PSEUDONYM FOR. The print,
@@ -10380,9 +10398,11 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   const unreadWarn = elsewhereUnread ? ` · ⚠ ${folderName} could not be read through for the names you said to fake, so none was written off the screen — save again.` : "";
   const pinnedWarn = pinnedNote(writtenTexts);
   const leftNames = [...new Set(leftOff.map((x) => String(x.v).trim()))];
-  const leftDocs = new Set(leftOff.map((x) => x.doc)).size;
+  // …and WHICH documents: "1 document off the screen" left the operator
+  // opening the folder's files one by one to find it (the owner, 2026-11-26).
+  const leftIn = inFolderOrder([...new Set(leftOff.map((x) => x.doc))]).map((n) => TD.docLabel(n));
   const leftWarn = leftOff.length
-    ? ` · ⚠ ${leftNames.length} name${leftNames.length === 1 ? "" : "s"} you said to fake ${leftNames.length === 1 ? "is" : "are"} still unfaked in ${leftDocs} document${leftDocs === 1 ? "" : "s"} off the screen, where the save could not write ${leftNames.length === 1 ? "a pseudonym" : "pseudonyms"} — `
+    ? ` · ⚠ ${leftNames.length} name${leftNames.length === 1 ? "" : "s"} you said to fake ${leftNames.length === 1 ? "is" : "are"} still unfaked in ${nameList(leftIn, 3)} (off the screen), where the save could not write ${leftNames.length === 1 ? "a pseudonym" : "pseudonyms"} — `
       + leftNames.slice(0, 4).join(", ") + (leftNames.length > 4 ? "…" : "") + "."
       + (instructionNote(leftNames) || " Re-run PDF-Linker writes them from your decisions.")
     : "";
@@ -11066,8 +11086,8 @@ async function scanPassNow(pass) {
     const pageDisk = () => {
       if (!diskMemo) {
         const d = TD.serializeHeld(body, { mapped: true });
-        const { flat: dflat, cited } = diskReading(d.text, d.held, d.pns, nextHeadOf(body));
-        diskMemo = { text: d.text, segs: d.segs, flat: dflat, cited };
+        const { flat: dflat, blank: dblank, cited } = diskReading(d.text, d.held, d.pns, nextHeadOf(body));
+        diskMemo = { text: d.text, segs: d.segs, flat: dflat, blank: dblank, cited };
       }
       return diskMemo;
     };
@@ -11081,7 +11101,7 @@ async function scanPassNow(pass) {
       // back on the page through the text nodes it stands in.
       const disk = pageDisk();
       const { flat: diskFlat, cited } = disk;
-      const masked = maskKept(diskFlat, disk.text);
+      const masked = seekable(diskFlat, disk.text, disk.blank);
       // Most of what a key matches in a brief belongs to the decisions it
       // cites, not to this matter. Those are not leaks and are not marked:
       // see textdoc.citedNameSpans, which the save reads the same way.

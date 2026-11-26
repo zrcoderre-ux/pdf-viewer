@@ -1113,7 +1113,9 @@ export function pageScan(raw, { rev = null, reals = null, spots = null, mask = n
   let needs = held.some((h, k) => pns.some((p) => overlaps(h, p)) || gutters.some((g) => overlaps(h, g)) || held.some((o, j) => j !== k && overlaps(h, o)));
   const blank = held.concat(pns);
   const flat = blank.length ? blankRanges(text, blank, " ") : text;
-  if (!needs && reals) needs = findRealSpans(reals, mask ? mask(flat, text) : flat, { layout: text }).length > 0;
+  // …the fakes and spot keeps NUL again once the keeps are masked, so no real
+  // is read across one (the reader's seekable, which the save writes by).
+  if (!needs && reals) needs = findRealSpans(reals, blankRanges(mask ? mask(flat, text) : flat, blank), { layout: text }).length > 0;
   return { needs, scan: blankRanges(text, blank.concat(citedNameSpans(flat, { next }))) };
 }
 
@@ -1937,7 +1939,11 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
       // A name wrapped down a column is read too, its cells off the page as
       // it stands (`layout`), not off the reading with its fakes blanked out.
       const cited = citedNameSpans(flat, { next });
-      for (const h of findRealSpans(reals, mask ? mask(flat, raw) : flat, { layout: raw })) {
+      // A real is not read ACROSS a fake or a spot keep: once the keeps are
+      // masked those are NUL again (the reader's seekable), as the save reads
+      // them — read as a gap, a real with a pseudonym where its blank is was
+      // counted here as a name the save then could not write.
+      for (const h of findRealSpans(reals, blankRanges(mask ? mask(flat, raw) : flat, blank), { layout: raw })) {
         if (!insideCited(cited, h)) values.push(h.real);
       }
     }

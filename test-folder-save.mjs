@@ -2669,6 +2669,7 @@ test(40, "a decided name the save cannot write: Save says so, and Re-run PDF-Lin
     await save(r.page);
     const said = r.log.toasts.filter((t) => /Nothing to save|Saved|Nothing saved/.test(t)).pop() || "";
     truthy("Save names the name it could not write, not just \"Nothing to save.\"", /Odile Varnum/.test(said) && /could not write/.test(said), said);
+    truthy("…and the document it stands in", /still unfaked in G Letter \(off the screen\)/.test(said), said);
     check("…and the file is as it was", T(await readFolder(r.page), "G Letter.txt"), G);
     await r.page.evaluate(() => {
       window.__links = [];
@@ -2686,6 +2687,57 @@ test(40, "a decided name the save cannot write: Save says so, and Re-run PDF-Lin
     truthy("…and it says the name is left for the run", r.log.toasts.some((t) => /left for the run to write/.test(t)), JSON.stringify(r.log.toasts));
     check("no page errors", r.log.errors, []);
   } finally { await r.close(); }
+});
+
+// ── 42. a real is not read across a pseudonym ──────────────────────────────
+// The owner: "⚠ 1 name you said to fake is still unfaked in 1 document off the
+// screen, where the save could not write a pseudonym — 5321  Fakeins Road
+// #115. … Nothing to save." The readings blanked the run's fakes to spaces,
+// so a real whose blank between two words is where a fake stands ("5321
+// Wrenfield Fakeins Road #115") was read whole, counted and settled, and the
+// save, which never writes over a fake, could not write it. Read with the fake
+// a wall, the words either side are found by their own rows.
+test(42, "a real with a pseudonym where its blank is: not counted, not settled, its street written by its own row", async () => {
+  const ADDR = "5321  Fakeins Road #115";
+  const keyBytes = buildKeyXlsx([...KEY,
+    ["address", ADDR, "5321  Morwen Road #115", "", "", "document", 1],
+    ["address_street", "Fakeins Road", "Morwen Road", "", "", "document", 1],
+  ]);
+  const G = "====== Page 1 ======\nPlaintiff Wrenfield lives at 5321 Wrenfield Fakeins Road #115, Los Angeles.\n";
+  {
+    const r = await newReader({ presets: { [`textReader.settled.${CASE_ID}`]: [ADDR] } });
+    try {
+      await writeFolder(r.page, { docs: { "A Complaint.txt": A, "G Letter.txt": G }, root: {}, keyBytes });
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await openDoc(r.page, "A Complaint.txt", { settle: 2500 });
+      check("the address split by a pseudonym is not owed off the screen", await hasUnsaved(r.page), false);
+      r.log.answer = () => true;
+      r.log.toasts.length = 0;
+      await save(r.page);
+      truthy("Save does not say it could not write it", !r.log.toasts.some((t) => /could not write/.test(t)), JSON.stringify(r.log.toasts));
+      check("…and the file is as it was", T(await readFolder(r.page), "G Letter.txt"), G);
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
+  {
+    const r = await newReader({ presets: { [`textReader.settled.${CASE_ID}`]: [ADDR, "Fakeins Road"] } });
+    try {
+      await writeFolder(r.page, { docs: { "A Complaint.txt": A, "G Letter.txt": G }, root: {}, keyBytes });
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await openDoc(r.page, "A Complaint.txt", { settle: 2500 });
+      await r.page.waitForFunction(() => window.__textReaderHasUnsaved(), null, { timeout: 10000 }).catch(() => {});
+      truthy("the street standing after the pseudonym is owed by its own row", await hasUnsaved(r.page));
+      r.log.answer = () => true;
+      r.log.toasts.length = 0;
+      await save(r.page);
+      check("…and Save writes it, the pseudonym beside it untouched", T(await readFolder(r.page), "G Letter.txt"),
+        "====== Page 1 ======\nPlaintiff Wrenfield lives at 5321 Wrenfield Morwen Road #115, Los Angeles.\n");
+      truthy("…saying nothing could not be written", !r.log.toasts.some((t) => /could not write/.test(t)), JSON.stringify(r.log.toasts));
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
 });
 
 // ── 41. 🩺 Diagnose: a page report and a page copy, asked of PDF-Linker ─────
